@@ -2,18 +2,18 @@
   <ion-card>
     <ion-card-header>
       <ion-card-title>
-        {{ $t('Facility') }}
+        {{ translate('Facility') }}
       </ion-card-title>
     </ion-card-header>
     <ion-card-content>
-      {{ $t('Specify which facility you want to operate from. Order, inventory and other configuration data will be specific to the facility you select.') }}
+      {{ translate('Specify which facility you want to operate from. Order, inventory and other configuration data will be specific to the facility you select.') }}
     </ion-card-content>
     <ion-item lines="none">
       <ion-label>
         {{ currentFacility.facilityName }}
         <p>{{ currentFacility.facilityId }}</p>
       </ion-label>
-      <ion-button v-if="facilities?.length > 1" id="open-facility-modal" slot="end" fill="outline" color="dark">{{ $t('Change')}}</ion-button>
+      <ion-button v-if="facilities?.length > 1" id="open-facility-modal" slot="end" fill="outline" color="dark">{{ translate('Change')}}</ion-button>
     </ion-item>
   </ion-card>
   <!-- Using inline modal(as recommended by ionic), also using it inline as the component inside modal is not getting mounted when using modalController -->
@@ -25,23 +25,23 @@
             <ion-icon :icon="closeOutline"/>
           </ion-button>
         </ion-buttons>
-        <ion-title>{{ $t("Select Facility") }}</ion-title>
+        <ion-title>{{ translate("Select Facility") }}</ion-title>
       </ion-toolbar>
     </ion-header>
     <ion-content>
-      <ion-searchbar @ionFocus="selectSearchBarText($event)" :placeholder="$t('Search facilities')" v-model="queryString" @keyup.enter="queryString = $event.target.value; findFacility()" @keydown="preventSpecialCharacters($event)"/>
+      <ion-searchbar @ionFocus="selectSearchBarText($event)" :placeholder="translate('Search facilities')" v-model="queryString" @keyup.enter="queryString = $event.target.value; findFacility()" @keydown="preventSpecialCharacters($event)"/>
       <ion-radio-group v-model="selectedFacilityId">
         <ion-list>
           <!-- Loading state -->
           <div class="empty-state" v-if="isLoading">
             <ion-item lines="none">
               <ion-spinner color="secondary" name="crescent" slot="start" />
-              {{ $t("Fetching facilities") }}
+              {{ translate("Fetching facilities") }}
             </ion-item>
           </div>
           <!-- Empty state -->
           <div class="empty-state" v-else-if="!filteredFacilities.length">
-            <p>{{ $t("No facilities found") }}</p>
+            <p>{{ translate("No facilities found") }}</p>
           </div>
           <div v-else>
             <ion-item v-for="facility in filteredFacilities" :key="facility.facilityId">
@@ -90,10 +90,8 @@ import {
   IonToolbar
 } from '@ionic/vue';
 import { closeOutline, saveOutline } from "ionicons/icons";
-import { useUserStore } from '../index'
+import { useUserStore, translate } from '../index'
 import { computed, ref } from 'vue';
-
-console.log("=======facility switcher=====")
 
 const userStore = useUserStore();
 

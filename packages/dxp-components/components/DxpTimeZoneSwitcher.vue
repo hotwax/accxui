@@ -2,26 +2,26 @@
   <ion-card>
     <ion-card-header>
       <ion-card-title>
-        {{ $t('Timezone') }}
+        {{ translate('Timezone') }}
       </ion-card-title>
     </ion-card-header>
     <ion-card-content>
-      {{ $t('The timezone you select is used to ensure automations you schedule are always accurate to the time you select.') }}
+      {{ translate('The timezone you select is used to ensure automations you schedule are always accurate to the time you select.') }}
     </ion-card-content>
     <ion-item v-if="showBrowserTimeZone">
       <ion-label>
-        <p class="overline">{{ $t("Browser TimeZone") }}</p>
+        <p class="overline">{{ translate("Browser TimeZone") }}</p>
         {{ browserTimeZone.id }}
         <p v-if="showDateTime">{{ getCurrentTime(browserTimeZone.id, dateTimeFormat) }}</p>
       </ion-label>
     </ion-item>
     <ion-item lines="none">
       <ion-label>
-        <p class="overline">{{ $t("Selected TimeZone") }}</p>
+        <p class="overline">{{ translate("Selected TimeZone") }}</p>
         {{ currentTimeZoneId }}
         <p v-if="showDateTime">{{ getCurrentTime(currentTimeZoneId, dateTimeFormat) }}</p>
       </ion-label>
-      <ion-button id="time-zone-modal" slot="end" fill="outline" color="dark">{{ $t("Change") }}</ion-button>
+      <ion-button id="time-zone-modal" slot="end" fill="outline" color="dark">{{ translate("Change") }}</ion-button>
     </ion-item>
   </ion-card>
   <!-- Using inline modal(as recommended by ionic), also using it inline as the component inside modal is not getting mounted when using modalController -->
@@ -33,10 +33,10 @@
             <ion-icon :icon="closeOutline" />
           </ion-button>
         </ion-buttons>
-        <ion-title>{{ $t("Select time zone") }}</ion-title>
+        <ion-title>{{ translate("Select time zone") }}</ion-title>
       </ion-toolbar>
       <ion-toolbar>
-        <ion-searchbar @ionFocus="selectSearchBarText($event)" :placeholder="$t('Search time zones')"  v-model="queryString" @keyup.enter="queryString = $event.target.value; findTimeZone()" @keydown="preventSpecialCharacters($event)" />
+        <ion-searchbar @ionFocus="selectSearchBarText($event)" :placeholder="translate('Search time zones')"  v-model="queryString" @keyup.enter="queryString = $event.target.value; findTimeZone()" @keydown="preventSpecialCharacters($event)" />
       </ion-toolbar>
     </ion-header>
 
@@ -44,7 +44,7 @@
       <div>
         <ion-radio-group value="rd" v-model="timeZoneId">
           <ion-list v-if="showBrowserTimeZone">
-            <ion-list-header>{{ $t("Browser time zone") }}</ion-list-header>
+            <ion-list-header>{{ translate("Browser time zone") }}</ion-list-header>
             <ion-item>
               <ion-radio label-placement="end" justify="start" :value="browserTimeZone.id">
                 <ion-label>
@@ -55,17 +55,17 @@
             </ion-item>
           </ion-list>
           <ion-list>
-            <ion-list-header v-if="showBrowserTimeZone">{{ $t("Select a different time zone") }}</ion-list-header>
+            <ion-list-header v-if="showBrowserTimeZone">{{ translate("Select a different time zone") }}</ion-list-header>
             <!-- Loading state -->
             <div class="empty-state" v-if="isLoading">
               <ion-item lines="none">
                 <ion-spinner color="secondary" name="crescent" slot="start" />
-                {{ $t("Fetching time zones") }}
+                {{ translate("Fetching time zones") }}
               </ion-item>
             </div>
             <!-- Empty state -->
             <div class="empty-state" v-else-if="filteredTimeZones.length === 0">
-              <p>{{ $t("No time zone found") }}</p>
+              <p>{{ translate("No time zone found") }}</p>
             </div>
             <div v-else>
               <ion-item :key="timeZone.id" v-for="timeZone in filteredTimeZones">
@@ -116,7 +116,7 @@ import {
   IonToolbar
 } from '@ionic/vue';
 import { closeOutline, saveOutline } from "ionicons/icons";
-import { useUserStore } from '../index';
+import { translate, useUserStore } from '../index';
 import { computed, onBeforeMount, ref } from "vue";
 import { getCurrentTime } from '../utils'
 

@@ -3,17 +3,17 @@
     <div class="center-div">
       <ion-item lines="none" v-if='error.message.length'>
         <ion-icon slot="start" color="warning" :icon="warningOutline" />
-        <h4>{{ $t('Login failed') }}</h4>
+        <h4>{{ translate('Login failed') }}</h4>
       </ion-item>
       <p v-if='error.responseMessage.length'>
-        {{ $t('Reason:') }} {{ $t(error.responseMessage) }}
+        {{ translate('Reason:') }} {{ translate(error.responseMessage) }}
       </p>
       <p v-if='error.message.length'>
-        {{ $t(error.message) }}
+        {{ translate(error.message) }}
       </p>
       <ion-button v-if='error.message.length' class="ion-margin-top" @click="goToLaunchpad()">
         <ion-icon slot="start" :icon="arrowBackOutline" />
-        {{ $t("Back to Launchpad") }}
+        {{ translate("Back to Launchpad") }}
       </ion-button>
     </div>
   </ion-content>
@@ -29,7 +29,7 @@ import {
 } from "@ionic/vue";
 import { arrowBackOutline, warningOutline } from 'ionicons/icons'
 import { addNotification, initialiseFirebaseApp, storeClientRegistrationToken } from "../utils/firebase"
-import emitter from '@/event-bus'
+import emitter from '../event-bus'
 import {
   useAuthStore,
   useUserStore,
@@ -39,7 +39,8 @@ import { DateTime } from "luxon"
 import { getAppLoginUrl } from "../utils";
 import { useRouter } from 'vue-router';
 import { useRoute } from 'vue-router'
-import { getConfig, initialise } from "oms-api"
+import { getConfig, initialise } from "../../oms-api"
+import { translate } from "../index"
 
 declare var process: any;
 const props = defineProps({

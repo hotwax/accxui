@@ -2,17 +2,17 @@
   <ion-card>
     <ion-card-header>
       <ion-card-subtitle>
-        {{ $t('OMS instance') }}
+        {{ translate('OMS instance') }}
       </ion-card-subtitle>
       <ion-card-title>
         {{ authStore.getOms }}
       </ion-card-title>
     </ion-card-header>
     <ion-card-content>
-      {{ $t('This is the name of the OMS you are connected to right now. Make sure that you are connected to the right instance before proceeding.') }}
+      {{ translate('This is the name of the OMS you are connected to right now. Make sure that you are connected to the right instance before proceeding.') }}
     </ion-card-content>
     <ion-button v-if="!authStore.isEmbedded" :standalone-hidden="!hasPermission('COMMON_ADMIN')" @click="goToOms(token.value, oms)" fill="clear" :disabled="!hasPermission('COMMERCEUSER_VIEW')">
-      {{ $t('Go to OMS') }}
+      {{ translate('Go to OMS') }}
       <ion-icon slot="end" :icon="openOutline" />
     </ion-button>
   </ion-card>
@@ -31,8 +31,7 @@ import {
 import { goToOms } from '../utils';
 import { openOutline } from 'ionicons/icons'
 import { computed } from 'vue';
-import { useAuthStore } from "../store/auth";
-import { hasPermission } from "../index";
+import { hasPermission, translate, useAuthStore } from "../index";
 
 const authStore = useAuthStore();
 
