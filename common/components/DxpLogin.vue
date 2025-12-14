@@ -29,7 +29,7 @@ import {
 } from "@ionic/vue";
 import { arrowBackOutline, warningOutline } from 'ionicons/icons'
 import { addNotification, initialiseFirebaseApp, storeClientRegistrationToken } from "../utils/firebase"
-import emitter from '../event-bus'
+import emitter from '../../event-bus'
 import {
   useAuthStore,
   useUserStore,

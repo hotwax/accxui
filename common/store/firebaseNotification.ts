@@ -1,8 +1,8 @@
 import { defineStore } from "pinia";
-import { translate } from "../i18n";
+import { translate } from "../core/i18n";
 import { showToast } from "../utils";
 import { storeClientRegistrationToken } from 'oms-api'
-import logger from '../logger'
+import logger from '../core/logger'
 import { generateDeviceId } from '../utils/firebase'
 import { DateTime } from 'luxon';
 

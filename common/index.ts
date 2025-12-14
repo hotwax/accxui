@@ -1,6 +1,5 @@
 import { createPinia } from 'pinia'
 import piniaPluginPersistedstate from 'pinia-plugin-persistedstate'
-import { createI18n } from 'vue-i18n'
 
 import {
   DxpAppVersionInfo,
@@ -42,7 +41,7 @@ const createDxpPinia = () => {
   return pinia
 }
 
-import { createDxpI18n, i18n, translate } from './i18n'
+import { createDxpI18n, i18n, translate } from './core/i18n'
 
 export {
   // --- Stores ---

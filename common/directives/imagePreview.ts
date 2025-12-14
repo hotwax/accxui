@@ -19,6 +19,7 @@ export default {
           render(null, container)         // Unmount component
           el.removeChild(container)       // Remove from DOM
         }
+        
       })
 
       render(vnode, container)

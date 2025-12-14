@@ -1,4 +1,4 @@
-import { translate } from '@/i18n'
+import { translate } from '../index'
 import { useUserStore } from '../index'
 import { loadingController } from '@ionic/vue'
 
