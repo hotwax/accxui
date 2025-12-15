@@ -1,6 +1,6 @@
 import api from "../core/remoteApi";
 import { OPERATOR, Product, Response } from "./types";
-import { hasError, isError } from "../utils";
+import { hasError, isError } from "../utils/commonUtil";
 import { transform } from 'node-json-transform'
 import { productTransformRule } from "./mappings/product";
 const SYSTEM_TYPE = import.meta.env.VITE_SYSTEM_TYPE || "OFBIZ";

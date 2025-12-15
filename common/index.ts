@@ -1,6 +1,6 @@
 import { createPinia } from 'pinia'
 import piniaPluginPersistedstate from 'pinia-plugin-persistedstate'
-import { getTelecomCountryCode, hasError, isError } from './utils'
+import { getTelecomCountryCode, hasError, isError } from './utils/commonUtil'
 
 import {
   DxpAppVersionInfo,
@@ -29,9 +29,9 @@ import { useFieldValidator } from './composables/useFieldValidation'
 
 import imagePreview from './directives/imagePreview'
 
-import { goToOms, getProductIdentificationValue, getAppLoginUrl } from './utils'
-import { initialiseFirebaseApp } from './utils/firebase'
-import { hasPermission } from './utils'
+import { goToOms, getProductIdentificationValue, getAppLoginUrl } from './utils/commonUtil'
+import { initialiseFirebaseApp } from './utils/firebaseUtil'
+import { hasPermission } from './utils/commonUtil'
 
 import './service-worker'
 

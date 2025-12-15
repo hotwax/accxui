@@ -1,8 +1,8 @@
 import { defineStore } from "pinia";
 import { i18n, translate, useAuthStore } from "../index";
 import { DateTime } from "luxon";
-import { showToast } from "../utils";
-import { getAvailableTimeZones, getEComStores, getEComStoresByFacility, getUserFacilities, getUserPreference, setUserLocale, setUserPreference, setUserTimeZone } from '../../oms-api'
+import { showToast } from "../utils/commonUtil";
+import { userApi } from '../index'
 
 export const useUserStore = defineStore('user', {
   state: () => {
@@ -74,7 +74,7 @@ export const useUserStore = defineStore('user', {
           matchingLocale = matchingLocale || Object.keys(this.localeOptions).find((option: string) => option.slice(0, 2) === locale.slice(0, 2))
           newLocale = matchingLocale || this.locale
           // update locale in state and globally
-          await setUserLocale({ userId: userProfile.userId, newLocale })
+          await userApi.setUserLocale({ userId: userProfile.userId, newLocale })
         }
       } catch (error) {
         console.error(error)
@@ -92,7 +92,7 @@ export const useUserStore = defineStore('user', {
       try {
         const userProfile = this.getUserProfile
 
-        await setUserTimeZone({ userId: userProfile.userId, tzId })
+        await userApi.setUserTimeZone({ userId: userProfile.userId, tzId })
         this.currentTimeZoneId = tzId
 
         showToast(translate("Time zone updated successfully"));
@@ -109,7 +109,7 @@ export const useUserStore = defineStore('user', {
       }
 
       try {
-        const resp = await getAvailableTimeZones()
+        const resp = await userApi.getAvailableTimeZones()
         this.timeZones = resp.filter((timeZone: any) => DateTime.local().setZone(timeZone.id).isValid);
       } catch(err) {
         console.error('Error', err)
@@ -123,7 +123,7 @@ export const useUserStore = defineStore('user', {
       const authStore = useAuthStore();
 
       try {
-        const response = await getUserFacilities(authStore.getToken.value, authStore.getBaseUrl, partyId, facilityGroupId, isAdminUser, payload);
+        const response = await userApi.getUserFacilities(authStore.getToken.value, authStore.getBaseUrl, partyId, facilityGroupId, isAdminUser, payload);
         this.facilities = response;
       } catch (error) {
         console.error(error);
@@ -139,7 +139,7 @@ export const useUserStore = defineStore('user', {
       let preferredFacility = this.facilities[0];
    
       try {
-        let preferredFacilityId = await getUserPreference(authStore.getToken.value, authStore.getBaseUrl, userPrefTypeId, userId);
+        let preferredFacilityId = await userApi.getUserPreference(authStore.getToken.value, authStore.getBaseUrl, userPrefTypeId, userId);
         if(preferredFacilityId) {
           const facility = this.facilities.find((facility: any) => facility.facilityId == preferredFacilityId);
           facility && (preferredFacility = facility)
@@ -153,7 +153,7 @@ export const useUserStore = defineStore('user', {
       const userProfile = this.getUserProfile
 
       try {
-        await setUserPreference({
+        await userApi.setUserPreference({
           userPrefTypeId: 'SELECTED_FACILITY',
           userPrefValue: payload.facilityId,
           userId: userProfile.userId
@@ -168,7 +168,7 @@ export const useUserStore = defineStore('user', {
       const authStore = useAuthStore();
     
       try {
-        const response = await getEComStoresByFacility(authStore.getToken.value, authStore.getBaseUrl, 100, facilityId);
+        const response = await userApi.getEComStoresByFacility(authStore.getToken.value, authStore.getBaseUrl, 100, facilityId);
         this.eComStores = response;
       } catch (error) {
         console.error(error);
@@ -179,7 +179,7 @@ export const useUserStore = defineStore('user', {
       const authStore = useAuthStore();
     
       try {
-        const response = await getEComStores(authStore.getToken.value, authStore.getBaseUrl, 100);
+        const response = await userApi.getEComStores(authStore.getToken.value, authStore.getBaseUrl, 100);
         this.eComStores = response;
       } catch (error) {
         console.error(error);
@@ -194,7 +194,7 @@ export const useUserStore = defineStore('user', {
       }
       let preferredStore = this.eComStores[0];
       try {
-        let preferredStoreId = await getUserPreference(authStore.getToken.value, authStore.getBaseUrl, userPrefTypeId, userId);
+        let preferredStoreId = await userApi.getUserPreference(authStore.getToken.value, authStore.getBaseUrl, userPrefTypeId, userId);
 
         if(preferredStoreId) {
           const store = this.eComStores.find((store: any) => store.productStoreId === preferredStoreId);
@@ -209,7 +209,7 @@ export const useUserStore = defineStore('user', {
       const userProfile = this.getUserProfile
 
       try {
-        await setUserPreference({
+        await userApi.setUserPreference({
           userPrefTypeId: 'SELECTED_BRAND',
           userPrefValue: payload.productStoreId,
           userId: userProfile.userId

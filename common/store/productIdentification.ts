@@ -1,4 +1,6 @@
-import { fetchGoodIdentificationTypes, fetchProducts, getProductIdentificationPref, hasError, setProductIdentificationPref } from "oms-api";
+import { hasError } from "../index";
+
+import { productApi, userApi } from "../index";
 import { defineStore } from "pinia";
 
 export const useProductIdentificationStore = defineStore('productIdentification', {
@@ -33,7 +35,7 @@ export const useProductIdentificationStore = defineStore('productIdentification'
       productIdentificationPref[id] = value
 
       try {
-        this.productIdentificationPref = await setProductIdentificationPref(eComStoreId, productIdentificationPref)
+        this.productIdentificationPref = await userApi.setProductIdentificationPref(eComStoreId, productIdentificationPref)
       } catch(err) {
         // TODO: display a toast message in failed scenario
         console.error('error', err)
@@ -48,7 +50,7 @@ export const useProductIdentificationStore = defineStore('productIdentification'
         };
       }
 
-      this.productIdentificationPref = await getProductIdentificationPref(eComStoreId)
+      this.productIdentificationPref = await userApi.getProductIdentificationPref(eComStoreId)
     },
     async prepareProductIdentifierOptions() {
       //static identifications 
@@ -62,7 +64,7 @@ export const useProductIdentificationStore = defineStore('productIdentification'
         { goodIdentificationTypeId: "title", description: "Title" }
       ]
       //good identification types
-      const fetchedGoodIdentificationTypes = await fetchGoodIdentificationTypes("HC_GOOD_ID_TYPE");
+      const fetchedGoodIdentificationTypes = await productApi.fetchGoodIdentificationTypes("HC_GOOD_ID_TYPE");
       const fetchedGoodIdentificationOptions = fetchedGoodIdentificationTypes || []
       // Merge the arrays and remove duplicates
       this.productIdentificationOptions = Array.from(new Set([...productIdentificationOptions, ...fetchedGoodIdentificationOptions])).sort();
@@ -71,7 +73,7 @@ export const useProductIdentificationStore = defineStore('productIdentification'
     async fetchProducts() {
       const params = { viewSize: 10 }
       try {
-        const products = await fetchProducts(params)
+        const products = await productApi.fetchProducts(params)
         if (!hasError(products)) {
           this.sampleProducts = products.data.response.docs;
           this.shuffleProduct()

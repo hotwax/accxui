@@ -1,9 +1,9 @@
 import { defineStore } from "pinia";
 import { translate } from "../core/i18n";
-import { showToast } from "../utils";
-import { storeClientRegistrationToken } from 'oms-api'
+import { showToast } from "../utils/commonUtil";
+import { notificationApi } from '../index'
 import logger from '../core/logger'
-import { generateDeviceId } from '../utils/firebase'
+import { generateDeviceId } from '../utils/firebaseUtil'
 import { DateTime } from 'luxon';
 
 export const useFirebaseNotificationStore = defineStore('firebaseNotification', {
@@ -39,7 +39,7 @@ export const useFirebaseNotificationStore = defineStore('firebaseNotification', 
       this.firebaseDeviceId = firebaseDeviceId
 
       try {
-        await storeClientRegistrationToken(registrationToken, firebaseDeviceId,  import.meta.env.VITE_VUE_APP_NOTIF_APP_ID as any)
+        await notificationApi.storeClientRegistrationToken(registrationToken, firebaseDeviceId,  import.meta.env.VITE_VUE_APP_NOTIF_APP_ID as any)
       } catch (error) {
         logger.error(error)
       }

@@ -28,7 +28,7 @@ import {
   IonItem
 } from "@ionic/vue";
 import { arrowBackOutline, warningOutline } from 'ionicons/icons'
-import { addNotification, initialiseFirebaseApp, storeClientRegistrationToken } from "../utils/firebase"
+import { addNotification, initialiseFirebaseApp, storeClientRegistrationToken } from "../utils/firebaseUtil"
 import emitter from '../../event-bus'
 import {
   useAuthStore,
@@ -36,7 +36,7 @@ import {
   useFirebaseNotificationStore
 } from "../index"
 import { DateTime } from "luxon"
-import { getAppLoginUrl } from "../utils";
+import { getAppLoginUrl } from "../utils/commonUtil";
 import { useRouter } from 'vue-router';
 import { useRoute } from 'vue-router'
 import { getConfig, initialise } from "../../oms-api"
