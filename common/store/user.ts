@@ -1,7 +1,7 @@
 import { defineStore } from "pinia";
 import { i18n, translate, useAuthStore } from "../index";
 import { DateTime } from "luxon";
-import { showToast } from "../utils/commonUtil";
+import { showToast } from "../utils";
 import { userApi } from '../index'
 
 export const useUserStore = defineStore('user', {

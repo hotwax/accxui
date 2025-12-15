@@ -1,23 +1,6 @@
 import { createPinia } from 'pinia'
 import piniaPluginPersistedstate from 'pinia-plugin-persistedstate'
-import { getTelecomCountryCode, hasError, isError } from './utils/commonUtil'
-
-import {
-  DxpAppVersionInfo,
-  DxpFacilitySwitcher,
-  DxpGitBookSearch,
-  DxpImage,
-  DxpLanguageSwitcher,
-  DxpLogin,
-  DxpMenuFooterNavigation,
-  DxpOmsInstanceNavigator,
-  DxpPagination,
-  DxpProductIdentifier,
-  DxpProductStoreSelector,
-  DxpShopifyImg,
-  DxpTimeZoneSwitcher,
-  DxpUserProfile
-} from './components'
+import { getTelecomCountryCode, hasError, isError } from './utils'
 
 import { useAuthStore } from './store/auth'
 import { useUserStore } from './store/user'
@@ -29,9 +12,9 @@ import { useFieldValidator } from './composables/useFieldValidation'
 
 import imagePreview from './directives/imagePreview'
 
-import { goToOms, getProductIdentificationValue, getAppLoginUrl } from './utils/commonUtil'
+import { goToOms, getProductIdentificationValue, getAppLoginUrl } from './utils'
 import { initialiseFirebaseApp } from './utils/firebaseUtil'
-import { hasPermission } from './utils/commonUtil'
+import { hasPermission } from './utils'
 
 import './service-worker'
 
@@ -55,28 +38,28 @@ export * from './api/productApi'
 export * from './api/stockApi'
 export * from './api/userApi'
 
+export { default as DxpAppVersionInfo } from './DxpAppVersionInfo.vue';
+export { default as DxpFacilitySwitcher } from './DxpFacilitySwitcher.vue'
+export { default as DxpGitBookSearch } from './DxpGitBookSearch.vue';
+export { default as DxpImage } from './DxpImage.vue';
+export { default as DxpLanguageSwitcher } from './DxpLanguageSwitcher.vue';
+export { default as DxpLogin } from './DxpLogin.vue';
+export { default as DxpMenuFooterNavigation } from './DxpMenuFooterNavigation.vue';
+export { default as DxpOmsInstanceNavigator } from './DxpOmsInstanceNavigator.vue'
+export { default as DxpPagination } from './DxpPagination.vue'
+export { default as DxpProductIdentifier } from "./DxpProductIdentifier.vue";
+export { default as DxpProductStoreSelector } from "./DxpProductStoreSelector.vue"
+export { default as DxpShopifyImg } from './DxpShopifyImg.vue';
+export { default as DxpUserProfile } from './DxpUserProfile.vue'
+export { default as DxpTimeZoneSwitcher } from './DxpTimeZoneSwitcher.vue'
+
+
 export {
   // --- Stores ---
   useAuthStore,
   useUserStore,
   useFirebaseNotificationStore,
   useProductIdentificationStore,
-
-  // --- Components ---
-  DxpAppVersionInfo,
-  DxpFacilitySwitcher,
-  DxpGitBookSearch,
-  DxpImage,
-  DxpLanguageSwitcher,
-  DxpLogin,
-  DxpMenuFooterNavigation,
-  DxpOmsInstanceNavigator,
-  DxpPagination,
-  DxpProductIdentifier,
-  DxpProductStoreSelector,
-  DxpShopifyImg,
-  DxpTimeZoneSwitcher,
-  DxpUserProfile,
 
   // --- Composables ---
   useFormValidator,

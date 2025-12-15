@@ -1,6 +1,6 @@
 import api from '../core/remoteApi'
 import { OPERATOR, Order, OrderItem, OrderPart, Response } from './types'
-import { hasError } from '../utils/commonUtil'
+import { hasError } from '../utils'
 import { transform } from 'node-json-transform'
 import { orderDetailTranformRule, orderItemTransformRule, orderPartTransformRule } from './mappings/order'
 

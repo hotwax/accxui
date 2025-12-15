@@ -36,7 +36,7 @@ import {
   useFirebaseNotificationStore
 } from "../index"
 import { DateTime } from "luxon"
-import { getAppLoginUrl } from "../utils/commonUtil";
+import { getAppLoginUrl } from "../utils";
 import { useRouter } from 'vue-router';
 import { useRoute } from 'vue-router'
 import { getConfig, initialise } from "../../oms-api"

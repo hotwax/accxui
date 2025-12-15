@@ -118,7 +118,7 @@ import {
 import { closeOutline, saveOutline } from "ionicons/icons";
 import { translate, useUserStore } from '../index';
 import { computed, onBeforeMount, ref } from "vue";
-import { getCurrentTime } from '../utils/commonUtil'
+import { getCurrentTime } from '../utils'
 
 const userStore = useUserStore();
 

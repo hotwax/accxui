@@ -1,5 +1,5 @@
 import api from "../core/remoteApi";
-import { hasError } from "../utils/commonUtil";
+import { hasError } from "../utils";
 const SYSTEM_TYPE = import.meta.env.VITE_SYSTEM_TYPE || "OFBIZ";
 
 async function omsGetNotificationEnumIds(enumTypeId: string): Promise<any> {

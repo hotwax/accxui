@@ -1,5 +1,5 @@
 import api from "../core/remoteApi";
-import { hasError } from "../utils/commonUtil";
+import { hasError } from "../utils";
 import { Stock, Response, OPERATOR } from "./types"
 import { transform } from "node-json-transform";
 import { stockTransformRule } from "./mappings/stock";
