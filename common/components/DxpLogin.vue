@@ -39,7 +39,6 @@ import { DateTime } from "luxon"
 import { getAppLoginUrl } from "../utils/commonUtil";
 import { useRouter } from 'vue-router';
 import { useRoute } from 'vue-router'
-import { getConfig, initialise } from "../../oms-api"
 import { translate } from "../index"
 
 declare var process: any;
@@ -91,14 +90,11 @@ onMounted(async () => {
 });
 
 async function handleUserFlow(token: string, oms: string, expirationTime: string, omsRedirectionUrl = "", isEmbedded: boolean, shop: string, host: string) {
-  // fetch the current config for the user
-  const appConfig = getConfig()
 
   // logout to clear current user state, don't mark the user as logout as we just want to clear the user data
   await props.appLogout({ isUserUnauthorised: true })
 
   // reset the config that we got from the oms-api, as on logout we clear the config of oms-api
-  await initialise(appConfig)
 
   // checking if token from launchpad has expired and redirecting there only
   if (+expirationTime < DateTime.now().toMillis()) {
