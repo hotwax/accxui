@@ -1,5 +1,5 @@
-import api, {client} from "../../api";
-import { hasError } from "../../util";
+import api, {client} from "../core/remoteApi";
+import { hasError } from "../utils";
 
 async function askQuery(payload: any): Promise<any> {
   try {
@@ -88,8 +88,4 @@ async function searchQuery(payload: any): Promise<any> {
   }
 }
 
-export {
-  askQuery,
-  getGitBookPage,
-  searchQuery
-}
+export const gitBookApi = { askQuery, getGitBookPage, searchQuery };

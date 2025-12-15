@@ -1,8 +1,8 @@
-import api from "../../api";
-import { hasError } from "../../util";
-import { Stock, Response, OPERATOR } from "../../types"
+import api from "../core/remoteApi";
+import { hasError } from "../utils";
+import { Stock, Response, OPERATOR } from "./types"
 import { transform } from "node-json-transform";
-import { stockTransformRule } from "../../mappings/stock";
+import { stockTransformRule } from "./mappings/stock";
 
 async function fetchProductsStockAtFacility(productIds: Array<string>, facilityId?: string): Promise<Array<Stock> | Response> {
   // There is a limitation at API level to handle only 100 records
@@ -96,4 +96,4 @@ async function fetchProductsStock(productIds: Array<string>): Promise<Array<Stoc
   }
 }
 
-export { fetchProductsStock, fetchProductsStockAtFacility }
+export const stockApi = { fetchProductsStock, fetchProductsStockAtFacility }

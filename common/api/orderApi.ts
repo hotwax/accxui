@@ -1,10 +1,10 @@
-import api from '../../api'
-import { OPERATOR, Order, OrderItem, OrderPart, Response } from '../../types'
-import { hasError } from '../../util'
+import api from '../core/remoteApi'
+import { OPERATOR, Order, OrderItem, OrderPart, Response } from './types'
+import { hasError } from '../utils'
 import { transform } from 'node-json-transform'
-import { orderDetailTranformRule, orderItemTransformRule, orderPartTransformRule } from '../../mappings/order'
+import { orderDetailTranformRule, orderItemTransformRule, orderPartTransformRule } from './mappings/order'
 
-export async function getOrderDetails (orderId: string): Promise<Order | Response> {
+async function getOrderDetails (orderId: string): Promise<Order | Response> {
   const payload = {
     "json": {
       "params": {
@@ -68,7 +68,7 @@ export async function getOrderDetails (orderId: string): Promise<Order | Respons
   }
 }
 
-export async function updateOrderStatus (payload: {orderId: string, statusId: string, setItemStatus: string}): Promise<Response> {
+async function updateOrderStatus (payload: {orderId: string, statusId: string, setItemStatus: string}): Promise<Response> {
 
   try {
     const resp = await api({
@@ -98,3 +98,5 @@ export async function updateOrderStatus (payload: {orderId: string, statusId: st
     })
   }
 }
+
+export const orderApi = { updateOrderStatus, getOrderDetails };

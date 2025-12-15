@@ -1,5 +1,6 @@
 import { createPinia } from 'pinia'
 import piniaPluginPersistedstate from 'pinia-plugin-persistedstate'
+import { getTelecomCountryCode, hasError, isError } from './utils'
 
 import {
   DxpAppVersionInfo,
@@ -43,6 +44,17 @@ const createDxpPinia = () => {
 
 import { createDxpI18n, i18n, translate } from './core/i18n'
 
+export { OPERATOR, STATUSCOLOR, events } from './api/types'
+
+// ✅ These are pure types (erased during build)
+export type { Product, Response, Stock, Order, OrderItem, OrderPart, User } from './api/types'
+export * from './api/gitBookApi'
+export * from './api/notificationApi'
+export * from './api/orderApi'
+export * from './api/productApi'
+export * from './api/stockApi'
+export * from './api/userApi'
+
 export {
   // --- Stores ---
   useAuthStore,
@@ -84,5 +96,9 @@ export {
   createDxpPinia,
   createDxpI18n, 
   i18n, 
-  translate
+  translate,
+
+  getTelecomCountryCode,
+  hasError,
+  isError
 }

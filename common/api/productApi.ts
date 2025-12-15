@@ -1,8 +1,9 @@
-import api from "../../api";
-import { OPERATOR, Product, Response } from "../../types";
-import { hasError, isError } from "../../util";
+import api from "../core/remoteApi";
+import { OPERATOR, Product, Response } from "./types";
+import { hasError, isError } from "../utils";
 import { transform } from 'node-json-transform'
-import { productTransformRule } from "../../mappings/product";
+import { productTransformRule } from "./mappings/product";
+const SYSTEM_TYPE = import.meta.env.VITE_SYSTEM_TYPE || "OFBIZ";
 
 async function fetchProducts(params: any): Promise<any | Response> {
 
@@ -196,4 +197,33 @@ async function omsFetchGoodIdentificationTypes(parentTypeId: string = "HC_GOOD_I
   }
 }
 
-export { fetchProducts, fetchProductsGroupedBy, fetchProductsGroupedByParent, omsFetchGoodIdentificationTypes }
+const maargFetchGoodIdentificationTypes = async (parentTypeId = "HC_GOOD_ID_TYPE"): Promise <any>  => {
+  try {
+    const resp: any = await api({
+      url: "oms/goodIdentificationTypes",
+      method: "get",
+      params: {
+        parentTypeId,
+        pageSize: 50
+      }
+    });
+
+    return Promise.resolve(resp.data)
+  } catch(error) {
+    return Promise.reject({
+      code: 'error',
+      message: 'Failed to fetch good identification types',
+      serverResponse: error
+    })
+  }
+}
+
+const fetchGoodIdentificationTypes = async (payload: any) => {
+  if(SYSTEM_TYPE === "MOQUI") {
+    return await maargFetchGoodIdentificationTypes(payload)
+  } else {
+    return await omsFetchGoodIdentificationTypes(payload)
+  }
+}
+
+export const productApi = { fetchProducts, fetchProductsGroupedBy, fetchProductsGroupedByParent, fetchGoodIdentificationTypes }
