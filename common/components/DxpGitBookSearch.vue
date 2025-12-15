@@ -144,8 +144,7 @@
 import { IonButton, IonButtons, IonChip, IonContent, IonHeader, IonIcon, IonItem, IonLabel, IonList, IonModal, IonSearchbar, IonSegment, IonSegmentButton, IonSpinner, IonTabButton, IonTitle, IonToolbar, modalController } from "@ionic/vue";
 import { ref } from "vue";
 import { caretForwardOutline, caretDownOutline, close, documentOutline, helpOutline, returnDownBackOutline, returnDownForwardOutline, searchOutline } from "ionicons/icons";
-import { translate } from '../index'
-import { hasError, askQuery, searchQuery, getGitBookPage  } from "oms-api";
+import { gitBookApi, hasError, translate } from '../index'
 import VueMarkdown from 'vue-markdown-render';
 
 const gitBookSearchModal = ref();
@@ -178,7 +177,7 @@ async function gitBookAskQuery() {
   let response = {} as any;
 
   try {
-    const resp = await askQuery({ 
+    const resp = await gitBookApi.askQuery({ 
       queryString: queryString.value,
       spaceId: import.meta.env.VITE_VUE_APP_SPACE_ID,
       baseURL: import.meta.env.VITE_VUE_APP_GITBOOK_BASE_URL,
@@ -206,7 +205,7 @@ async function gitBookSearchQuery() {
   const baseURL = import.meta.env.VITE_VUE_APP_GITBOOK_BASE_URL
 
   try {
-    const resp = await searchQuery({
+    const resp = await gitBookApi.searchQuery({
       queryString: queryString.value,
       spaceId: import.meta.env.VITE_VUE_APP_SPACE_ID,
       baseURL,
@@ -231,7 +230,7 @@ async function fetchSources() {
 
   const responses = await (Promise as any).allSettled(answer.value.sources.map((source: any) => {
     if(source.type === "page") {
-      return getGitBookPage({
+      return gitBookApi.getGitBookPage({
         pageId: source.page,
         spaceId: import.meta.env.VITE_VUE_APP_SPACE_ID,
         baseURL: import.meta.env.VITE_VUE_APP_GITBOOK_BASE_URL,

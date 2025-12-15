@@ -34,7 +34,7 @@ import {
   IonIcon,
   IonItem
 } from '@ionic/vue';
-import { DxpImage } from './index';
+import { DxpImage } from '../index';
 import { openOutline } from 'ionicons/icons';
 
 declare let process: any;
