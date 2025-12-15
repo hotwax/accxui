@@ -1,4 +1,4 @@
-import { getIdentification } from '../../utils'
+import { getIdentification } from '../../utils/commonUtil'
 
 export const orderItemTransformRule = {
   item: {

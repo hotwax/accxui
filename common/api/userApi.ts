@@ -1,7 +1,7 @@
 import api, { client } from "../core/remoteApi";
 import { userProfileTransformRule } from "./mappings/user";
 import { RequestPayload, Response, User } from "./types";
-import { hasError, jsonParse } from "../utils";
+import { hasError, jsonParse } from "../utils/commonUtil";
 import { transform } from 'node-json-transform';
 
 const SYSTEM_TYPE = import.meta.env.VITE_SYSTEM_TYPE || "OFBIZ";

@@ -1,5 +1,5 @@
 import api, {client} from "../core/remoteApi";
-import { hasError } from "../utils";
+import { hasError } from "../utils/commonUtil";
 
 async function askQuery(payload: any): Promise<any> {
   try {

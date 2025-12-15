@@ -1,6 +1,6 @@
 import { defineStore } from "pinia";
 import { translate } from "../core/i18n";
-import { showToast } from "../utils";
+import { showToast } from "../utils/commonUtil";
 import { notificationApi } from '../index'
 import logger from '../core/logger'
 import { generateDeviceId } from '../utils/firebaseUtil'
