@@ -5,10 +5,12 @@ import {
 import { setupCache } from 'axios-cache-adapter'
 import qs from "qs"
 import merge from 'deepmerge'
+import { useAuthStore } from '../store/auth';
+const SYSTEM_TYPE = import.meta.env.VITE_SYSTEM_TYPE || "OFBIZ";
 
 const requestInterceptor = async (config: any) => {
   if (apiConfig.token) {
-    config.headers["Authorization"] =  "Bearer " + apiConfig.token;
+    config.headers["Authorization"] =  "Bearer " + useAuthStore().token.value;
     config.headers['Content-Type'] = 'application/json';
   }
   return config;
@@ -21,15 +23,6 @@ const responseSuccessInterceptor = (response: any) => {
   // Any status code that lie within the range of 2xx cause this function to trigger
   // Do something with response data
   if (apiConfig.events.responseSuccess) apiConfig.events.responseSuccess(response);
-
-  if(apiConfig.systemType === "MOQUI") {
-    const csrfToken = response.headers["x-csrf-token"]
-    const meta = document.createElement("meta")
-    meta.name = "csrf"
-    meta.content = csrfToken
-    document.getElementsByTagName("head")[0].appendChild(meta)
-    document.cookie = `x-csrf-token=${csrfToken}`
-  }
   return response;
 }
 
@@ -79,8 +72,7 @@ const defaultConfig = {
       success: responseSuccessInterceptor,
       error: responseErrorInterceptor
     }
-  },
-  systemType: "OFBIZ"
+  }
 }
 let apiConfig = { ...defaultConfig }
 
@@ -184,9 +176,7 @@ const api = async (customConfig: any) => {
     // if passing responseType in payload then only adding it as responseType
     if(customConfig.responseType) config['responseType'] = customConfig.responseType
 
-    if(apiConfig.instanceUrl && apiConfig.systemType === "MOQUI") config.baseURL = apiConfig.instanceUrl.startsWith('http') ? apiConfig.instanceUrl.includes('/rest/s1') ? apiConfig.instanceUrl : `${apiConfig.instanceUrl}/rest/s1/` : `https://${apiConfig.instanceUrl}.hotwax.io/rest/s1/`;
-    else if(apiConfig.instanceUrl) config.baseURL = apiConfig.instanceUrl.startsWith('http') ? apiConfig.instanceUrl.includes('/api') ? apiConfig.instanceUrl : `${apiConfig.instanceUrl}/api/` : `https://${apiConfig.instanceUrl}.hotwax.io/api/`;
-
+    config.baseURL = useAuthStore().getBaseUrl;
     if(customConfig.cache) config.adapter = axiosCache.adapter;
 
     if (customConfig.queue) {
