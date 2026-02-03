@@ -7,7 +7,7 @@ export const useAuthStore = defineStore('userAuth', {
     return {
       token: {
         value: '',
-        expiration: undefined
+        expiration: undefined as number | undefined
       },
       oms: '',
       maarg: '',
