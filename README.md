@@ -10,9 +10,8 @@ pnpm install
 # build the launchpad app
 pnpm --filter launchpad build
 
-# Start fulfillment app
+# Start launchpad app
 pnpm --filter launchpad dev
-
 
 # Build fulfillment app
 pnpm --filter fulfillment build
