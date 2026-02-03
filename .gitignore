@@ -26,6 +26,9 @@ pnpm-debug.log*
 /www
 /lib
 .firebase/*
+/apps
+/packages/dxp-components/node_modules/
+/packages/oms-api/node_modules/
 
 .history
 
