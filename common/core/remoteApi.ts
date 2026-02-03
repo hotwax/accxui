@@ -1,10 +1,7 @@
 import axios from 'axios';
-import {
-  StatusCodes
-} from 'http-status-codes';
+import { StatusCodes } from 'http-status-codes';
 import { setupCache } from 'axios-cache-adapter'
 import qs from "qs"
-import merge from 'deepmerge'
 import { useAuthStore } from '../store/auth';
 const SYSTEM_TYPE = import.meta.env.VITE_SYSTEM_TYPE || "OFBIZ";
 
@@ -127,10 +124,10 @@ const api = async (customConfig: any) => {
     }
 
     // if passing responseType in payload then only adding it as responseType
-    if(customConfig.responseType) config['responseType'] = customConfig.responseType
+    if (customConfig.responseType) config['responseType'] = customConfig.responseType
 
     config.baseURL = useAuthStore().getBaseUrl;
-    if(customConfig.cache) config.adapter = axiosCache.adapter;
+    if (customConfig.cache) config.adapter = axiosCache.adapter;
 
     if (customConfig.queue) {
         if (!config.headers) config.headers = { ...axios.defaults.headers.common, ...config.headers };
