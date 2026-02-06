@@ -2,16 +2,18 @@ import axios from 'axios';
 import { StatusCodes } from 'http-status-codes';
 import { setupCache } from 'axios-cache-adapter'
 import qs from "qs"
-import { useAuthStore } from '../store/auth';
-const SYSTEM_TYPE = import.meta.env.VITE_SYSTEM_TYPE || "OFBIZ";
+import merge from 'deepmerge'
 
 const requestInterceptor = async (config: any) => {
-  if (useAuthStore().token.value) {
-    config.headers["Authorization"] =  "Bearer " + useAuthStore().token.value;
+  if (apiConfig.token) {
+    config.headers["Authorization"] =  "Bearer " + apiConfig.token;
     config.headers['Content-Type'] = 'application/json';
   }
   return config;
 }
+
+// configuration passed from the app
+let appConfig = {};
 
 const responseSuccessInterceptor = (response: any) => {
   // Any status code that lie within the range of 2xx cause this function to trigger
@@ -19,12 +21,12 @@ const responseSuccessInterceptor = (response: any) => {
 }
 
 const responseErrorInterceptor = (error: any) => {
+  if (apiConfig.events.responseError) apiConfig.events.responseError(error);
   // As we have yet added support for logout on unauthorization hence emitting unauth event only in case of ofbiz app
-  if (error.response && SYSTEM_TYPE === "OFBIZ") {
-      // TODO Handle case for failed queue request
+  if (error.response) {
       const { status } = error.response;
       if (status == StatusCodes.UNAUTHORIZED) {
-        //TODO: Need to call apps logout here
+        if (apiConfig.events.unauthorised) apiConfig.events.unauthorised(error);
       }
   }
   // Any status codes that falls outside the range of 2xx cause this function to trigger
@@ -32,27 +34,23 @@ const responseErrorInterceptor = (error: any) => {
   return Promise.reject(error);
 }
 
-const responseClientErrorInterceptor = (error: any) => {
-  // As we have yet added support for logout on unauthorization hence emitting unauth event only in case of ofbiz app
-  if (error.response && SYSTEM_TYPE === "MOQUI") {
-      // TODO Handle case for failed queue request
-      const { status } = error.response;
-      if (status == StatusCodes.UNAUTHORIZED) {
-        //TODO: Need to call apps logout here
-      }
-  }
-  // Any status codes that falls outside the range of 2xx cause this function to trigger
-  // Do something with response error
-  return Promise.reject(error);
-}
-
-const interceptor = {
-  request: requestInterceptor,
-  response: {
-    success: responseSuccessInterceptor,
-    error: responseErrorInterceptor
+const defaultConfig = {
+  token: '',
+  instanceUrl: '',
+  events: {
+    unauthorised: undefined,
+    responseSuccess: undefined,
+    responseError: undefined
+  } as any,
+  interceptor: {
+    request: requestInterceptor,
+    response: {
+      success: responseSuccessInterceptor,
+      error: responseErrorInterceptor
+    }
   }
 }
+let apiConfig = { ...defaultConfig }
 
 // `paramsSerializer` is an optional function in charge of serializing `params`
 // (e.g. https://www.npmjs.com/package/qs, http://api.jquery.com/jquery.param/)
@@ -89,12 +87,35 @@ const paramsSerializer = (p: any) => {
   return qs.stringify(params, {arrayFormat: 'repeat'});
 }
 
-axios.interceptors.request.use(interceptor.request);
+function updateToken(key: string) {
+  apiConfig.token = key
+}
 
-axios.interceptors.response.use(interceptor.response.success, interceptor.response.error);
+function updateInstanceUrl(url: string) {
+  apiConfig.instanceUrl = url
+}
 
-const maxAge = import.meta.env.VITE_VUE_APP_CACHE_MAX_AGE
-  ? parseInt(import.meta.env.VITE_VUE_APP_CACHE_MAX_AGE)
+function resetConfig() {
+  apiConfig = { ...defaultConfig }
+}
+
+function initialise(customConfig: any) {
+  appConfig = customConfig;
+  apiConfig = merge(apiConfig, customConfig)
+  axios.interceptors.request.use(apiConfig.interceptor.request);
+  axios.interceptors.response.use(apiConfig.interceptor.response.success, apiConfig.interceptor.response.error);
+}
+
+function getConfig() {
+  return appConfig;
+}
+
+axios.interceptors.request.use(apiConfig.interceptor.request);
+
+axios.interceptors.response.use(apiConfig.interceptor.response.success, apiConfig.interceptor.response.error);
+
+const maxAge = import.meta.env.VITE_CACHE_MAX_AGE
+  ? parseInt(import.meta.env.VITE_CACHE_MAX_AGE)
   : 0;
 const axiosCache = setupCache({
   maxAge: maxAge * 1000
@@ -112,7 +133,6 @@ const axiosCache = setupCache({
  * - Node only: Stream, Buffer
  * @param {any} [params] - Optional: `params` are the URL parameters to be sent with the request. Must be a plain object or a URLSearchParams object
  * @param {boolean} [cache] - Optional: Apply caching to it
- *  @param {boolean} [queue] - Optional: Apply offline queueing to it
  * @return {Promise} Response from API as returned by Axios
  */
 const api = async (customConfig: any) => {
@@ -128,21 +148,11 @@ const api = async (customConfig: any) => {
     // if passing responseType in payload then only adding it as responseType
     if (customConfig.responseType) config['responseType'] = customConfig.responseType
 
-    config.baseURL = useAuthStore().getBaseUrl;
+    if (apiConfig.instanceUrl) config.baseURL = apiConfig.instanceUrl.startsWith('http') ? apiConfig.instanceUrl.includes('/rest/s1') ? apiConfig.instanceUrl : `${apiConfig.instanceUrl}/rest/s1/` : `https://${apiConfig.instanceUrl}.hotwax.io/rest/s1/`;
+
     if (customConfig.cache) config.adapter = axiosCache.adapter;
 
-    if (customConfig.queue) {
-        if (!config.headers) config.headers = { ...axios.defaults.headers.common, ...config.headers };
-
-        if (config.events.queueTask) {
-          config.events.queueTask ({
-            callbackEvent: customConfig.callbackEvent,
-            payload: config
-          })
-        }
-    } else {
-        return axios(config);
-    }
+    return axios(config);
 }
 
 /**
@@ -155,17 +165,4 @@ const client = (config: any) => {
   return axios.create().request({ paramsSerializer, ...config })
 }
 
-/**
- * Client method to directly pass configuration to axios
- * This method uses the response interceptors to handle the responses correctly
- *
- * @param {any}  config - API configuration
- * @return {Promise} Response from API as returned by Axios
- */
-const apiClient = (config: any) => {
-  const axiosClient = axios.create()
-  axiosClient.interceptors.response.use(interceptor.response.success, responseClientErrorInterceptor);
-  return axiosClient.request({ paramsSerializer, ...config })
-}
-
-export { api as default, apiClient, client, axios };
+export { api as default, initialise, client, axios, getConfig, updateToken, updateInstanceUrl, resetConfig };

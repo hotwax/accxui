@@ -4,12 +4,12 @@ import { useFieldValidator } from './composables/useFieldValidation'
 import imagePreview from './directives/imagePreview'
 
 import { getTelecomCountryCode, hasError, isError, goToOms, hasPermission } from './utils/commonUtil'
-import api, { apiClient, client, axios } from './core/remoteApi'
+import api, { client, axios, initialise, getConfig, updateToken, updateInstanceUrl, resetConfig } from './core/remoteApi'
 
 import { createDxpI18n, i18n, translate } from './core/i18n'
 
 // ✅ These are pure types (erased during build)
-export { api, apiClient, client, axios }
+export { api, client, axios, initialise, getConfig, updateToken, updateInstanceUrl, resetConfig }
 
 export {
   createDxpI18n,
