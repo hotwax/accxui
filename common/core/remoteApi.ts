@@ -3,12 +3,10 @@ import { StatusCodes } from 'http-status-codes';
 import { setupCache } from 'axios-cache-adapter'
 import qs from "qs"
 import merge from 'deepmerge'
-import { useCookies } from '../helpers/cookieHelper';
-
-const { get: getCookie } = useCookies();
+import { cookieHelper } from '../helpers/cookieHelper';
 
 const requestInterceptor = async (config: any) => {
-  const token = getCookie('token');
+  const token = cookieHelper().get('token');
   if (token) {
     config.headers["Authorization"] =  "Bearer " + token;
     config.headers['Content-Type'] = 'application/json';
@@ -144,7 +142,7 @@ const api = async (customConfig: any) => {
 
     if (customConfig.baseURL) config.baseURL = customConfig.baseURL;
     else {
-        const instanceUrl = getCookie('maarg');
+        const instanceUrl = cookieHelper().get('maarg');
         if (instanceUrl) {
            config.baseURL = instanceUrl.startsWith('http') ? instanceUrl.includes('/rest/s1') ? instanceUrl : `${instanceUrl}/rest/s1/` : `https://${instanceUrl}.hotwax.io/rest/s1/`;
         }

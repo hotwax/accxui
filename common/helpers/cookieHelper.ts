@@ -1,4 +1,4 @@
-export const useCookies = () => {
+export const cookieHelper = () => {
 
     // Function to set a cookie with an optional expiration
     const set = (name: string, value: string, maxAge?: number) => {
