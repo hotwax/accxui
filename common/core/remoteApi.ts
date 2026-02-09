@@ -3,7 +3,7 @@ import { StatusCodes } from 'http-status-codes';
 import { setupCache } from 'axios-cache-adapter'
 import qs from "qs"
 import merge from 'deepmerge'
-import { useCookies } from '../composables/useCookies'
+import { useCookies } from '../helpers/cookieHelper';
 
 const { get: getCookie } = useCookies();
 

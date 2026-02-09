@@ -1,5 +1,5 @@
 export const useCookies = () => {
-    
+
     // Function to set a cookie with an optional expiration
     const set = (name: string, value: string, maxAge?: number) => {
         let cookieString = `${encodeURIComponent(name)}=${encodeURIComponent(value)}; path=/; SameSite=Lax`;

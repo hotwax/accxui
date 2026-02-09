@@ -1,6 +1,6 @@
 import { useFormValidator } from './composables/useFormValidation'
 import { useFieldValidator } from './composables/useFieldValidation'
-import { useCookies } from './composables/useCookies'
+import { useCookies } from './helpers/cookieHelper'
 import imagePreview from './directives/imagePreview'
 
 import { getTelecomCountryCode, hasError, isError, goToOms, hasPermission } from './utils/commonUtil'
