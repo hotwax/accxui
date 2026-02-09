@@ -3,10 +3,14 @@ import { StatusCodes } from 'http-status-codes';
 import { setupCache } from 'axios-cache-adapter'
 import qs from "qs"
 import merge from 'deepmerge'
+import { useCookies } from '../composables/useCookies'
+
+const { get: getCookie } = useCookies();
 
 const requestInterceptor = async (config: any) => {
-  if (apiConfig.token) {
-    config.headers["Authorization"] =  "Bearer " + apiConfig.token;
+  const token = getCookie('token');
+  if (token) {
+    config.headers["Authorization"] =  "Bearer " + token;
     config.headers['Content-Type'] = 'application/json';
   }
   return config;
@@ -35,8 +39,6 @@ const responseErrorInterceptor = (error: any) => {
 }
 
 const defaultConfig = {
-  token: '',
-  instanceUrl: '',
   events: {
     unauthorised: undefined,
     responseSuccess: undefined,
@@ -85,14 +87,6 @@ const paramsSerializer = (p: any) => {
   // 'a=b,c'
   // Currently OMS 1.0 supports values as repeat
   return qs.stringify(params, {arrayFormat: 'repeat'});
-}
-
-function updateToken(key: string) {
-  apiConfig.token = key
-}
-
-function updateInstanceUrl(url: string) {
-  apiConfig.instanceUrl = url
 }
 
 function resetConfig() {
@@ -148,7 +142,13 @@ const api = async (customConfig: any) => {
     // if passing responseType in payload then only adding it as responseType
     if (customConfig.responseType) config['responseType'] = customConfig.responseType
 
-    if (apiConfig.instanceUrl) config.baseURL = apiConfig.instanceUrl.startsWith('http') ? apiConfig.instanceUrl.includes('/rest/s1') ? apiConfig.instanceUrl : `${apiConfig.instanceUrl}/rest/s1/` : `https://${apiConfig.instanceUrl}.hotwax.io/rest/s1/`;
+    if (customConfig.baseURL) config.baseURL = customConfig.baseURL;
+    else {
+        const instanceUrl = getCookie('maarg');
+        if (instanceUrl) {
+           config.baseURL = instanceUrl.startsWith('http') ? instanceUrl.includes('/rest/s1') ? instanceUrl : `${instanceUrl}/rest/s1/` : `https://${instanceUrl}.hotwax.io/rest/s1/`;
+        }
+    }
 
     if (customConfig.cache) config.adapter = axiosCache.adapter;
 
@@ -165,4 +165,4 @@ const client = (config: any) => {
   return axios.create().request({ paramsSerializer, ...config })
 }
 
-export { api as default, initialise, client, axios, getConfig, updateToken, updateInstanceUrl, resetConfig };
+export { api as default, initialise, client, axios, getConfig, resetConfig };
