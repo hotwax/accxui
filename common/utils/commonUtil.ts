@@ -35,9 +35,22 @@ const hasPermission  = (permissionId: string) => {
   return true
 }
 
-
-function hasError(response: any) {
-  return typeof response.data != "object" || !!response.data._ERROR_MESSAGE_ || !!response.data._ERROR_MESSAGE_LIST_ || !!response.data.error;
+function hasError(response: any): boolean {
+  const data = response?.data ?? response;
+  if (!data || typeof data !== 'object') return false;
+  if (typeof data._ERROR_MESSAGE_ === 'string' && data._ERROR_MESSAGE_.length) {
+    return true;
+  }
+  if (
+    Array.isArray(data._ERROR_MESSAGE_LIST_) &&
+    data._ERROR_MESSAGE_LIST_.length > 0
+  ) {
+    return true;
+  }
+  if (data.error) {
+    return true;
+  }
+  return false;
 }
 
 function isError(response: any): boolean {
