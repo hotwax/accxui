@@ -3,7 +3,7 @@ import { useFieldValidator } from './composables/useFieldValidation'
 import { cookieHelper } from './helpers/cookieHelper'
 import imagePreview from './directives/imagePreview'
 
-import { getTelecomCountryCode, hasError, isError, goToOms, hasPermission } from './utils/commonUtil'
+import { getTelecomCountryCode, hasError, isError, goToOms, hasPermission, getOmsURL, getMaargURL } from './utils/commonUtil'
 import api, { client, axios, initialise, getConfig, resetConfig } from './core/remoteApi'
 
 import { createDxpI18n, i18n, translate } from './core/i18n'
@@ -15,6 +15,8 @@ export {
   createDxpI18n,
   getTelecomCountryCode,
   goToOms,
+  getOmsURL,
+  getMaargURL,
   hasError,
   hasPermission,
   i18n,

@@ -1,7 +1,10 @@
 import { toastController } from "@ionic/vue";
 import { DateTime } from "luxon";
+import { cookieHelper } from "../helpers/cookieHelper";
 
-const goToOms = (token: string, oms: string) => {
+const goToOms = () => {
+  const oms = cookieHelper().get("oms")!
+  const token = cookieHelper().get("token")!
   const link = (oms.startsWith('http') ? oms.replace(/\/api\/?|\/$/, "") : `https://${oms}.hotwax.io`) + `/commerce/control/main?token=${token}`
   
   window.open(link, '_blank', 'noopener, noreferrer')
@@ -318,10 +321,30 @@ const telecomCode = {
   "ZW": "+263"
 } as any;
 
+const getMaargURL = () => {
+  const maarg = cookieHelper().get("maarg")
+  let maargURL = ""
+  if(maarg) {
+    maargURL = maarg.startsWith('http') ? maarg.includes('/rest/s1') ? maarg : `${maarg}/rest/s1/` : `https://${maarg}.hotwax.io/rest/s1/`;
+  }
+  return maargURL
+}
+
+const getOmsURL = () => {
+  const oms = cookieHelper().get("oms")
+  let omsURL = ""
+  if(oms) {
+    omsURL = oms.startsWith('http') ? oms.includes('/api') ? oms : `${oms}/api/` : `https://${oms}.hotwax.io/api/`
+  }
+  return omsURL;
+}
+
 export {
   getCurrentTime,
   getTelecomCountryCode,
   goToOms,
+  getOmsURL,
+  getMaargURL,
   hasError,
   hasPermission,
   isError,

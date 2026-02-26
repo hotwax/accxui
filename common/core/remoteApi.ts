@@ -4,11 +4,12 @@ import { setupCache } from 'axios-cache-adapter'
 import qs from "qs"
 import merge from 'deepmerge'
 import { cookieHelper } from '../helpers/cookieHelper';
+import { getMaargURL } from '../utils/commonUtil';
 
 const requestInterceptor = async (config: any) => {
   const token = cookieHelper().get('token');
   if (token) {
-    config.headers["Authorization"] =  "Bearer " + token;
+    config.headers["Authorization"] = "Bearer " + token;
     config.headers['Content-Type'] = 'application/json';
   }
   return config;
@@ -128,29 +129,23 @@ const axiosCache = setupCache({
  * @return {Promise} Response from API as returned by Axios
  */
 const api = async (customConfig: any) => {
-    // Prepare configuration
-    const config: any = {
-        url: customConfig.url,
-        method: customConfig.method,
-        data: customConfig.data,
-        params: customConfig.params,
-        paramsSerializer
-    }
+  // Prepare configuration
+  const config: any = {
+    url: customConfig.url,
+    method: customConfig.method,
+    data: customConfig.data,
+    params: customConfig.params,
+    paramsSerializer
+  }
 
-    // if passing responseType in payload then only adding it as responseType
-    if (customConfig.responseType) config['responseType'] = customConfig.responseType
+  // if passing responseType in payload then only adding it as responseType
+  if (customConfig.responseType) config['responseType'] = customConfig.responseType
 
-    if (customConfig.baseURL) config.baseURL = customConfig.baseURL;
-    else {
-        const instanceUrl = cookieHelper().get('maarg');
-        if (instanceUrl) {
-           config.baseURL = instanceUrl.startsWith('http') ? instanceUrl.includes('/rest/s1') ? instanceUrl : `${instanceUrl}/rest/s1/` : `https://${instanceUrl}.hotwax.io/rest/s1/`;
-        }
-    }
+  config.baseURL = customConfig.baseURL ? customConfig.baseURL : getMaargURL();
 
-    if (customConfig.cache) config.adapter = axiosCache.adapter;
+  if(customConfig.cache) config.adapter = axiosCache.adapter;
 
-    return axios(config);
+  return axios(config);
 }
 
 /**
