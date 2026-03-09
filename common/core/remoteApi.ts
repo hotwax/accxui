@@ -4,7 +4,7 @@ import { setupCache } from 'axios-cache-adapter'
 import qs from "qs"
 import merge from 'deepmerge'
 import { cookieHelper } from '../helpers/cookieHelper';
-import { getMaargURL } from '../utils/commonUtil';
+import { commonUtil } from '../utils/commonUtil';
 
 const requestInterceptor = async (config: any) => {
   const token = cookieHelper().get('token');
@@ -27,10 +27,10 @@ const responseErrorInterceptor = (error: any) => {
   if (apiConfig.events.responseError) apiConfig.events.responseError(error);
   // As we have yet added support for logout on unauthorization hence emitting unauth event only in case of ofbiz app
   if (error.response) {
-      const { status } = error.response;
-      if (status == StatusCodes.UNAUTHORIZED) {
-        if (apiConfig.events.unauthorised) apiConfig.events.unauthorised(error);
-      }
+    const { status } = error.response;
+    if (status == StatusCodes.UNAUTHORIZED) {
+      if (apiConfig.events.unauthorised) apiConfig.events.unauthorised(error);
+    }
   }
   // Any status codes that falls outside the range of 2xx cause this function to trigger
   // Do something with response error
@@ -68,12 +68,12 @@ const paramsSerializer = (p: any) => {
   // 'a.b.c=d&a.b.e=f'
   // OMS 1.0 supports objects passed as strings
   const params = Object.keys(p).reduce((params: any, key: string) => {
-      let value = p[key];
-      if ( typeof value === 'object' && !Array.isArray(value) && value !== null) {
-          value = JSON.stringify(value)
-      }
-      params[key] = value;
-      return params;
+    let value = p[key];
+    if (typeof value === 'object' && !Array.isArray(value) && value !== null) {
+      value = JSON.stringify(value)
+    }
+    params[key] = value;
+    return params;
   }, {})
   // arrayFormat option is used to specify the format of the output array:
   //qs.stringify({ a: ['b', 'c'] }, { arrayFormat: 'indices' })
@@ -85,7 +85,7 @@ const paramsSerializer = (p: any) => {
   //qs.stringify({ a: ['b', 'c'] }, { arrayFormat: 'comma' })
   // 'a=b,c'
   // Currently OMS 1.0 supports values as repeat
-  return qs.stringify(params, {arrayFormat: 'repeat'});
+  return qs.stringify(params, { arrayFormat: 'repeat' });
 }
 
 function resetConfig() {
@@ -144,9 +144,9 @@ const api = async (customConfig: any) => {
   // if passing responseType in payload then only adding it as responseType
   if (customConfig.responseType) config['responseType'] = customConfig.responseType
 
-  config.baseURL = customConfig.baseURL ? customConfig.baseURL : getMaargURL();
+  config.baseURL = customConfig.baseURL ? customConfig.baseURL : commonUtil.getMaargURL();
 
-  if(customConfig.cache) config.adapter = axiosCache.adapter;
+  if (customConfig.cache) config.adapter = axiosCache.adapter;
 
   return axios(config);
 }
