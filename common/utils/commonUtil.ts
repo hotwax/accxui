@@ -339,6 +339,20 @@ const getOmsURL = () => {
   return omsURL;
 }
 
+const getStatusColor = (statusId: string) => {
+  const statusColor = {
+    "DmlsCancelled": "danger",
+    "DmlsCrashed": "danger",
+    "DmlsFailed": "danger",
+    "DmlsFinished": "success",
+    "DmlsPending": "light",
+    "DmlsQueued": "primary",
+    "DmlsRunning": "medium"
+  } as Record<string, string>
+
+  return statusColor[statusId] || "primary"
+}
+
 export {
   getCurrentTime,
   getTelecomCountryCode,
@@ -349,5 +363,6 @@ export {
   hasPermission,
   isError,
   jsonParse,
-  showToast
+  showToast,
+  getStatusColor
 }

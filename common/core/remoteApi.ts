@@ -138,6 +138,9 @@ const api = async (customConfig: any) => {
     paramsSerializer
   }
 
+  // Honor the custom headers passed in the api call
+  if(customConfig.headers) config["headers"] = { ...config["headers"], ...customConfig["headers"] }
+
   // if passing responseType in payload then only adding it as responseType
   if (customConfig.responseType) config['responseType'] = customConfig.responseType
 
