@@ -2,6 +2,10 @@ import imagePreview from './directives/imagePreview'
 import DxpShopifyImg from "./components/DxpShopifyImg.vue"
 import emitter from './core/emitter'
 import { commonUtil } from './utils/commonUtil'
+import { solrUtil } from './utils/solrUtil'
+import logger from './core/logger'
+import { cookieHelper } from './helpers/cookieHelper'
+import { moduleFederationUtil } from './utils/moduleFederationUtil'
 
 import api, { client, axios, initialise, getConfig, resetConfig } from './core/remoteApi'
 
@@ -14,13 +18,17 @@ import { useNotificationStore } from './store/notification'
 export { api, client, axios, initialise, getConfig, resetConfig }
 
 export {
+  commonUtil,
+  cookieHelper,
   createDxpI18n,
-  i18n,
-  imagePreview,
-  translate,
   DxpShopifyImg,
   emitter,
-  commonUtil,
   firebaseMessaging,
+  i18n,
+  imagePreview,
+  logger,
+  moduleFederationUtil,
+  solrUtil,
+  translate,
   useNotificationStore
 }
