@@ -1,0 +1,57 @@
+on:
+  workflow_call:
+    inputs:
+      config-path:
+        required: true
+        type: string
+      app: # The name of the app to clone into apps/, org/repo
+        required: true
+        type: string
+      appDir:
+        required: true
+        type: string
+    secrets:
+      envPAT:
+        required: true
+jobs:
+  reusable_workflow_job:
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        node-version: [18.x, 20.x]
+
+    steps:
+    - name: Checkout accxui
+      uses: actions/checkout@v4
+      with:
+        path: .
+
+    - name: Checkout app in apps/
+    - uses: actions/checkout@v2
+      with:
+        repository: ${{ inputs.app }}
+        token: ${{ secrets.envPAT }}
+        path: apps/${{ inputs.appDir }}
+
+    - name: Install pnpm
+      uses: pnpm/action-setup@v4
+      with:
+        version: 8
+        run_install: false
+
+    - name: Use Node.js ${{ matrix.node-version }}
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ matrix.node-version }}
+        cache: 'pnpm'
+
+    - name: Install Dependencies
+      run: pnpm install
+
+    - name: Generate .env file
+      run: cp .env.example .env
+      working-directory: apps/${{ inputs.appDir }}
+
+    - name: Build
+      run: pnpm run build
