@@ -55,14 +55,14 @@ export const useNotificationStore = defineStore("notification", {
           method: "get",
           params: { enumTypeId, pageSize: 200 }
         });
-        enumerationResp = resp.data.docs;
+        enumerationResp = resp.data;
 
         resp = await api({
           url: "firebase/user/notificationtopic",
           method: "get",
           params: { topicTypeId: applicationId, userId: userLoginId, pageSize: 200 }
         });
-        userPrefIds = resp.data.docs.map((userPref: any) => userPref.userPrefTypeId);
+        userPrefIds = resp.data.map((userPref: any) => userPref.userPrefTypeId);
       } catch (error) {
         logger.error(error);
       } finally {

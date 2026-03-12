@@ -39,6 +39,12 @@ importers:
       '@module-federation/runtime':
         specifier: ^0.7.7
         version: 0.7.7
+      '@shopify/app-bridge':
+        specifier: ^3.7.11
+        version: 3.7.11
+      '@shopify/app-bridge-utils':
+        specifier: ^3.5.1
+        version: 3.5.1
       '@types/node-json-transform':
         specifier: ^1.0.0
         version: 1.0.2
@@ -205,12 +211,6 @@ importers:
       '@module-federation/runtime':
         specifier: ^0.7.7
         version: 0.7.7
-      '@shopify/app-bridge':
-        specifier: ^3.7.11
-        version: 3.7.11
-      '@shopify/app-bridge-utils':
-        specifier: ^3.5.1
-        version: 3.5.1
       '@types/encoding-japanese':
         specifier: ^2.0.5
         version: 2.2.1

@@ -642,7 +642,8 @@ const getProductIdentificationValue = (productIdentifier: string, product: any) 
   return value;
 }
 
-const getOMSInstanceName = (instanceUrl: string) => {
+const getOMSInstanceName = () => {
+  const instanceUrl = getOmsURL();
   return instanceUrl.split("-")[0].replace(new RegExp("^(https|http)://"), "").replace(new RegExp("/api.*"), "").replace(new RegExp(":.*"), "");
 }
 
