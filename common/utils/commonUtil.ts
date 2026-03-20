@@ -425,6 +425,16 @@ const getFeatures = (productFeatures: any) => {
   return features || "";
 }
 
+const getFeature = (featureHierarchy: any, featureKey: string) => {
+  let featureValue = ''
+  if (featureHierarchy) {
+    const feature = featureHierarchy.find((featureItem: any) => featureItem.startsWith(featureKey))
+    const featureSplit = feature ? feature.split('/') : [];
+    featureValue = featureSplit[2] ? featureSplit[2] : '';
+  }
+  return featureValue;
+}
+
 const downloadCsv = (csv: any, fileName: any) => {
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
   saveAs(blob, fileName ? fileName : "default.csv");
@@ -545,8 +555,12 @@ const getColorByDesc = (desc: string) => ({
   "Not-Authorized": "warning",
   "Not-Received": "warning",
   "Pending": "warning",
+  "Picked up": "success",
+  "Picking": "dark",
+  "Ready for pickup": "primary",
   "Received": "success",
   "Refunded": "success",
+  "Reserved": "medium",
   "Settled": "success",
   "default": "medium"
 } as any)[desc]
@@ -658,6 +672,7 @@ export const commonUtil = {
   getColorByDesc,
   getCurrentTime,
   getDateWithOrdinalSuffix,
+  getFeature,
   getFeatures,
   getIdentificationId,
   getMaargBaseURL,
