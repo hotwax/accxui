@@ -658,8 +658,9 @@ const getProductIdentificationValue = (productIdentifier: string, product: any) 
 
 const getOMSInstanceName = () => {
   const instanceUrl = getOmsURL();
-  return instanceUrl.split("-")[0].replace(new RegExp("^(https|http)://"), "").replace(new RegExp("/api.*"), "").replace(new RegExp(":.*"), "");
-}
+  const hostname = instanceUrl.replace(/^(https?:\/\/)/, "").replace(/\/.*/, "").replace(/:.*/, "");             
+  return hostname.split(".")[0];
+};
 
 export const commonUtil = {
   copyToClipboard,
