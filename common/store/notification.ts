@@ -8,6 +8,7 @@ interface NotificationState {
   firebaseDeviceId: string;
   hasUnreadNotifications: boolean;
   allNotificationPrefs: any[];
+  isFirebaseInitialised: boolean;
 }
 
 export const useNotificationStore = defineStore("notification", {
@@ -17,6 +18,7 @@ export const useNotificationStore = defineStore("notification", {
     firebaseDeviceId: "",
     hasUnreadNotifications: true,
     allNotificationPrefs: [],
+    isFirebaseInitialised: false,
   }),
   getters: {
     getNotifications(state: NotificationState) {
@@ -26,6 +28,7 @@ export const useNotificationStore = defineStore("notification", {
     getFirebaseDeviceId: (state: NotificationState) => state.firebaseDeviceId,
     getUnreadNotificationsStatus: (state: NotificationState) => state.hasUnreadNotifications,
     getAllNotificationPrefs: (state: NotificationState) => state.allNotificationPrefs,
+    isFirebaseInitialised: (state: NotificationState) => state.isFirebaseInitialised,
   },
   actions: {
     setNotifications(payload: any) {
@@ -46,9 +49,9 @@ export const useNotificationStore = defineStore("notification", {
     async addNotification(payload: any) {
       this.notifications = [payload, ...this.notifications];
     },
-    async fetchNotificationPreferences(enumTypeId: string, applicationId: string, userLoginId: string, topicNameGenerator: (enumId: string) => string) {
+    async fetchNotificationPreferences(enumTypeId: string, applicationId: string, userId: string, topicNameGenerator: (enumId: string) => string) {
       let enumerationResp: any[] = [];
-      let userPrefIds: any[] = [];
+      let userSubscribedTopics: any[] = [];
       try {
         let resp: any = await api({
           url: "admin/enums",
@@ -60,16 +63,16 @@ export const useNotificationStore = defineStore("notification", {
         resp = await api({
           url: "firebase/user/notificationtopic",
           method: "get",
-          params: { topicTypeId: applicationId, userId: userLoginId, pageSize: 200 }
+          params: { topicTypeId: applicationId, userId: userId, pageSize: 200 }
         });
-        userPrefIds = resp.data.map((userPref: any) => userPref.userPrefTypeId);
+        userSubscribedTopics = resp.data.map((userPref: any) => userPref.topic);
       } catch (error) {
         logger.error(error);
       } finally {
         if (enumerationResp.length) {
           this.notificationPrefs = enumerationResp.reduce((notifactionPref: any, pref: any) => {
             const topicName = topicNameGenerator(pref.enumId);
-            notifactionPref.push({ ...pref, isEnabled: userPrefIds.includes(topicName) });
+            notifactionPref.push({ ...pref, isEnabled: userSubscribedTopics.includes(topicName) });
             return notifactionPref;
           }, []);
         }
@@ -87,14 +90,28 @@ export const useNotificationStore = defineStore("notification", {
         logger.error(error);
       }
     },
-    async fetchAllNotificationPrefs(applicationId: string, userLoginId: string) {
+
+    async removeClientRegistrationToken(deviceId: string, applicationId: string) {
+      this.firebaseDeviceId = deviceId;
+      try {
+        await api({
+          url: "firebase/token",
+          method: "delete",
+          data: { deviceId, applicationId }
+        });
+      } catch (error) {
+        logger.error(error);
+      }
+    },
+
+    async fetchAllNotificationPrefs(applicationId: string, userId: string) {
       try {
         const resp: any = await api({
           url: "firebase/user/notificationtopic",
           method: "get",
-          params: { topicTypeId: applicationId, userId: userLoginId, pageSize: 200 }
+          params: { topicTypeId: applicationId, userId: userId, pageSize: 200 }
         });
-        this.allNotificationPrefs = resp.data.docs;
+        this.allNotificationPrefs = resp.data;
       } catch (error) {
         logger.error(error);
       }
@@ -127,6 +144,8 @@ export const useNotificationStore = defineStore("notification", {
       this.firebaseDeviceId = "";
       this.hasUnreadNotifications = true;
       this.allNotificationPrefs = [];
+      this.isFirebaseInitialised = false;
     }
-  }
+  },
+  persist: true
 });

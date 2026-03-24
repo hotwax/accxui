@@ -427,6 +427,16 @@ const getFeatures = (productFeatures: any) => {
   return features || "";
 }
 
+const getFeature = (featureHierarchy: any, featureKey: string) => {
+  let featureValue = ''
+  if (featureHierarchy) {
+    const feature = featureHierarchy.find((featureItem: any) => featureItem.startsWith(featureKey))
+    const featureSplit = feature ? feature.split('/') : [];
+    featureValue = featureSplit[2] ? featureSplit[2] : '';
+  }
+  return featureValue;
+}
+
 const downloadCsv = (csv: any, fileName: any) => {
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
   saveAs(blob, fileName ? fileName : "default.csv");
@@ -551,9 +561,13 @@ const getColorByDesc = (desc: string) => ({
   "Not-Authorized": "warning",
   "Not-Received": "warning",
   "Pending": "warning",
+  "Picked up": "success",
+  "Picking": "dark",
+  "Ready for pickup": "primary",
   "Received": "success",
   "Refunded": "success",
   "Rejected": "warning",
+  "Reserved": "medium",
   "Settled": "success",
 } as any)[desc]
 
@@ -650,8 +664,9 @@ const getProductIdentificationValue = (productIdentifier: string, product: any) 
 
 const getOMSInstanceName = () => {
   const instanceUrl = getOmsURL();
-  return instanceUrl.split("-")[0].replace(new RegExp("^(https|http)://"), "").replace(new RegExp("/api.*"), "").replace(new RegExp(":.*"), "");
-}
+  const hostname = instanceUrl.replace(/^(https?:\/\/)/, "").replace(/\/.*/, "").replace(/:.*/, "");             
+  return hostname.split(".")[0];
+};
 
 const sortSequence = (sequence: Array<any>, sortOnField = "sequenceNum") => {
   // Currently, sorting is only performed on a single parameter, so if two sequence have same value for that parameter then they will be arranged in FCFS basis
@@ -720,6 +735,7 @@ export const commonUtil = {
   getDateAndTime,
   getDateAndTimeShort,
   getDateWithOrdinalSuffix,
+  getFeature,
   getFeatures,
   getIdentificationId,
   getMaargBaseURL,
