@@ -1,6 +1,8 @@
 import { defineStore } from "pinia";
 import api from "../core/remoteApi";
 import logger from "../core/logger";
+import { commonUtil } from "../utils/commonUtil";
+import { translate } from "../core/i18n";
 
 interface NotificationState {
   notifications: any[];
@@ -48,6 +50,10 @@ export const useNotificationStore = defineStore("notification", {
     },
     async addNotification(payload: any) {
       this.notifications = [payload, ...this.notifications];
+      this.hasUnreadNotifications = true;
+      if (payload.isForeground) {
+        commonUtil.showToast(translate("New notification received."));
+      }
     },
     async fetchNotificationPreferences(enumTypeId: string, applicationId: string, userId: string, topicNameGenerator: (enumId: string) => string) {
       let enumerationResp: any[] = [];

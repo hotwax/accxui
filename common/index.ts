@@ -2,7 +2,7 @@ import imagePreview from './directives/imagePreview'
 import DxpShopifyImg from "./components/DxpShopifyImg.vue"
 import emitter from './core/emitter'
 import { commonUtil } from './utils/commonUtil'
-import { solrUtil } from './utils/solrUtil'
+import { useSolrSearch } from './composables/useSolrSearch'
 import logger from './core/logger'
 import { cookieHelper } from './helpers/cookieHelper'
 import { moduleFederationUtil } from './utils/moduleFederationUtil'
@@ -29,7 +29,7 @@ export {
   imagePreview,
   logger,
   moduleFederationUtil,
-  solrUtil,
+  useSolrSearch,
   ShopifyService,
   translate,
   useNotificationStore
