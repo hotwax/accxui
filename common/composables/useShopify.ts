@@ -1,4 +1,4 @@
-import { Scanner, Features, Group } from '@shopify/app-bridge/actions';
+import { Scanner, Features, Group, Redirect } from '@shopify/app-bridge/actions';
 import { embeddedApp } from "../store/embeddedAppAuth";
 import { createApp } from "@shopify/app-bridge";
 import { getSessionToken } from "@shopify/app-bridge-utils";
@@ -164,10 +164,35 @@ const openPosScanner = (): Promise<any> => {
     }
   };
 
+  const redirect = (url: string) => {
+    if (store.shopifyAppBridge) {
+      Redirect.create(store.shopifyAppBridge).dispatch(Redirect.Action.REMOTE, url);
+    }
+  }
+
+  const authorise = async (shop: string, host: string) => {
+    const shopConfigsStr = import.meta.env.VITE_SHOPIFY_SHOP_CONFIG as string;
+    const shopConfigs = shopConfigsStr ? JSON.parse(shopConfigsStr) : {};
+    const scopes = import.meta.env.VITE_SHOPIFY_SCOPES || '';
+    const shopConfig = shopConfigs[shop];
+    const apiKey = shopConfig ? shopConfig.apiKey : '';
+    const redirectUri = import.meta.env.VITE_SHOPIFY_REDIRECT_URI || '';
+    const permissionUrl = `https://${shop}/admin/oauth/authorize?client_id=${apiKey}&scope=${scopes}&redirect_uri=${redirectUri}`;
+
+    if (window.top == window.self) {
+      window.location.assign(permissionUrl);
+    } else {
+      await createShopifyAppBridge(shop, host);
+      redirect(permissionUrl);
+    }
+  };
+
   return {
     appBridgeLogin,
+    authorise,
     createShopifyAppBridge,
     getSessionTokenFromShopify,
-    openPosScanner
+    openPosScanner,
+    redirect
   };
 }
