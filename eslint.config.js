@@ -129,8 +129,8 @@ export default [
       "camelcase": ["error", { "properties": "never", "ignoreDestructuring": false }],
       "func-names": ["error", "as-needed"],
       "prefer-arrow-callback": ["error", { "allowNamedFunctions": false }],
-      "no-console": ["error"],
-      "no-debugger": ["error"],
+      "no-console": process.env.NODE_ENV === "production" ? "error" : "off",
+      "no-debugger": process.env.NODE_ENV === "production" ? "error" : "off",
       "no-alert": ["error"],
       "no-multi-assign": ["error"],
       "sort-imports": ["error", {
