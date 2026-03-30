@@ -144,7 +144,7 @@ const prepareOrderLookupQuery = (query: any) => {
         "q.op": "AND"
       } as any,
       "query": "*:*",
-      "filter": ["docType: ORDER", "orderTypeId: SALES_ORDER", "facilityId: " + query.facilityId]
+      "filter": ["docType: ORDER", "orderTypeId: SALES_ORDER"]
     }
   } as any
 
@@ -158,6 +158,16 @@ const prepareOrderLookupQuery = (query: any) => {
         "type": "terms",
         "facet": {
           "groups": "unique(orderId)"
+        }
+      },
+      "facilityNameFacet":{
+        "excludeTags":"orderLookupFilter",
+        "field":"facilityName",
+        "mincount":1,
+        "limit":-1,
+        "type":"terms",
+        "facet":{
+          "groups":"unique(orderId)"
         }
       },
       "salesChannelDescFacet": {
@@ -204,6 +214,9 @@ const prepareOrderLookupQuery = (query: any) => {
     payload.json.filter.push(`{!tag=orderLookupFilter}shipmentMethodTypeId: (${shipmentMethodTypeIdValues.join(" OR ")})`)
   }
 
+  if (query.facility?.length) {
+    payload.json.filter.push(`{!tag=orderLookupFilter}facilityName: (\"${query.facility.join('\" OR \"')}\")`)
+  }
   if (query.productStore?.length) {
     payload.json.filter.push(`{!tag=orderLookupFilter}productStoreName: (\"${query.productStore.join('\" OR \"')}\")`)
   }
