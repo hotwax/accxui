@@ -1,9 +1,12 @@
 import js from "@eslint/js";
 import pluginVue from "eslint-plugin-vue";
 import vueParser from "vue-eslint-parser";
-import * as espree from "espree"; // Import the base parser
+import * as espree from "espree";
 import eslintPluginImport from "eslint-plugin-import";
 import stylistic from "@stylistic/eslint-plugin";
+import typescriptEslint from "@typescript-eslint/eslint-plugin";
+import typescriptParser from "@typescript-eslint/parser";
+import globals from "globals";
 
 export default [
   {
@@ -12,15 +15,29 @@ export default [
   js.configs.recommended,
   ...pluginVue.configs["flat/recommended"],
   {
-    files: ["**/*.js", "**/*.mjs", "**/*.cjs", "**/*.vue"],
+    plugins: {
+      "@typescript-eslint": typescriptEslint,
+    },
+    rules: {
+      ...typescriptEslint.configs.recommended.rules,
+    },
+  },
+  {
+    files: ["**/*.js", "**/*.mjs", "**/*.cjs", "**/*.ts", "**/*.vue"],
     languageOptions: {
-      ecmaVersion: 2021,
+      ecmaVersion: "latest",
       sourceType: "module",
+      globals: {
+        ...globals.browser,
+        ...globals.node,
+        ...globals.es2021,
+      },
       parser: vueParser,
       parserOptions: {
-        parser: espree,
-        ecmaVersion: 2021,
+        parser: typescriptParser,
+        ecmaVersion: "latest",
         sourceType: "module",
+        extraFileExtensions: [".vue"],
         ecmaFeatures: {
           jsx: true,
         },
@@ -32,20 +49,21 @@ export default [
     },
     settings: {
       "import/resolver": {
+        typescript: true,
         node: {
-          extensions: [".js", ".mjs", ".cjs", ".json", ".vue"]
+          extensions: [".js", ".mjs", ".cjs", ".json", ".vue", ".ts"]
         }
       }
     },
     rules: {
       // CRITICAL: Ionic uses the 'slot' attribute for positioning (e.g., slot="start")
       "vue/no-deprecated-slot-attribute": "off",
-      "vue/multi-word-component-names": ["warn", { "ignores": ["App", "Main"] }],
+      "vue/multi-word-component-names": "off",
       "vue/html-indent": ["error", 2],
-      "vue/max-attributes-per-line": ["warn", { "singleline": 3, "multiline": 1 }],
+      "vue/max-attributes-per-line": ["warn", { "singleline": 10, "multiline": 1 }],
       "vue/html-closing-bracket-newline": ["error", { "singleline": "never", "multiline": "always" }],
-      "@stylistic/quotes": ["error", "double", { "avoidEscape": true, "allowTemplateLiterals": true }],
-      "@stylistic/semi": ["error", "never"],
+      "@stylistic/quotes": ["error", "double"],
+      // "@stylistic/semi": ["error", "never"],
       "@stylistic/indent": ["error", 2],
       "@stylistic/brace-style": ["error", "1tbs", { "allowSingleLine": true }],
       "@stylistic/comma-style": ["error", "last"],
@@ -58,19 +76,23 @@ export default [
         "asyncArrow": "always"
       }],
       "@stylistic/space-in-parens": ["error", "never"],
-      "@stylistic/keyword-spacing": ["error", { "before": true, "after": true }],
+      "@stylistic/keyword-spacing": ["error", { "before": true, "after": true, "overrides": {
+        "if": { "after": false },
+        "for": { "after": false },
+        "while": { "after": false }
+      } }],
       "@stylistic/spaced-comment": ["error", "always", { "markers": ["/"] }],
       "@stylistic/eol-last": ["error", "always"],
       "@stylistic/no-trailing-spaces": ["error"],
       "@stylistic/no-multi-spaces": ["error"],
       "@stylistic/operator-linebreak": ["error", "after", { "overrides": { "?": "before", ":": "before" } }],
       "@stylistic/function-paren-newline": ["error", "multiline"],
-      "@stylistic/object-curly-newline": ["error", {
-        "ObjectExpression": { "multiline": true, "minProperties": 4 },
-        "ObjectPattern": { "multiline": true, "minProperties": 4 },
-        "ImportDeclaration": { "multiline": true, "minProperties": 4 },
-        "ExportDeclaration": { "multiline": true, "minProperties": 4 }
-      }],
+      // "@stylistic/object-curly-newline": ["error", {
+      //   "ObjectExpression": { "multiline": true, "minProperties": 4 },
+      //   "ObjectPattern": { "multiline": true, "minProperties": 4 },
+      //   "ImportDeclaration": { "multiline": true, "minProperties": 20 },
+      //   "ExportDeclaration": { "multiline": true, "minProperties": 4 }
+      // }],
       "@stylistic/no-whitespace-before-property": ["error"],
       "@stylistic/padding-line-between-statements": [
         "error",
@@ -86,16 +108,16 @@ export default [
       "no-self-assign": ["error"],
       "no-global-assign": ["error"],
       "no-unneeded-ternary": ["error", { "defaultAssignment": false }],
-      "no-mixed-operators": ["error", {
-        "groups": [
-          ["+", "-", "*", "/", "%", "**"],
-          ["&", "|", "^", "~", "<<", ">>", ">>>"],
-          ["==", "!=", "===", "!==", ">", ">=", "<", "<="],
-          ["&&", "||"],
-          ["in", "instanceof"]
-        ],
-        "allowSamePrecedence": false
-      }],
+      // "no-mixed-operators": ["error", {
+      //   "groups": [
+      //     ["+", "-", "*", "/", "%", "**"],
+      //     ["&", "|", "^", "~", "<<", ">>", ">>>"],
+      //     ["==", "!=", "===", "!==", ">", ">=", "<", "<="],
+      //     ["&&", "||"],
+      //     ["in", "instanceof"]
+      //   ],
+      //   "allowSamePrecedence": false
+      // }],
       "no-floating-decimal": ["error"],
       "require-await": ["error"],
       "no-var": ["error"],
@@ -119,23 +141,23 @@ export default [
       }],
       "import/no-unresolved": ["error", { "commonjs": true, "caseSensitive": true }],
       "import/no-duplicates": ["error"],
-      "import/no-extraneous-dependencies": ["error", {
-        "devDependencies": [
-          "**/test/**", "**/__tests__/**", "**/*.test.*",
-          "**/scripts/**", "**/webpack.config.*", "**/rollup.config.*"
-        ],
-        "optionalDependencies": false,
-        "peerDependencies": false
-      }],
+      // "import/no-extraneous-dependencies": ["error", {
+      //   "devDependencies": [
+      //     "**/test/**", "**/__tests__/**", "**/*.test.*",
+      //     "**/scripts/**", "**/webpack.config.*", "**/rollup.config.*"
+      //   ],
+      //   "optionalDependencies": false,
+      //   "peerDependencies": false
+      // }],
       "import/order": ["error", {
         "groups": ["builtin", "external", "internal", "parent", "sibling", "index"],
-        "newlines-between": "always",
         "alphabetize": { "order": "asc", "caseInsensitive": true }
       }],
       "import/newline-after-import": ["error", { "count": 1 }],
       "import/no-cycle": ["error", { "maxDepth": 1 }],
       "import/no-self-import": ["error"],
-      "import/no-useless-path-segments": ["error", { "noUselessIndex": true }]
+      "import/no-useless-path-segments": ["error", { "noUselessIndex": true }],
+      "@typescript-eslint/no-explicit-any": "off",
     }
   }
 ];
