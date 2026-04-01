@@ -8,7 +8,7 @@ import Papa from 'papaparse';
 import Encoding from 'encoding-japanese';
 import cronParser from "cron-parser";
 import cronstrue from "cronstrue"
-import { embeddedApp } from "../store/embeddedAppAuth";
+import { useEmbeddedAppStore } from "../store/embeddedApp";
 
 export interface JsonToCsvOption {
   parse?: object | null;
@@ -363,7 +363,7 @@ const telecomCode = {
 } as any;
 
 const getMaargURL = () => {
-  const maarg = embeddedApp().maarg || cookieHelper().get("maarg")
+  const maarg = useEmbeddedAppStore().maarg || cookieHelper().get("maarg")
   let maargURL = ""
   if (maarg) {
     maargURL = maarg.startsWith('http') ? maarg.includes('/rest/s1') ? maarg : `${maarg}/rest/s1/` : `https://${maarg}.hotwax.io/rest/s1/`;
@@ -372,11 +372,11 @@ const getMaargURL = () => {
 }
 
 const getMaargBaseURL = () => {
-  return embeddedApp().maarg ||  cookieHelper().get("maarg")
+  return useEmbeddedAppStore().maarg ||  cookieHelper().get("maarg")
 }
 
 const getOmsURL = () => {
-  const oms = embeddedApp().oms || cookieHelper().get("oms")
+  const oms = useEmbeddedAppStore().oms || cookieHelper().get("oms")
   let omsURL = ""
   if (oms) {
     omsURL = oms.startsWith('http') ? oms.includes('/api') ? oms : `${oms}/api/` : `https://${oms}.hotwax.io/api/`
@@ -385,15 +385,15 @@ const getOmsURL = () => {
 }
 
 const getToken = () => {
-  return embeddedApp().token.value || cookieHelper().get("token")
+  return useEmbeddedAppStore().token.value || cookieHelper().get("token")
 }
 
 const getTokenExpiration = () => {
-  return embeddedApp().token.expiration || cookieHelper().get("expirationTime")
+  return useEmbeddedAppStore().token.expiration || cookieHelper().get("expirationTime")
 }
 
 const isAppEmbedded = () => {
-  return !!embeddedApp().shopifyAppBridge
+  return !!useEmbeddedAppStore().shopifyAppBridge
 }
 
 const getStatusColor = (statusId: string) => {

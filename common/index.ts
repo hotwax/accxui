@@ -14,7 +14,7 @@ import { createDxpI18n, i18n, translate } from './core/i18n'
 
 import { firebaseMessaging } from './core/firebaseMessaging'
 import { useNotificationStore } from './store/notification'
-import { embeddedApp } from './store/embeddedAppAuth'
+import { useEmbeddedAppStore } from './store/embeddedApp'
 import ShopifyService from './core/ShopifyService'
 
 // ✅ These are pure types (erased during build)
@@ -36,5 +36,5 @@ export {
   ShopifyService,
   translate,
   useNotificationStore,
-  embeddedApp
+  useEmbeddedAppStore
 }

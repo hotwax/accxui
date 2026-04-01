@@ -1,11 +1,11 @@
 import { Scanner, Features, Group, Redirect } from '@shopify/app-bridge/actions';
-import { embeddedApp } from "../store/embeddedAppAuth";
+import { useEmbeddedAppStore } from "../store/embeddedApp";
 import { createApp } from "@shopify/app-bridge";
 import { getSessionToken } from "@shopify/app-bridge-utils";
 import api from '../core/remoteApi';
 
 export function useShopify() {
-  const store = embeddedApp();
+  const store = useEmbeddedAppStore();
 
   const createShopifyAppBridge = async (shop: string, host: string) => {
   try {
@@ -87,8 +87,8 @@ const openPosScanner = (): Promise<any> => {
 
   const appBridgeLogin = async (shop: string, host: string) => {
     try {
-      if (!shop) shop = embeddedApp().shop
-      if (!host) host = embeddedApp().host
+      if (!shop) shop = useEmbeddedAppStore().shop
+      if (!host) host = useEmbeddedAppStore().host
 
       if (!shop || !host) {
         throw new Error("Shop or host missing");

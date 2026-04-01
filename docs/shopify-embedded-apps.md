@@ -51,7 +51,7 @@ To manage common variables (like Shopify tokens, OMS identifier, and layout conf
 ```typescript
 import { defineStore } from 'pinia';
 
-export const useEmbeddedAppStore = defineStore('embeddedAppStore', {
+export const useEmbeddedAppStore = defineStore('embeddedApp', {
   state: () => ({
     token: {
       value: '',

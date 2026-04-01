@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia';
 
-export const embeddedApp = defineStore('embeddedAppStore', {
+export const useEmbeddedAppStore = defineStore('embeddedApp', {
   state: () => ({
     token: {
       value: '',
