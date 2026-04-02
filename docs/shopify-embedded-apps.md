@@ -2,9 +2,9 @@
 
 ## 1. Flow Diagram
 
-Here is the updated sequence diagram. The standalone `ShopifyService` has been removed, and its responsibilities have been absorbed directly into the `useShopify` Composable. 
+Here is the sequence diagram illustrating the embedded app authentication flow using the `useShopify` Composable. 
 
-The primary entry point is `appBridgeLogin`, which sequentially orchestrates creating the bridge, fetching the token, and calling the backend login API.
+The primary entry point is `appBridgeLogin`, which sequentially orchestrates creating the bridge, fetching the token, and calling the backend login API to yield the authentication credentials (`omsInstanceUrl`, `token`, and `expiresAt`).
 
 ```mermaid
 sequenceDiagram
@@ -18,19 +18,19 @@ sequenceDiagram
 
     Merchant->>Shopify: Opens Custom App in Shopify Admin
     Shopify->>Page: Loads App iframe (passes ?host=...&apiKey=... in URL)
-    Page->>Composable: Calls appBridgeLogin(apiKey, host)
+    Page->>Composable: Calls appBridgeLogin(shop, host)
     
     rect rgba(164, 169, 177, 1)
     Note over Composable: Step 1: Initialization
-    Composable->>Composable: createShopifyAppBridge(apiKey, host)
+    Composable->>Composable: createShopifyAppBridge(shop, host)
     Composable->>Store: Stores apiKey, host, and Bridge Instance
     
     Note over Composable: Step 2: Token Generation
-    Composable->>Composable: getSessionTokenFromShopify()
+    Composable->>Composable: getSessionTokenFromShopify(appBridgeConfig)
     
     Note over Composable: Step 3: Backend Authentication
     Composable->>API: login() (API call with Session Token)
-    API-->>Composable: 200 OK (Auth Successful)
+    API-->>Composable: 200 OK (Returns omsInstanceUrl, token, expiresAt)
     end
     
     Composable-->>Page: Returns true (Success)
@@ -41,7 +41,7 @@ sequenceDiagram
 
 ## 2. Design Analysis & Suggestions
 
-By eliminating `ShopifyService` and moving everything into the `useShopify` composable, you consolidate your authentication orchestration into a single, cohesive file.
+By centralizing everything into the `useShopify` composable, we consolidate the authentication orchestration into a single, cohesive module.
 
 ### A. Pinia State Definition (`embeddedAppStore`)
 
@@ -275,7 +275,7 @@ const openPosScanner = (): Promise<any> => {
 
 ### C. Route Guard vs Component Handling
 
-Because you eliminated the `ShopifyService` singleton layer, you must ensure that whatever component or router guard invokes `appBridgeLogin` does it safely when the app loads. In `Shopify.vue`:
+You must ensure that whatever component or router guard invokes `appBridgeLogin` does it safely when the app loads. In `Shopify.vue`:
 
 ```typescript
 import { onMounted } from 'vue';
