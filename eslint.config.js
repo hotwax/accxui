@@ -62,6 +62,7 @@ export default [
       "vue/html-indent": ["error", 2],
       "vue/max-attributes-per-line": ["warn", { "singleline": 10, "multiline": 1 }],
       "vue/html-closing-bracket-newline": ["error", { "singleline": "never", "multiline": "always" }],
+      "vue/html-quotes": ["error", "double"],
       "@stylistic/quotes": ["error", "double"],
       // "@stylistic/semi": ["error", "never"],
       "@stylistic/indent": ["error", 2],

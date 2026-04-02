@@ -127,22 +127,38 @@ export default {
 ></div>
 ```
 
+### `vue/html-quotes`
+- **Configuration**: `["error", "double"]`
+- **Description**: Enforces double quotes in HTML attributes in `<template>`.
+
+**Incorrect:**
+```html
+<div class='my-class'></div>
+```
+
+**Correct:**
+```html
+<div class="my-class"></div>
+```
+
 ---
 
 ## Stylistic Rules <a name="stylistic-rules"></a>
 
 ### `@stylistic/quotes`
 - **Configuration**: `["error", "double"]`
-- **Description**: Enforces the use of double quotes.
+- **Description**: Enforces the use of double quotes. Single quotes are not allowed even if the string contains double quotes (e.g., `"He said 'Hello'"` is valid, `'He said "Hello"'` is not).
 
 **Incorrect:**
 ```javascript
 const message = 'Hello World';
+const quote = 'He said "Hello"';
 ```
 
 **Correct:**
 ```javascript
 const message = "Hello World";
+const quote = "He said 'Hello'";
 ```
 
 ---
