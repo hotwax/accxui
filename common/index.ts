@@ -3,6 +3,7 @@ import DxpShopifyImg from "./components/DxpShopifyImg.vue"
 import emitter from './core/emitter'
 import { commonUtil } from './utils/commonUtil'
 import { useSolrSearch } from './composables/useSolrSearch'
+import { useShopify } from './composables/useShopify'
 import logger from './core/logger'
 import { cookieHelper } from './helpers/cookieHelper'
 import { moduleFederationUtil } from './utils/moduleFederationUtil'
@@ -13,6 +14,7 @@ import { createDxpI18n, i18n, translate } from './core/i18n'
 
 import { firebaseMessaging } from './core/firebaseMessaging'
 import { useNotificationStore } from './store/notification'
+import { useEmbeddedAppStore } from './store/embeddedApp'
 import ShopifyService from './core/ShopifyService'
 
 // ✅ These are pure types (erased during build)
@@ -30,7 +32,9 @@ export {
   logger,
   moduleFederationUtil,
   useSolrSearch,
+  useShopify,
   ShopifyService,
   translate,
-  useNotificationStore
+  useNotificationStore,
+  useEmbeddedAppStore
 }

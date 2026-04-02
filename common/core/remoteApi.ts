@@ -3,11 +3,10 @@ import { StatusCodes } from 'http-status-codes';
 import { setupCache } from 'axios-cache-adapter'
 import qs from "qs"
 import merge from 'deepmerge'
-import { cookieHelper } from '../helpers/cookieHelper';
 import { commonUtil } from '../utils/commonUtil';
 
 const requestInterceptor = async (config: any) => {
-  const token = cookieHelper().get('token');
+  const token = commonUtil.getToken();
   if (token) {
     config.headers["Authorization"] = "Bearer " + token;
     config.headers['Content-Type'] = 'application/json';
