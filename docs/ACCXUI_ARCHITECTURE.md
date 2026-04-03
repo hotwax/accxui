@@ -47,6 +47,7 @@ graph TD
             Composables["Composables (useSolrSearch, validation)"]
             Utils["Utils (commonUtil, cookieHelper)"]
             Stores["Shared Stores (notifications)"]
+            Theme["Theming (theme.css, settings.css)"]
         end
     end
     
@@ -109,6 +110,9 @@ sequenceDiagram
 - **Integrated Services**:
   - `ShopifyService`: Core logic for Shopify-integrated features.
   - `firebaseMessaging`: Support for push notifications.
+- **Theming (`common/css`)**:
+  - `theme.css`: Standardized CSS variables (spacers, colors) and utility classes (list-item, empty-state).
+  - `settings.css`: Reusable styles for application settings and configuration views.
 
 ### 4.3 App Building Pattern (How to build using common functionality)
 When building a new app in AccxUI, follow this pattern:
@@ -129,7 +133,8 @@ When building a new app in AccxUI, follow this pattern:
 5.  **API Communication**:
     - Always use the `api` or `client` exports from `@common` for any network requests.
 6.  **Theming**:
-    - Utilize `@hotwax/apps-theme` and Ionic components for a consistent visual identity.
+    - Import `@common/css/theme.css` and `@common/css/settings.css` in the app's main entry point (e.g., `index.ts`) to ensure a consistent visual identity.
+    - Use local `variables.css` for app-specific overrides.
 
 ## 5. Data State & Storage Strategy
 
