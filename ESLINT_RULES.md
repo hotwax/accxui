@@ -8,6 +8,7 @@ This guide provides an overview of the ESLint rules configured for this project,
 3. [ESLint Core Rules](#eslint-core-rules)
 4. [TypeScript Rules](#typescript-eslint-rules)
 5. [Import Rules](#import-rules)
+6. [Project Specific Rules](#project-specific-rules)
 
 ---
 
@@ -865,4 +866,107 @@ import { something } from './utils/index';
 **Correct:**
 ```javascript
 import { something } from './utils';
+```
+
+---
+
+## Project Specific Rules <a name="project-specific-rules"></a>
+
+The rules in this section are specific to our project's architecture and naming conventions, designed to maintain consistency and enforce best practices throughout the codebase.
+
+### `no-restricted-imports` (Architectural Restriction)
+- **Configuration**: Applied specifically to `@common` and `api`, `client`.
+- **Description**: Disallows direct import of `api` or `client` from the `@common` directory within `.vue` files.
+- **Why**: To maintain a clean separation of concerns and ensure that Vue components interact with the backend only through services or composables, promoting consistency and reusability.
+
+**Incorrect:**
+```vue
+<script setup>
+import { api } from "@common"; // Restricted import
+</script>
+```
+
+**Correct:**
+```vue
+<script setup>
+import { userService } from "@/services"; // Use service instead
+</script>
+```
+
+---
+
+### `no-restricted-syntax` (API Call Restriction)
+- **Configuration**: Enforces that `api()` or `client()` are not called directly within `.vue` files.
+- **Description**: Disallows calling functions named `api` or `client` directly in Vue components.
+- **Why**: This ensures that components don't make direct API calls, promoting reuse through services and simplifying component logic.
+
+**Incorrect:**
+```vue
+<script setup>
+const result = api("/users"); // Prohibited call
+</script>
+```
+
+**Correct:**
+```vue
+<script setup>
+const result = userService.getUsers(); // Use service method instead
+</script>
+```
+
+---
+
+### `no-restricted-syntax` (Composable Naming)
+- **Configuration**: Enforces that exported functions in `composables/*.ts` start with `use`.
+- **Description**: All composable functions must follow the `use` prefix convention. This applies to both named `function` declarations and arrow functions.
+- **Why**: Standardizes the naming of Vue composables, making them easily identifiable as reactive logic abstractions.
+
+**Incorrect:**
+```typescript
+export function getAuthStatus() { ... } // Should start with 'use'
+export const fetchUser = () => { ... } // Should start with 'use'
+```
+
+**Correct:**
+```typescript
+export function useAuthStatus() { ... }
+export const useFetchUser = () => { ... }
+```
+
+---
+
+### `no-restricted-syntax` (Store Naming)
+- **Configuration**: Enforces that Pinia stores in `store/*.ts` follow the `use...Store` naming pattern.
+- **Description**: Store names must start with `use` and end with `Store`.
+- **Why**: Maintains consistency across all Pinia store definitions, following the standard convention for store usage in Vue.
+
+**Incorrect:**
+```typescript
+export const userStore = defineStore("user", { ... }); // Should follow use...Store
+```
+
+**Correct:**
+```typescript
+export const useUserStore = defineStore("user", { ... });
+```
+
+---
+
+### `local/i18n-check-keys` (Translation Key Check)
+- **Configuration**: `"error"`
+- **Description**: Ensures that any literal string passed to the `translate()` method exists as a key in the application's `locales/en.json` file.
+- **Why**: Prevents missing translations and ensures that all user-facing text is properly documented in the locale files before the app is deployed.
+
+**Incorrect:**
+```vue
+<script setup>
+const label = translate("Missing Key"); // "Missing Key" is not in en.json
+</script>
+```
+
+**Correct:**
+```vue
+<script setup>
+const label = translate("Login"); // "Login" exists in en.json
+</script>
 ```

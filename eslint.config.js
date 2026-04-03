@@ -1,3 +1,5 @@
+import fs from "fs";
+import path from "path";
 import js from "@eslint/js";
 import pluginVue from "eslint-plugin-vue";
 import vueParser from "vue-eslint-parser";
@@ -7,6 +9,38 @@ import stylistic from "@stylistic/eslint-plugin";
 import typescriptEslint from "@typescript-eslint/eslint-plugin";
 import typescriptParser from "@typescript-eslint/parser";
 import globals from "globals";
+
+const localesCache = new Map();
+
+function getEnKeys(filePath) {
+  let currentDir = path.dirname(filePath);
+  const root = path.parse(filePath).root;
+
+  while (currentDir !== root) {
+    // Try src/locales/en.json (if we are at app root)
+    let localePath = path.join(currentDir, "src", "locales", "en.json");
+    if (!fs.existsSync(localePath)) {
+      // Try locales/en.json (if we are already in src)
+      localePath = path.join(currentDir, "locales", "en.json");
+    }
+
+    if (fs.existsSync(localePath)) {
+      if (localesCache.has(localePath)) {
+        return localesCache.get(localePath);
+      }
+      try {
+        const content = JSON.parse(fs.readFileSync(localePath, "utf8"));
+        const keys = Object.keys(content);
+        localesCache.set(localePath, keys);
+        return keys;
+      } catch (e) {
+        return [];
+      }
+    }
+    currentDir = path.dirname(currentDir);
+  }
+  return [];
+}
 
 export default [
   {
@@ -46,6 +80,31 @@ export default [
     plugins: {
       import: eslintPluginImport,
       "@stylistic": stylistic,
+      "local": {
+        rules: {
+          "i18n-check-keys": {
+            create(context) {
+              return {
+                CallExpression(node) {
+                  if (node.callee.name === "translate") {
+                    const firstArg = node.arguments[0];
+                    if (firstArg && firstArg.type === "Literal" && typeof firstArg.value === "string") {
+                      const key = firstArg.value;
+                      const enKeys = getEnKeys(context.filename);
+                      if (enKeys.length > 0 && !enKeys.includes(key)) {
+                        context.report({
+                          node,
+                          message: `Translation key "${key}" is missing in en.json`,
+                        });
+                      }
+                    }
+                  }
+                }
+              };
+            }
+          }
+        }
+      }
     },
     settings: {
       "import/resolver": {
@@ -77,11 +136,13 @@ export default [
         "asyncArrow": "always"
       }],
       "@stylistic/space-in-parens": ["error", "never"],
-      "@stylistic/keyword-spacing": ["error", { "before": true, "after": true, "overrides": {
-        "if": { "after": false },
-        "for": { "after": false },
-        "while": { "after": false }
-      } }],
+      "@stylistic/keyword-spacing": ["error", {
+        "before": true, "after": true, "overrides": {
+          "if": { "after": false },
+          "for": { "after": false },
+          "while": { "after": false }
+        }
+      }],
       "@stylistic/spaced-comment": ["error", "always", { "markers": ["/"] }],
       "@stylistic/eol-last": ["error", "always"],
       "@stylistic/no-trailing-spaces": ["error"],
@@ -159,6 +220,58 @@ export default [
       "import/no-self-import": ["error"],
       "import/no-useless-path-segments": ["error", { "noUselessIndex": true }],
       "@typescript-eslint/no-explicit-any": "off",
+      "local/i18n-check-keys": "error",
+    }
+  },
+  {
+    files: ["**/*.vue"],
+    rules: {
+      "no-restricted-imports": ["error", {
+        "paths": [{
+          "name": "@common",
+          "importNames": ["api", "client"],
+          "message": "Direct import of 'api' or 'client' is not allowed in vue files. Please use services or composables instead."
+        }]
+      }],
+      "no-restricted-syntax": [
+        "error",
+        {
+          "selector": "CallExpression[callee.name='api']",
+          "message": "Calling 'api' directly in vue files is not allowed. Use services or composables for API calls."
+        },
+        {
+          "selector": "CallExpression[callee.name='client']",
+          "message": "Calling 'client' directly in vue files is not allowed. Use services or composables for API calls."
+        }
+      ]
+    }
+  },
+  {
+    files: ["**/composables/*.ts"],
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        {
+          "selector": "ExportNamedDeclaration > FunctionDeclaration[id.name!=/^use.*/]",
+          "message": "Composable function names must start with 'use'."
+        },
+        {
+          "selector": "ExportNamedDeclaration > VariableDeclaration > VariableDeclarator[init.type='ArrowFunctionExpression'][id.name!=/^use.*/]",
+          "message": "Composable arrow function names must start with 'use'."
+        }
+      ]
+    }
+  },
+  {
+    files: ["**/store/*.ts"],
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        {
+          "selector": "VariableDeclarator[init.type='CallExpression'][init.callee.name='defineStore'][id.name!=/^use.*Store$/]",
+          "message": "Store names must start with 'use' and end with 'Store' (e.g., useUserStore)."
+        }
+      ]
     }
   }
 ];
