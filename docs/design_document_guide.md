@@ -27,18 +27,21 @@ Dependencies (APIs, modules, systems)
 ### 4.1 High-Level Design
 Architecture overview
 Feature flow summary
+Vue Composables used
 
-### 4.2 Diagrams
+### 4.2 UI Mockup
+Figma links or document describing the UI behavior
+
+### 4.3 Diagrams
 Sequence diagram
 Data flow diagram
 Component interaction (if needed)
 
-### 4.3 Data State & Storage Strategy
-#### 4.3.1 Pinia State Structure
-#### 4.3.2 Indexed DB Structure
-#### 4.3.3 Local Storage/Caching strategy
-
-#### 4.3.4 Data Flow & Sync
+### 4.4 Data State & Storage Strategy
+#### 4.4.1 Pinia State Structure
+#### 4.4.2 Indexed DB Structure
+#### 4.4.3 Local Storage/Caching strategy
+#### 4.4.4 Data Flow & Sync
 - API → Store → UI
 - UI → Store → API
 - Offline handling
@@ -50,10 +53,10 @@ Component interaction (if needed)
 3. If offline → queue updates
 4. Sync when online
 
-### 4.4 Pseudocode / Logic Flow
+### 4.5 Pseudocode / Logic Flow
 Core logic (high-level)
 
-### 4.5 Alternatives Considered
+### 4.6 Alternatives Considered
 Other approaches evaluated
 Why rejected
 
