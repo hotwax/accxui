@@ -107,6 +107,33 @@ hr {
 .cursor-pointer {
   cursor: pointer;
 }
+/* End of classes to create row based layouts */
+
+/* fixing wrapping on ion-toast */
+.toast-message {
+  --white-space: pre-wrap !important;
+}
+
+/* class used for text placed above primary information */
+.overline {
+  font-weight: 500 !important;
+  font-size: 10px !important;
+  line-height: 16px !important;
+  letter-spacing: 1.5px;
+  color: #666;
+  text-transform: uppercase !important;
+ }
+
+/* fixing image scaling logic to prevent distortion and overflow */
+ion-thumbnail > img {
+  object-fit: contain;
+}
+
+/* fixing slot end not pushing element to complete right inside ion-item */
+ion-item > *[slot="end"] {
+  flex-grow: unset !important;
+}
+
 
 /* Tablet media query for row based layouts */
 @media (min-width: 700px) {
@@ -137,34 +164,6 @@ hr {
   .list-item .tablet {
     display: unset;
   }
-}
-
-/* End of classes to create row based layouts */
-
-
-/* fixing wrapping on ion-toast */
-.toast-message {
-  --white-space: pre-wrap !important;
-}
-
-/* class used for text placed above primary information */
-.overline {
-  font-weight: 500 !important;
-  font-size: 10px !important;
-  line-height: 16px !important;
-  letter-spacing: 1.5px;
-  color: #666;
-  text-transform: uppercase !important;
- }
-
-/* fixing image scaling logic to prevent distortion and overflow */
-ion-thumbnail > img {
-  object-fit: contain;
-}
-
-/* fixing slot end not pushing element to complete right inside ion-item */
-ion-item > *[slot="end"] {
-  flex-grow: unset !important;
 }
 
 /* optimzing chip and item border color for dark mode */
