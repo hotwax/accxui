@@ -17,7 +17,6 @@
     "@capacitor/keyboard": "7.0.3",
     "@capacitor/status-bar": "7.0.3",
     "@casl/ability": "^6.7.3",
-    "@hotwax/apps-theme": "^1.2.8",
     "@ionic/vue": "^8.0.0",
     "@module-federation/runtime": "^0.7.7",
     "@shopify/app-bridge": "^3.7.11",

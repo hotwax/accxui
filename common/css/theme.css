@@ -1,0 +1,189 @@
+/** Spacer variables **/
+body {
+  --spacer-2xs: 0.25rem; /* 4px */
+  --spacer-xs: 0.5rem;   /* 8px */
+  --spacer-sm: 1rem;     /* 16px */
+  --spacer-base: 1.5rem; /* 24px */
+  --spacer-lg: 2rem;     /* 32px */
+  --spacer-xl: 2.5rem;   /* 40px */
+  --spacer-2xl: 5rem;    /* 80px */
+  --spacer-3xl: 10rem;   /* 160px */
+}
+
+ion-split-pane {
+  --side-width: 304px;
+}
+
+/* Default spinner size when used inside button */
+/* Use case: putting spinner inside buttons can cause UI distortions like the spinner being larger than the actual button itself resulting in a cropped spinner */
+
+/* Using height and width relative to its parent element. */
+ion-button > ion-spinner {
+  height: 1em;
+  width: 1em;
+  font-size: 1.35em;
+}
+
+/* Classes to create row based layouts */
+
+/* Apply 'list-item' class on parent wrapper of items constituing the columns of a row */
+.list-item {
+  /* select the number of columns to show on each device type */
+  --columns-mobile: 2;
+  --columns-tablet: 5;
+  --columns-desktop: 8;
+  /* default to mobile view */
+  --col-calc: var(--columns-mobile);
+  /* user will input the amount of columns seen on screen, but the last column is always visible and is spaced differently from other columns so it is reduced from column count */
+  --implicit-columns: calc(var(--col-calc) - 1);
+  display: grid;
+  /* all columns except the last one are spaced evenly */
+  grid-template-columns: repeat(var(--implicit-columns), 1fr) max-content;
+  justify-items: center;
+  align-items: center;
+}
+
+.list-item:hover {
+  --list-item-bg-hover: var(--ion-color-light);
+  background: var(--list-item-bg-hover);
+  cursor: pointer;
+}
+
+.list-item ion-item {
+  --background: var(--list-item-bg-hover);
+}
+
+/* Hides all columns first so that smaller devices don't overflow horizontally */
+.list-item > * {
+  display: none;
+}
+
+/* Show the last column which usually contains the CTA of the row and make sure its right aligned*/
+.list-item > *:last-child {
+  display: unset;
+  justify-self: end;
+}
+
+/* Center all column labels that are not in the last or first column */
+.list-item > ion-label {
+  text-align: center;
+}
+
+/* Show the first column which usually contains the primary information for the row and make sure its left aligned */
+.list-item > *:first-child {
+  display: unset;
+  justify-self: start
+}
+
+.list-item > ion-item:first-child {
+  width: 100%;
+}
+
+/* Add a border to the top of the row item. Using border top so that the last item doesn't have a border below it */
+hr {
+  border-top: 1px solid var(--ion-color-medium);
+}
+
+/* Align item in center and giving padding to all sides */
+.empty-state {
+  max-width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: var(--spacer-sm);
+}
+
+/* To fully show the image in the empty-state instead of any crops */
+.empty-state > img {
+  object-fit: contain;
+}
+
+/* To center align the content inside <p> */
+.empty-state > p {
+  text-align: center;
+}
+
+.cursor-pointer {
+  cursor: pointer;
+}
+
+/* Tablet media query for row based layouts */
+@media (min-width: 700px) {
+  /* show the number of columns entered in the tablet columns CSS variable */
+  .list-item {
+    --col-calc: var(--columns-tablet);
+  }
+
+  /* show columns that are tagged with 'tablet' class */
+  .list-item .tablet {
+    display: unset;
+  }
+}
+
+/* Desktop media query for row based layouts */
+@media (min-width: 991px) {
+  /* show the number of columns entered in the desktop columns CSS variable */
+  .list-item {
+    --col-calc: var(--columns-desktop);
+  }
+
+  /* show all columns now regardless of class and column count */
+  .list-item > * {
+    display: unset;
+  }
+
+  /* make sure tablet columns are still shown */
+  .list-item .tablet {
+    display: unset;
+  }
+}
+
+/* End of classes to create row based layouts */
+
+
+/* fixing wrapping on ion-toast */
+.toast-message {
+  --white-space: pre-wrap !important;
+}
+
+/* class used for text placed above primary information */
+.overline {
+  font-weight: 500 !important;
+  font-size: 10px !important;
+  line-height: 16px !important;
+  letter-spacing: 1.5px;
+  color: #666;
+  text-transform: uppercase !important;
+ }
+
+/* fixing image scaling logic to prevent distortion and overflow */
+ion-thumbnail > img {
+  object-fit: contain;
+}
+
+/* fixing slot end not pushing element to complete right inside ion-item */
+ion-item > *[slot="end"] {
+  flex-grow: unset !important;
+}
+
+/* optimzing chip and item border color for dark mode */
+@media (prefers-color-scheme: dark) {
+  ion-chip > ion-icon {
+    color: var(--ion-color-dark);
+  }
+
+  .chip-outline {
+    border-color: var(--ion-color-dark);
+  }
+
+  ion-item {
+    --border-color: var(--ion-color-medium)
+  }
+}
+
+@media (display-mode: standalone) {
+  [standalone-hidden="true"] {
+    display: none;
+  }
+}

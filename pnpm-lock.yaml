@@ -30,9 +30,6 @@ importers:
       '@casl/ability':
         specifier: ^6.7.3
         version: 6.8.0
-      '@hotwax/apps-theme':
-        specifier: ^1.2.8
-        version: 1.4.0
       '@ionic/vue':
         specifier: ^8.0.0
         version: 8.8.1(@stencil/core@4.1.0)(vue-router@4.6.4(vue@3.5.30(typescript@5.9.3)))(vue@3.5.30(typescript@5.9.3))
@@ -232,9 +229,6 @@ importers:
       '@hotwax/app-version-info':
         specifier: ^1.0.0
         version: 1.0.0
-      '@hotwax/apps-theme':
-        specifier: ^1.2.6
-        version: 1.4.0
       '@ionic/core':
         specifier: ^8.8.0
         version: 8.8.1
