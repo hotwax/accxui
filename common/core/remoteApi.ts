@@ -28,7 +28,7 @@ const responseErrorInterceptor = (error: any) => {
   if (error.response) {
     const { status } = error.response;
     if (status == StatusCodes.UNAUTHORIZED) {
-      if (apiConfig.events.unauthorised) apiConfig.events.unauthorised(error);
+      if (apiConfig.events.unauthorised) apiConfig.events.unauthorised({ isUserUnauthorised: true });
     }
   }
   // Any status codes that falls outside the range of 2xx cause this function to trigger
