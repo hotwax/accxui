@@ -164,10 +164,6 @@ const openPosScanner = (): Promise<any> => {
     }
   };
 
-  const getApp = () => {
-    return store.shopifyAppBridge;
-  }
-
   const redirect = (url: string) => {
     if (store.shopifyAppBridge) {
       Redirect.create(store.shopifyAppBridge).dispatch(Redirect.Action.REMOTE, url);
@@ -197,7 +193,6 @@ const openPosScanner = (): Promise<any> => {
     createShopifyAppBridge,
     getSessionTokenFromShopify,
     openPosScanner,
-    getApp,
     redirect
   };
 }
