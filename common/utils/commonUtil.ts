@@ -422,7 +422,12 @@ const getStatusColor = (statusId: string) => {
     "DmlsFinished": "success",
     "DmlsPending": "light",
     "DmlsQueued": "primary",
-    "DmlsRunning": "medium"
+    "DmlsRunning": "medium",
+    "CYCLE_CNT_CREATED": "medium",
+    "CYCLE_CNT_IN_PRGS": "primary",
+    "SmsgSending": "medium",
+    "SmsgSent": "success",
+    "SmsgError": "danger"
   } as Record<string, string>
 
   return statusColor[statusId] || "primary"
@@ -757,11 +762,38 @@ function parseCronExpression(cronExpression: any, timeZone?: string) {
   return cronParser.parseExpression(cronExpression, timeZone ? { tz: timeZone } : {})
 }
 
+// Helper to convert date string (YYYY-MM-DD) to ISO start/end of day
+const formatDateTime = (dateStr: string, format?: string | null, endOfDay = false) => {
+  if (!dateStr) return '';
+  const dt = DateTime.fromISO(dateStr);
+  const final = endOfDay ? dt.endOf('day') : dt.startOf('day');
+  return format ? final.toFormat(format) : final.toFormat("yyyy-MM-dd HH:mm:ss.SSS");
+}
+
+function getDateTimeWithOrdinalSuffix(time: any) {
+  if (!time) return "-";
+  const dateTime = DateTime.fromMillis(time);
+  const suffix = dateOrdinalSuffix[dateTime.day] || "th";
+  return `${dateTime.toFormat("h:mm a d")}${suffix} ${dateTime.toFormat("MMM yyyy")}`;
+}
+
+const getFacilityChipLabel = (selectedFacilityIds: string[], facilities: any[]): string => {
+  if (selectedFacilityIds.length === 0) {
+    return translate('All');
+  } else if (selectedFacilityIds.length === 1) {
+    const facility = facilities.find((f: any) => f.facilityId === selectedFacilityIds[0]);
+    return facility?.facilityName || selectedFacilityIds[0];
+  } else {
+    return `${selectedFacilityIds.length} ${translate('facilities')}`;
+  }
+};
+
 export const commonUtil = {
   copyToClipboard,
   downloadCsv,
   formatCurrency,
   formatDate,
+  formatDateTime,
   formatPhoneNumber,
   formatUtcDate,
   generateInternalId,
@@ -771,7 +803,9 @@ export const commonUtil = {
   getDate,
   getDateAndTime,
   getDateAndTimeShort,
+  getDateTimeWithOrdinalSuffix,
   getDateWithOrdinalSuffix,
+  getFacilityChipLabel,
   getFeature,
   getFeatures,
   getIdentificationId,
