@@ -50,4 +50,5 @@ export const useEmbeddedAppStore = defineStore('embeddedApp', {
       this.posContext = posContext;
     }
   },
+  persist: true
 });
