@@ -412,25 +412,83 @@ The structural dataflow maps exclusively:
 4.  **Pinia -> Interceptors (`commonUtil`)**: The local runtime utilizes reactive state implicitly.
 
 ## 6. Security & Permissions
+### 6.1 Location Filtering
 - Shopify Admin environments bypass standard localized cookies; hence Universal state handles authentication tokens cleanly avoiding restriction boundaries.
-- **Physical Segregation (Location Filtering)**: When running inside the Shopify POS context, state managers (`productStore.ts`) handle operations strictly mapped securely via `useEmbeddedAppStore().posContext.locationId`.
+- **Location Filtering**: When running inside the Shopify POS context, state managers (`productStore.ts`) handle operations strictly mapped securely via `useEmbeddedAppStore().posContext.locationId`.
 ```typescript
 // Only Location's facility for Shopify POS Users.
-if (commonUtil.isAppEmbedded() && useEmbeddedAppStore().posContext.locationId) {
-  resp = await api({
-    url: "oms/shopifyShops/locations",
-    method: "GET",
-    params: {
-      locationId: useEmbeddedAppStore().posContext.locationId
-    }
-  });
-
-  const locations = resp.data;
-  facilityIds = locations.map((location: any) => location.facilityId);
-  // ...
+const shopifyLocationId = useEmbeddedAppStore().posContext.locationId
+if (commonUtil.isAppEmbedded() && shopifyLocationId) {
+  const locationFacilityId = await this.fetchShopifyShopLocation({
+    shopifyLocationId,
+    pageSize: 1
+  })
+  if (locationFacilityId) facilityIds = facilityIds.filter((id: any) => id === locationFacilityId)
+  else facilityIds = [];
+  if (!facilityIds.length) {
+    return Promise.reject({
+      code: 'error',
+      message: 'Failed to fetch user facilities for Shopify POS location',
+      serverResponse: resp.data
+    })
+  }
 }
 ```
 This guarantees an isolated operational context blocking embedded POS users from accidentally interacting with invalid physical terminal parameters securely.
+
+
+### 6.2 Facility Preference Resolution (Shopify POS)
+When an app is running within a Shopify POS context, the default facility is determined by the mapping of the POS location to an internal facility. This ensures that POS users are automatically signed into the correct facility for their physical location.
+
+The `fetchFacilityPreference` action handles this by checking the `posContext.locationId`:
+
+```typescript
+async fetchFacilityPreference() {
+  if (!this.facilities.length) return;
+  let facilityId: string | undefined;
+  try {
+    const locationId = useEmbeddedAppStore().posContext.locationId;
+    if (commonUtil.isAppEmbedded() && locationId) {
+      // Map Shopify POS Location to internal Facility
+      facilityId = await this.fetchShopifyShopLocation({
+        shopifyLocationId: locationId,
+        pageSize: 1,
+      });
+      if (!facilityId) {
+        throw new Error("Failed to fetch location information. Please contact the administrator.");
+      }
+    } else {
+      // Fallback to standard user preference
+      const preferredFacilityResp = await api({
+        url: "admin/user/preferences",
+        method: "GET",
+        params: {
+          pageSize: 1,
+          userId: useUserStore().current.userId,
+          preferenceKey: "SELECTED_FACILITY"
+        },
+      }) as any;
+      facilityId = preferredFacilityResp.data?.[0]?.preferenceValue;
+    }
+
+    if (facilityId) {
+      const facility = this.facilities.find((f: any) => f.facilityId === facilityId);
+      if (!facility && commonUtil.isAppEmbedded() && locationId) {
+        throw new Error("User is not associated with this location. Please contact the administrator.");
+      }
+      if (facility) {
+        this.setCurrentFacility(facility)
+        return;
+      }
+    }
+  } catch (error) {
+    console.error("Failed to resolve facility preference:", error);
+  }
+  // Default fallback
+  this.currentFacility = this.facilities[0];
+}
+```
+
 
 ## 7. Verification Plan
 - **Route Guard Edge Cases**: Systematically test route traversal switching from `standalone` local host directly to `?embedded=1` contexts verifying tokens refresh unconditionally without `Login.vue` exposure.
