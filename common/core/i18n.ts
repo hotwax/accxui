@@ -7,8 +7,8 @@ let translate: any
 export function createDxpI18n(localeMessages: Record<string, any>) {
   i18n = createI18n({
     legacy: false,
-    locale: import.meta.env.VITE_VUE_APP_I18N_LOCALE || 'en-US',
-    fallbackLocale: import.meta.env.VITE_VUE_APP_I18N_FALLBACK_LOCALE || 'en-US',
+    locale: import.meta.env.VITE_I18N_LOCALE || 'en-US',
+    fallbackLocale: import.meta.env.VITE_I18N_FALLBACK_LOCALE || 'en-US',
     messages: localeMessages
   })
 

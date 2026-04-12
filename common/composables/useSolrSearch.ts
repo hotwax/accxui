@@ -1,5 +1,5 @@
-/* eslint-disable */
-import { DateTime } from 'luxon';
+import { commonUtil } from "../utils/commonUtil";
+import api from "../core/remoteApi"
 
 const prepareOrderQuery = (params: any) => {
   const viewSize = params.viewSize ? params.viewSize : import.meta.env.VITE_VIEW_SIZE;
@@ -144,7 +144,7 @@ const prepareOrderLookupQuery = (query: any) => {
         "q.op": "AND"
       } as any,
       "query": "*:*",
-      "filter": ["docType: ORDER", "orderTypeId: SALES_ORDER", "facilityId: " + query.facilityId]
+      "filter": ["docType: ORDER", "orderTypeId: SALES_ORDER"]
     }
   } as any
 
@@ -158,6 +158,16 @@ const prepareOrderLookupQuery = (query: any) => {
         "type": "terms",
         "facet": {
           "groups": "unique(orderId)"
+        }
+      },
+      "facilityNameFacet":{
+        "excludeTags":"orderLookupFilter",
+        "field":"facilityName",
+        "mincount":1,
+        "limit":-1,
+        "type":"terms",
+        "facet":{
+          "groups":"unique(orderId)"
         }
       },
       "salesChannelDescFacet": {
@@ -204,6 +214,9 @@ const prepareOrderLookupQuery = (query: any) => {
     payload.json.filter.push(`{!tag=orderLookupFilter}shipmentMethodTypeId: (${shipmentMethodTypeIdValues.join(" OR ")})`)
   }
 
+  if (query.facility?.length) {
+    payload.json.filter.push(`{!tag=orderLookupFilter}facilityName: (\"${query.facility.join('\" OR \"')}\")`)
+  }
   if (query.productStore?.length) {
     payload.json.filter.push(`{!tag=orderLookupFilter}productStoreName: (\"${query.productStore.join('\" OR \"')}\")`)
   }
@@ -236,9 +249,144 @@ const prepareOrderLookupQuery = (query: any) => {
   return payload
 }
 
-export const solrUtil = {
-  escapeSolrSpecialChars,
-  prepareOrderQuery,
-  prepareOrderLookupQuery,
-  prepareSolrQuery
+enum OPERATOR {
+  AND = 'AND',
+  BETWEEN = 'between',
+  CONTAINS = 'contains',
+  EQUALS = 'equals',
+  GREATER_THAN = 'greaterThan',
+  GREATER_THAN_EQUAL_TO = 'greaterThanEqualTo',
+  IN = 'in',
+  LESS_THAN = 'lessThan',
+  LESS_THAN_EQUAL_TO = 'lessThanEqualTo',
+  LIKE = 'like',
+  NOT = 'not',
+  NOT_EMPTY = 'not-empty',
+  NOT_EQUAL = 'notEqual',
+  NOT_LIKE = 'notLike',
+  OR = 'OR',
 }
+
+
+async function runSolrQuery(payload: any): Promise<any> {
+  return await api({
+    url: "admin/runSolrQuery",
+    method: "post",
+    data: payload
+  }) as any;
+}
+
+async function searchProducts(params: { keyword?: string, sort?: string, qf?: string, viewSize?: number, viewIndex?: number, filters?: any }): Promise<any> {
+  const rows = params.viewSize ?? 100
+  const start = rows * (params.viewIndex ?? 0)
+  const keyword = params.keyword?.trim();
+
+  const payload = {
+    "json": {
+      "params": {
+        rows,
+        start,
+        "qf": "productId^20 productName^40 internalName^30 search_goodIdentifications parentProductName",
+        "sort": "sort_productName asc",
+        "defType": "edismax"
+      },
+      "query": "*:*",
+      "filter": "docType: PRODUCT"
+    }
+  }
+
+  let keywordString = ""
+
+  if (keyword) {
+    // When the searched keyword startWith \", we will consider that user want to make an exact search
+    // otherwise we will tokenize the keyword
+    if (keyword.startsWith('\"')) {
+      // Using multiple replace function as replaceAll does not work due to module type
+      keywordString = keyword.replace('\"', "").replace('\"', "");
+    } else {
+      // create string in the format, abc* OR xyz* or qwe*
+      const keywordTokens = keyword.split(" ")
+      const tokens: Array<string> = []
+
+      keywordTokens.forEach((token: string) => {
+        const regEx = /[`!@#$%^&*()_+\-=\\|,.<>?~]/
+        if (regEx.test(token)) {
+          const matchedTokens = [...new Set(token.match(regEx))]
+          matchedTokens?.forEach((matchedToken: string) => {
+            tokens.push(token.split(matchedToken).join(`\\\\${matchedToken}`))
+          })
+        } else {
+          tokens.push(token)
+        }
+      })
+
+      keywordString = tokens.join(`* ${OPERATOR.OR} `)
+      // adding the original searched string with
+      keywordString += `* ${OPERATOR.OR} \"${keyword}\"^100`
+    }
+
+    if (keywordString) {
+      payload.json.query = `(${keywordString})`
+    }
+  } else {
+    params.qf && (payload.json.params.qf = params.qf)
+    params.sort && (payload.json.params.sort = params.sort)
+  }
+
+  if (params.filters) {
+    Object.keys(params.filters).forEach((key: any) => {
+      const filterValue = params.filters[key].value;
+
+      if (Array.isArray(filterValue)) {
+        const filterOperator = params.filters[key].op ? params.filters[key].op : OPERATOR.OR;
+        payload.json.filter += ` ${OPERATOR.AND} ${key}: (${filterValue.join(' ' + filterOperator + ' ')})`
+      } else {
+        payload.json.filter += ` ${OPERATOR.AND} ${key}: ${filterValue}`
+      }
+    })
+  }
+
+  if (!params.filters?.isVirtual) {
+    payload.json.filter += ` ${OPERATOR.AND} isVirtual: false`
+  }
+
+  try {
+    const resp = await api({
+      url: "admin/runSolrQuery",
+      method: "post",
+      data: payload
+    }) as any;
+
+    if (resp.status == 200 && !commonUtil.hasError(resp) && resp.data?.response?.numFound > 0) {
+
+      const product = resp.data.response.docs
+
+      return {
+        products: product,
+        total: resp.data.response.numFound
+      }
+    } else {
+      return {
+        products: {},
+        total: 0
+      }
+    }
+  } catch (err) {
+    return Promise.reject({
+      code: 'error',
+      message: 'Something went wrong',
+      serverResponse: err
+    })
+  }
+}
+
+export function useSolrSearch() {
+  return {
+    escapeSolrSpecialChars,
+    prepareOrderLookupQuery,
+    prepareOrderQuery,
+    prepareSolrQuery,
+    runSolrQuery,
+    searchProducts
+  }
+} 

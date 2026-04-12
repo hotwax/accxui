@@ -6,6 +6,8 @@ import { translate } from "../core/i18n";
 import { saveAs } from 'file-saver';
 import Papa from 'papaparse';
 import Encoding from 'encoding-japanese';
+import cronParser from "cron-parser";
+import cronstrue from "cronstrue"
 
 export interface JsonToCsvOption {
   parse?: object | null;
@@ -381,18 +383,28 @@ const getOmsURL = () => {
   return omsURL;
 }
 
-const getStatusColor = (statusId: string) => {
-  const statusColor = {
-    "DmlsCancelled": "danger",
-    "DmlsCrashed": "danger",
-    "DmlsFailed": "danger",
-    "DmlsFinished": "success",
-    "DmlsPending": "light",
-    "DmlsQueued": "primary",
-    "DmlsRunning": "medium"
-  } as Record<string, string>
+const statusColor = {
+  "DmlsCancelled": "danger",
+  "DmlsCrashed": "danger",
+  "DmlsFailed": "danger",
+  "DmlsFinished": "success",
+  "DmlsPending": "light",
+  "DmlsQueued": "primary",
+  "DmlsRunning": "medium",
+  "SmsgConsumed": "success",
+  "SmsgConfirmed": "success",
+  "SmsgProduced": "primary",
+  "SmsgReceived": "primary",
+  "SmsgSending": "primary",
+  "SmsgSent": "primary",
+  "SmsgConsuming": "primary",
+  "SmsgRejected": "warning",
+  "SmsgError": "danger",
+  "SmsgCancelled": "medium",
+} as Record<string, string>
 
-  return statusColor[statusId] || "primary"
+const getStatusColor = (statusId: string) => {
+  return statusColor[statusId] || "medium"
 }
 
 const handleDateTimeInput = (dateTimeValue: any) => {
@@ -423,6 +435,16 @@ const getFeatures = (productFeatures: any) => {
     ?.map((feature: string) => feature.substring(feature.indexOf("/") + 1)) // Not using split method as we may have features with value as `Size/N/S` and thus the only value returned is N when accessing 1st index considering that 1st index will have actual feature value, so we need to have some additional handling in case of split method
     ?.join(' ');
   return features || "";
+}
+
+const getFeature = (featureHierarchy: any, featureKey: string) => {
+  let featureValue = ''
+  if (featureHierarchy) {
+    const feature = featureHierarchy.find((featureItem: any) => featureItem.startsWith(featureKey))
+    const featureSplit = feature ? feature.split('/') : [];
+    featureValue = featureSplit[2] ? featureSplit[2] : '';
+  }
+  return featureValue;
 }
 
 const downloadCsv = (csv: any, fileName: any) => {
@@ -537,18 +559,26 @@ const formatCurrency = (amount: any, code: string) => {
 const getColorByDesc = (desc: string) => ({
   "Approved": "primary",
   "Authorized": "medium",
+  "Cancellation Requested": "medium",
   "Cancelled": "danger",
   "Completed": "success",
   "Created": "medium",
+  "default": "medium",
   "Declined": "danger",
+  "Expired": "warning",
   "Held": "warning",
+  "Hold": "warning",
   "Not-Authorized": "warning",
   "Not-Received": "warning",
   "Pending": "warning",
+  "Picked up": "success",
+  "Picking": "dark",
+  "Ready for pickup": "primary",
   "Received": "success",
   "Refunded": "success",
+  "Rejected": "warning",
+  "Reserved": "medium",
   "Settled": "success",
-  "default": "medium"
 } as any)[desc]
 
 const dateOrdinalSuffix = {
@@ -642,8 +672,62 @@ const getProductIdentificationValue = (productIdentifier: string, product: any) 
   return value;
 }
 
-const getOMSInstanceName = (instanceUrl: string) => {
-  return instanceUrl.split("-")[0].replace(new RegExp("^(https|http)://"), "").replace(new RegExp("/api.*"), "").replace(new RegExp(":.*"), "");
+const getOMSInstanceName = () => {
+  const instanceUrl = getOmsURL();
+  const hostname = instanceUrl.replace(/^(https?:\/\/)/, "").replace(/\/.*/, "").replace(/:.*/, "");             
+  return hostname.split(".")[0];
+};
+
+const sortSequence = (sequence: Array<any>, sortOnField = "sequenceNum") => {
+  // Currently, sorting is only performed on a single parameter, so if two sequence have same value for that parameter then they will be arranged in FCFS basis
+  // TODO: Need to check that if for the above case we need to define the sorting on name as well, when previous param is same
+  return sequence.sort((a: any, b: any) => {
+    if(a[sortOnField] === b[sortOnField]) return 0;
+
+    // Sort undefined values at last
+    if(a[sortOnField] == undefined) return 1;
+    if(b[sortOnField] == undefined) return -1;
+
+    return a[sortOnField] - b[sortOnField]
+  })
+}
+
+const getTime = (time: any) => {
+  // Directly using TIME_SIMPLE for formatting the time results the time always in 24-hour format, as the Intl is set in that way. So, using hourCycle to always get the time in 12-hour format
+  // https://github.com/moment/luxon/issues/998
+  return time ? DateTime.fromMillis(time).toLocaleString({ ...DateTime.TIME_SIMPLE, hourCycle: "h12" }) : "-";
+}
+
+function getDate(runTime: any) {
+  return DateTime.fromMillis(runTime).toLocaleString({ ...DateTime.DATE_MED, hourCycle: "h12" });
+}
+
+function getDateAndTime(time: any) {
+  return time ? DateTime.fromMillis(time).toLocaleString({ ...DateTime.DATETIME_MED, hourCycle: "h12" }) : "-";
+}
+
+function getDateAndTimeShort(time: any) {
+  // format: hh:mm(localized 12-hour time) date/month
+  // Using toLocaleString as toFormat is not converting the time in 12-hour format
+  return time ? DateTime.fromMillis(time).toLocaleString({ hour: "numeric", minute: "numeric", day: "numeric", month: "numeric", hourCycle: "h12" }) : "-";
+}
+
+function getRelativeTime(endTime: any) {
+  const timeDiff = DateTime.fromMillis(endTime).diff(DateTime.local());
+  return DateTime.local().plus(timeDiff).toRelative();
+}
+
+function getCronString(cronExpression: any) {
+  try {
+    return cronstrue.toString(cronExpression)
+  } catch(e) {
+    console.info(e)
+    return ""
+  }
+}
+
+function parseCronExpression(cronExpression: any, timeZone?: string) {
+  return cronParser.parseExpression(cronExpression, timeZone ? { tz: timeZone } : {})
 }
 
 export const commonUtil = {
@@ -656,7 +740,12 @@ export const commonUtil = {
   generateInternalId,
   getColorByDesc,
   getCurrentTime,
+  getCronString,
+  getDate,
+  getDateAndTime,
+  getDateAndTimeShort,
   getDateWithOrdinalSuffix,
+  getFeature,
   getFeatures,
   getIdentificationId,
   getMaargBaseURL,
@@ -664,8 +753,10 @@ export const commonUtil = {
   getOMSInstanceName,
   getOmsURL,
   getProductIdentificationValue,
+  getRelativeTime,
   getStatusColor,
   getTelecomCountryCode,
+  getTime,
   goToOms,
   handleDateTimeInput,
   hasActiveFilters,
@@ -678,7 +769,9 @@ export const commonUtil = {
   jsonParse,
   jsonToCsv,
   parseBooleanSetting,
+  parseCronExpression,
   parseCsv,
   showToast,
-  sortItems
+  sortItems,
+  sortSequence
 }
