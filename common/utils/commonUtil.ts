@@ -73,11 +73,6 @@ const getCurrentTime = (zone: string, format = 't ZZZZ') => {
   return DateTime.now().setZone(zone).toFormat(format)
 }
 
-const hasPermission = (permissionId: string) => {
-  //TODO: write the logic
-  return true
-}
-
 function hasError(response: any): boolean {
   const data = response?.data ?? response;
   if (!data || typeof data !== 'object') return false;
@@ -384,6 +379,7 @@ const getOmsURL = () => {
 }
 
 const statusColor = {
+  // DMLS
   "DmlsCancelled": "danger",
   "DmlsCrashed": "danger",
   "DmlsFailed": "danger",
@@ -391,6 +387,7 @@ const statusColor = {
   "DmlsPending": "light",
   "DmlsQueued": "primary",
   "DmlsRunning": "medium",
+  // SMSG
   "SmsgConsumed": "success",
   "SmsgConfirmed": "success",
   "SmsgProduced": "primary",
@@ -401,6 +398,40 @@ const statusColor = {
   "SmsgRejected": "warning",
   "SmsgError": "danger",
   "SmsgCancelled": "medium",
+  // ITEM
+  "ITEM_CREATED": "medium",
+  "ITEM_APPROVED": "primary",
+  "ITEM_PENDING_FULFILL": "warning",
+  "ITEM_PENDING_RECEIPT": "warning",
+  "ITEM_REQ_CANCELATN": "warning",
+  "ITEM_REJECTED": "danger",
+  "ITEM_CANCELLED": "danger",
+  "ITEM_COMPLETED": "success",
+  // PAYMENT
+  "PAYMENT_AUTHORIZED": "medium",
+  "PAYMENT_NOT_AUTH": "warning",
+  "PAYMENT_NOT_RECEIVED": "warning",
+  "PAYMENT_CANCELLED": "danger",
+  "PAYMENT_DECLINED": "danger",
+  "PAYMENT_RECEIVED": "success",
+  "PAYMENT_REFUNDED": "success",
+  "PAYMENT_SETTLED": "success",
+  // ORDER
+  "ORDER_CREATED": "medium",
+  "ORDER_APPROVED": "primary",
+  "ORDER_HOLD": "warning",
+  "ORDER_CANCELLED": "danger",
+  "ORDER_REJECTED": "danger",
+  "ORDER_COMPLETED": "success",
+  // SHIPMENT
+  "SHIPMENT_INPUT": "medium",
+  "SHIPMENT_APPROVED": "primary",
+  "SHIPMENT_PACKED": "secondary",
+  "SHIPMENT_CANCELLED": "danger",
+  "SHIPMENT_SHIPPED": "success",
+  // CYCLE COUNT
+  "CYCLE_CNT_CREATED": "medium",
+  "CYCLE_CNT_IN_PRGS": "primary",
 } as Record<string, string>
 
 const getStatusColor = (statusId: string) => {
@@ -424,9 +455,14 @@ const formatDate = (value: any, inFormat?: string, outFormat?: string) => {
 }
 
 const formatUtcDate = (value: any, userTimeZone: string, outFormat?: string) => {
-  // TODO Make default format configurable and from environment variables
-  // TODO Fix this setDefault should set the default timezone instead of getting it everytiem and setting the tz
-  return DateTime.fromISO(value, { zone: 'utc' }).setZone(userTimeZone).toFormat(outFormat ? outFormat : 'MM-dd-yyyy')
+  if (!value) return "-";
+  let dateTime;
+  if (!isNaN(Number(value))) {
+    dateTime = DateTime.fromMillis(Number(value), { zone: 'utc' });
+  } else {
+    dateTime = DateTime.fromISO(value, { zone: 'utc' });
+  }
+  return dateTime.setZone(userTimeZone).toFormat(outFormat ? outFormat : 'MM-dd-yyyy')
 }
 
 const getFeatures = (productFeatures: any) => {
@@ -553,7 +589,8 @@ const currentSymbol: any = {
 }
 
 const formatCurrency = (amount: any, code: string) => {
-  return `${currentSymbol[code] || code || "$"}${amount || 0}`
+  const symbol = currentSymbol[code] || code || ""
+  return `${symbol}${amount != null ? Number(amount).toFixed(2) : '0.00'}`
 }
 
 const getColorByDesc = (desc: string) => ({
@@ -674,7 +711,7 @@ const getProductIdentificationValue = (productIdentifier: string, product: any) 
 
 const getOMSInstanceName = () => {
   const instanceUrl = getOmsURL();
-  const hostname = instanceUrl.replace(/^(https?:\/\/)/, "").replace(/\/.*/, "").replace(/:.*/, "");             
+  const hostname = instanceUrl.replace(/^(https?:\/\/)/, "").replace(/\/.*/, "").replace(/:.*/, "");
   return hostname.split(".")[0];
 };
 
@@ -682,11 +719,11 @@ const sortSequence = (sequence: Array<any>, sortOnField = "sequenceNum") => {
   // Currently, sorting is only performed on a single parameter, so if two sequence have same value for that parameter then they will be arranged in FCFS basis
   // TODO: Need to check that if for the above case we need to define the sorting on name as well, when previous param is same
   return sequence.sort((a: any, b: any) => {
-    if(a[sortOnField] === b[sortOnField]) return 0;
+    if (a[sortOnField] === b[sortOnField]) return 0;
 
     // Sort undefined values at last
-    if(a[sortOnField] == undefined) return 1;
-    if(b[sortOnField] == undefined) return -1;
+    if (a[sortOnField] == undefined) return 1;
+    if (b[sortOnField] == undefined) return -1;
 
     return a[sortOnField] - b[sortOnField]
   })
@@ -720,7 +757,7 @@ function getRelativeTime(endTime: any) {
 function getCronString(cronExpression: any) {
   try {
     return cronstrue.toString(cronExpression)
-  } catch(e) {
+  } catch (e) {
     console.info(e)
     return ""
   }
@@ -730,11 +767,38 @@ function parseCronExpression(cronExpression: any, timeZone?: string) {
   return cronParser.parseExpression(cronExpression, timeZone ? { tz: timeZone } : {})
 }
 
+// Helper to convert date string (YYYY-MM-DD) to ISO start/end of day
+const formatDateTime = (dateStr: string, format?: string | null, endOfDay = false) => {
+  if (!dateStr) return '';
+  const dt = DateTime.fromISO(dateStr);
+  const final = endOfDay ? dt.endOf('day') : dt.startOf('day');
+  return format ? final.toFormat(format) : final.toFormat("yyyy-MM-dd HH:mm:ss.SSS");
+}
+
+function getDateTimeWithOrdinalSuffix(time: any) {
+  if (!time) return "-";
+  const dateTime = DateTime.fromMillis(time);
+  const suffix = dateOrdinalSuffix[dateTime.day] || "th";
+  return `${dateTime.toFormat("h:mm a d")}${suffix} ${dateTime.toFormat("MMM yyyy")}`;
+}
+
+const getFacilityChipLabel = (selectedFacilityIds: string[], facilities: any[]): string => {
+  if (selectedFacilityIds.length === 0) {
+    return translate('All');
+  } else if (selectedFacilityIds.length === 1) {
+    const facility = facilities.find((f: any) => f.facilityId === selectedFacilityIds[0]);
+    return facility?.facilityName || selectedFacilityIds[0];
+  } else {
+    return `${selectedFacilityIds.length} ${translate('facilities')}`;
+  }
+};
+
 export const commonUtil = {
   copyToClipboard,
   downloadCsv,
   formatCurrency,
   formatDate,
+  formatDateTime,
   formatPhoneNumber,
   formatUtcDate,
   generateInternalId,
@@ -744,7 +808,9 @@ export const commonUtil = {
   getDate,
   getDateAndTime,
   getDateAndTimeShort,
+  getDateTimeWithOrdinalSuffix,
   getDateWithOrdinalSuffix,
+  getFacilityChipLabel,
   getFeature,
   getFeatures,
   getIdentificationId,
