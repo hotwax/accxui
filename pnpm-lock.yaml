@@ -12,6 +12,9 @@ catalogs:
     '@capacitor/cli':
       specifier: 8.2.0
       version: 8.2.0
+    '@capacitor/clipboard':
+      specifier: 8.0.1
+      version: 8.0.1
     '@capacitor/core':
       specifier: 8.2.0
       version: 8.2.0
@@ -36,6 +39,12 @@ catalogs:
     '@types/papaparse':
       specifier: 5.5.2
       version: 5.5.2
+    cron-parser:
+      specifier: 5.4.0
+      version: 5.4.0
+    cronstrue:
+      specifier: 3.13.0
+      version: 3.13.0
     eslint:
       specifier: 10.2.0
       version: 10.2.0
@@ -280,6 +289,9 @@ importers:
       '@capacitor/android':
         specifier: 'catalog:'
         version: 8.2.0(@capacitor/core@8.2.0)
+      '@capacitor/clipboard':
+        specifier: 'catalog:'
+        version: 8.0.1(@capacitor/core@8.2.0)
       '@capacitor/core':
         specifier: 'catalog:'
         version: 8.2.0
@@ -305,11 +317,11 @@ importers:
         specifier: ^2.0.3
         version: 2.0.5
       cron-parser:
-        specifier: ^4.9.0
-        version: 4.9.0
+        specifier: 'catalog:'
+        version: 5.4.0
       cronstrue:
-        specifier: ^2.50.0
-        version: 2.61.0
+        specifier: 'catalog:'
+        version: 3.13.0
       file-saver:
         specifier: 'catalog:'
         version: 2.0.5
@@ -1025,6 +1037,11 @@ packages:
     resolution: {integrity: sha512-1cMEk0d/I6tl1U+v/lnJR5Oylpx8ZBIHrvQxD5zK0MkjYOUyQAAGJgh97rkhGJqjAUvrGpa8H4BmyhNQN9a17A==}
     engines: {node: '>=22.0.0'}
     hasBin: true
+
+  '@capacitor/clipboard@8.0.1':
+    resolution: {integrity: sha512-iOlbTi8MojKyLnYE+M27priXid7vHd0PlDwyHohPzkuQ8Rkp6q7ykwZmPEUD+OnU/Ink7Qw/pUOfKgraKmA6Eg==}
+    peerDependencies:
+      '@capacitor/core': '>=8.0.0'
 
   '@capacitor/core@2.5.0':
     resolution: {integrity: sha512-WUkUnqqLtlEYn6tly8t6VR0ABlSVbXdlD/gBbYxx0P+gEqMF9b46uYb2YqyH+8HBDANzTweEySpLfhiSUvYS7w==}
@@ -3018,9 +3035,17 @@ packages:
     resolution: {integrity: sha512-p0SaNjrHOnQeR8/VnfGbmg9te2kfyYSQ7Sc/j/6DtPL3JQvKxmjO9TSjNFpujqV3vEYYBvNNvXSxzyksBWAx1Q==}
     engines: {node: '>=12.0.0'}
 
+  cron-parser@5.4.0:
+    resolution: {integrity: sha512-HxYB8vTvnQFx4dLsZpGRa0uHp6X3qIzS3ZJgJ9v6l/5TJMgeWQbLkR5yiJ5hOxGbc9+jCADDnydIe15ReLZnJA==}
+    engines: {node: '>=18'}
+
   cronstrue@2.61.0:
     resolution: {integrity: sha512-ootN5bvXbIQI9rW94+QsXN5eROtXWwew6NkdGxIRpS/UFWRggL0G5Al7a9GTBFEsuvVhJ2K3CntIIVt7L2ILhA==}
     deprecated: Non-backwards compatible Breaking changes
+    hasBin: true
+
+  cronstrue@3.13.0:
+    resolution: {integrity: sha512-M06cKwRIN46AyuM8BOmF1HUkBTkd3/h7uYImnrH1T3wtRKBGOibVo3jZ42VheEvx8LtgZbG/4GI35vfIxYxMug==}
     hasBin: true
 
   cross-spawn@7.0.6:
@@ -6451,6 +6476,10 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
+  '@capacitor/clipboard@8.0.1(@capacitor/core@8.2.0)':
+    dependencies:
+      '@capacitor/core': 8.2.0
+
   '@capacitor/core@2.5.0':
     dependencies:
       tslib: 1.14.1
@@ -8664,7 +8693,13 @@ snapshots:
     dependencies:
       luxon: 3.7.2
 
+  cron-parser@5.4.0:
+    dependencies:
+      luxon: 3.7.2
+
   cronstrue@2.61.0: {}
+
+  cronstrue@3.13.0: {}
 
   cross-spawn@7.0.6:
     dependencies:

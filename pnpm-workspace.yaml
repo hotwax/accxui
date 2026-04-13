@@ -25,6 +25,7 @@ catalog:
   "@capacitor/cli": "8.2.0"
   "cronstrue": "3.13.0"
   "cron-parser": "5.4.0"
+  "@capacitor/clipboard": "8.0.1"
 
 catalogs:
   ionic7:
