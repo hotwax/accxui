@@ -13,8 +13,11 @@
     "skipLibCheck": true,
     "noEmit": true,
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./apps/job-manager/src/*"],
+      "@common": ["./common/index.ts"],
+      "@common/*": ["./common/*"]
     }
   },
-  "exclude": ["node_modules"]
+  "include": ["apps/**/*.ts", "apps/**/*.tsx", "apps/**/*.vue", "common/**/*.ts"],
+  "exclude": ["node_modules", "**/dist"]
 }

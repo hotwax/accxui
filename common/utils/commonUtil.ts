@@ -378,59 +378,64 @@ const getOmsURL = () => {
   return omsURL;
 }
 
+const statusColor = {
+  // DMLS
+  "DmlsCancelled": "danger",
+  "DmlsCrashed": "danger",
+  "DmlsFailed": "danger",
+  "DmlsFinished": "success",
+  "DmlsPending": "light",
+  "DmlsQueued": "primary",
+  "DmlsRunning": "medium",
+  // SMSG
+  "SmsgConsumed": "success",
+  "SmsgConfirmed": "success",
+  "SmsgProduced": "primary",
+  "SmsgReceived": "primary",
+  "SmsgSending": "primary",
+  "SmsgSent": "primary",
+  "SmsgConsuming": "primary",
+  "SmsgRejected": "warning",
+  "SmsgError": "danger",
+  "SmsgCancelled": "medium",
+  // ITEM
+  "ITEM_CREATED": "medium",
+  "ITEM_APPROVED": "primary",
+  "ITEM_PENDING_FULFILL": "warning",
+  "ITEM_PENDING_RECEIPT": "warning",
+  "ITEM_REQ_CANCELATN": "warning",
+  "ITEM_REJECTED": "danger",
+  "ITEM_CANCELLED": "danger",
+  "ITEM_COMPLETED": "success",
+  // PAYMENT
+  "PAYMENT_AUTHORIZED": "medium",
+  "PAYMENT_NOT_AUTH": "warning",
+  "PAYMENT_NOT_RECEIVED": "warning",
+  "PAYMENT_CANCELLED": "danger",
+  "PAYMENT_DECLINED": "danger",
+  "PAYMENT_RECEIVED": "success",
+  "PAYMENT_REFUNDED": "success",
+  "PAYMENT_SETTLED": "success",
+  // ORDER
+  "ORDER_CREATED": "medium",
+  "ORDER_APPROVED": "primary",
+  "ORDER_HOLD": "warning",
+  "ORDER_CANCELLED": "danger",
+  "ORDER_REJECTED": "danger",
+  "ORDER_COMPLETED": "success",
+  // SHIPMENT
+  "SHIPMENT_INPUT": "medium",
+  "SHIPMENT_APPROVED": "primary",
+  "SHIPMENT_PACKED": "secondary",
+  "SHIPMENT_CANCELLED": "danger",
+  "SHIPMENT_SHIPPED": "success",
+  // CYCLE COUNT
+  "CYCLE_CNT_CREATED": "medium",
+  "CYCLE_CNT_IN_PRGS": "primary",
+} as Record<string, string>
+
 const getStatusColor = (statusId: string) => {
-  const statusColor = {
-    // ITEM
-    "ITEM_CREATED": "medium",
-    "ITEM_APPROVED": "primary",
-    "ITEM_PENDING_FULFILL": "warning",
-    "ITEM_PENDING_RECEIPT": "warning",
-    "ITEM_REQ_CANCELATN": "warning",
-    "ITEM_REJECTED": "danger",
-    "ITEM_CANCELLED": "danger",
-    "ITEM_COMPLETED": "success",
-
-    // PAYMENT
-    "PAYMENT_AUTHORIZED": "medium",
-    "PAYMENT_NOT_AUTH": "warning",
-    "PAYMENT_NOT_RECEIVED": "warning",
-    "PAYMENT_CANCELLED": "danger",
-    "PAYMENT_DECLINED": "danger",
-    "PAYMENT_RECEIVED": "success",
-    "PAYMENT_REFUNDED": "success",
-    "PAYMENT_SETTLED": "success",
-
-    // ORDER
-    "ORDER_CREATED": "medium",
-    "ORDER_APPROVED": "primary",
-    "ORDER_HOLD": "warning",
-    "ORDER_CANCELLED": "danger",
-    "ORDER_REJECTED": "danger",
-    "ORDER_COMPLETED": "success",
-
-    // SHIPMENT
-    "SHIPMENT_INPUT": "medium",
-    "SHIPMENT_APPROVED": "primary",
-    "SHIPMENT_PACKED": "secondary",
-    "SHIPMENT_CANCELLED": "danger",
-    "SHIPMENT_SHIPPED": "success",
-
-    // DMLS
-    "DmlsCancelled": "danger",
-    "DmlsCrashed": "danger",
-    "DmlsFailed": "danger",
-    "DmlsFinished": "success",
-    "DmlsPending": "light",
-    "DmlsQueued": "primary",
-    "DmlsRunning": "medium",
-    "CYCLE_CNT_CREATED": "medium",
-    "CYCLE_CNT_IN_PRGS": "primary",
-    "SmsgSending": "medium",
-    "SmsgSent": "success",
-    "SmsgError": "danger"
-  } as Record<string, string>
-
-  return statusColor[statusId] || "primary"
+  return statusColor[statusId] || "medium"
 }
 
 const handleDateTimeInput = (dateTimeValue: any) => {
