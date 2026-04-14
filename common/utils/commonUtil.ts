@@ -8,6 +8,7 @@ import Papa from 'papaparse';
 import Encoding from 'encoding-japanese';
 import cronParser from "cron-parser";
 import cronstrue from "cronstrue"
+import { useEmbeddedAppStore } from "../store/embeddedApp";
 
 export interface JsonToCsvOption {
   parse?: object | null;
@@ -17,8 +18,8 @@ export interface JsonToCsvOption {
 }
 
 const goToOms = () => {
-  const oms = cookieHelper().get("oms")!
-  const token = cookieHelper().get("token")!
+  const oms = getOmsURL()!
+  const token = getMaargURL()!
   const link = (oms.startsWith('http') ? oms.replace(/\/api\/?|\/$/, "") : `https://${oms}.hotwax.io`) + `/commerce/control/main?token=${token}`
 
   window.open(link, '_blank', 'noopener, noreferrer')
@@ -357,7 +358,7 @@ const telecomCode = {
 } as any;
 
 const getMaargURL = () => {
-  const maarg = cookieHelper().get("maarg")
+  const maarg = useEmbeddedAppStore().getMaarg || cookieHelper().get("maarg")
   let maargURL = ""
   if (maarg) {
     maargURL = maarg.startsWith('http') ? maarg.includes('/rest/s1') ? maarg : `${maarg}/rest/s1/` : `https://${maarg}.hotwax.io/rest/s1/`;
@@ -366,16 +367,28 @@ const getMaargURL = () => {
 }
 
 const getMaargBaseURL = () => {
-  return cookieHelper().get("maarg")
+  return useEmbeddedAppStore().getMaarg ||  cookieHelper().get("maarg")
 }
 
 const getOmsURL = () => {
-  const oms = cookieHelper().get("oms")
+  const oms = useEmbeddedAppStore().getOms || cookieHelper().get("oms")
   let omsURL = ""
   if (oms) {
     omsURL = oms.startsWith('http') ? oms.includes('/api') ? oms : `${oms}/api/` : `https://${oms}.hotwax.io/api/`
   }
   return omsURL;
+}
+
+const getToken = () => {
+  return useEmbeddedAppStore().getToken || cookieHelper().get("token")
+}
+
+const getTokenExpiration = () => {
+  return useEmbeddedAppStore().getTokenExpiration || cookieHelper().get("expirationTime")
+}
+
+const isAppEmbedded = () => {
+  return !!useEmbeddedAppStore().getShopifyAppBridge
 }
 
 const statusColor = {
@@ -794,6 +807,7 @@ const getFacilityChipLabel = (selectedFacilityIds: string[], facilities: any[]):
 };
 
 export const commonUtil = {
+  isAppEmbedded,
   copyToClipboard,
   downloadCsv,
   formatCurrency,
@@ -823,6 +837,8 @@ export const commonUtil = {
   getStatusColor,
   getTelecomCountryCode,
   getTime,
+  getToken,
+  getTokenExpiration,
   goToOms,
   handleDateTimeInput,
   hasActiveFilters,
