@@ -358,7 +358,7 @@ const telecomCode = {
 } as any;
 
 const getMaargURL = () => {
-  const maarg = useEmbeddedAppStore().maarg || cookieHelper().get("maarg")
+  const maarg = useEmbeddedAppStore().getMaarg || cookieHelper().get("maarg")
   let maargURL = ""
   if (maarg) {
     maargURL = maarg.startsWith('http') ? maarg.includes('/rest/s1') ? maarg : `${maarg}/rest/s1/` : `https://${maarg}.hotwax.io/rest/s1/`;
@@ -367,11 +367,11 @@ const getMaargURL = () => {
 }
 
 const getMaargBaseURL = () => {
-  return useEmbeddedAppStore().maarg ||  cookieHelper().get("maarg")
+  return useEmbeddedAppStore().getMaarg ||  cookieHelper().get("maarg")
 }
 
 const getOmsURL = () => {
-  const oms = useEmbeddedAppStore().oms || cookieHelper().get("oms")
+  const oms = useEmbeddedAppStore().getOms || cookieHelper().get("oms")
   let omsURL = ""
   if (oms) {
     omsURL = oms.startsWith('http') ? oms.includes('/api') ? oms : `${oms}/api/` : `https://${oms}.hotwax.io/api/`
@@ -380,15 +380,15 @@ const getOmsURL = () => {
 }
 
 const getToken = () => {
-  return useEmbeddedAppStore().token.value || cookieHelper().get("token")
+  return useEmbeddedAppStore().getToken || cookieHelper().get("token")
 }
 
 const getTokenExpiration = () => {
-  return useEmbeddedAppStore().token.expiration || cookieHelper().get("expirationTime")
+  return useEmbeddedAppStore().getTokenExpiration || cookieHelper().get("expirationTime")
 }
 
 const isAppEmbedded = () => {
-  return !!useEmbeddedAppStore().shopifyAppBridge
+  return !!useEmbeddedAppStore().getShopifyAppBridge
 }
 
 const getStatusColor = (statusId: string) => {

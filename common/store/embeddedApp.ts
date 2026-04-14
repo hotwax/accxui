@@ -19,13 +19,16 @@ export const useEmbeddedAppStore = defineStore('embeddedApp', {
     }
   }),
   getters: {
-    getToken: (state) => state.token,
+    getToken: (state) => state.token.value,
+    getTokenExpiration: (state) => state.token.expiration,
     getOms: (state) => state.oms,
     getMaarg: (state) => state.maarg,
     getApiKey: (state) => state.apiKey,
+    getShop: (state) => state.shop,
     getHost: (state) => state.host,
     getShopifyAppBridge: (state) => state.shopifyAppBridge,
     getPosContext: (state) => state.posContext,
+    getPosLocationId: (state) => state.posContext.locationId,
   },
   actions: {
     setToken(token: string) {
@@ -40,6 +43,9 @@ export const useEmbeddedAppStore = defineStore('embeddedApp', {
     setApiKey(apiKey: string) {
       this.apiKey = apiKey;
     },
+    setShop(shop: string) {
+      this.shop = shop;
+    },
     setHost(host: string) {
       this.host = host;
     },
@@ -48,6 +54,9 @@ export const useEmbeddedAppStore = defineStore('embeddedApp', {
     },
     setPosContext(posContext: any) {
       this.posContext = posContext;
+    },
+    setTokenExpiration(expiration: string | number | undefined) {
+      this.token.expiration = expiration;
     }
   },
   persist: true
