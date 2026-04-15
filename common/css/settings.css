@@ -1,24 +1,26 @@
-ion-card > ion-button {
-  margin: var(--spacer-xs);
-}
+.settings {
+  ion-card>ion-button {
+    margin: var(--spacer-xs);
+  }
 
-.user-profile ion-card-header {
-  padding-inline: 0px
-}
+  .user-profile ion-card-header {
+    padding-inline: 0px
+  }
 
-h1 {
-  padding: var(--spacer-xs) 10px 0;
-}
+  h1 {
+    padding: var(--spacer-xs) 10px 0;
+  }
 
-section {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-  align-items: start;
-}
-
-@media (min-width: 400px) {
-  .user-profile {
+  section {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    align-items: start;
+  }
+
+  @media (min-width: 400px) {
+    .user-profile {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
+    }
   }
 }
