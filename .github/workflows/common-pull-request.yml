@@ -19,7 +19,7 @@ jobs:
 
     strategy:
       matrix:
-        node-version: [18.x, 20.x]
+        node-version: [20.x, 22.x]
 
     steps:
     - name: Checkout accxui
@@ -28,7 +28,7 @@ jobs:
         path: .
 
     - name: Checkout app in apps/
-    - uses: actions/checkout@v2
+      uses: actions/checkout@v2
       with:
         repository: ${{ inputs.app }}
         token: ${{ secrets.envPAT }}
