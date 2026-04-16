@@ -76,7 +76,7 @@ flowchart TD
     %% First check: Is this a return trip from SSO?
     InitCall --> CheckURLToken{"Token and expiration date exists in Query Parameters?"}
     
-    CheckURLToken -- Yes --> ProcessSSOReturn["useAuth().login(token, exp)"]
+    CheckURLToken -- Yes --> ProcessSSOReturn["useAuth().login(undefined, undefined, token, exp)"]
     
     %% Second check: Do we have an OMS in cookie?
     CheckURLToken -- No --> CheckOMSCookie{"Is 'oms' present in Cookie?"}
@@ -98,7 +98,7 @@ flowchart TD
     AuthTypeCheck -- No --> SAMLFlow[SAML / SSO Mode <br/> Redirect to loginAuthUrl]
     
     BasicFlow --> UserSubmits(User enters credentials <br/> and submits)
-    UserSubmits --> ProcessBasic["useAuth().login(username, pass)"]
+    UserSubmits --> ProcessBasic["useAuth().login(username, password)"]
     
     %% SSO Externality
     SAMLFlow --> ExternSSO(((SSO Auth Provider)))
@@ -106,11 +106,15 @@ flowchart TD
     ReturnURL -. "Triggers re-render" .-> StartLogin
 
     %% Composable Domain
-    subgraph useAuth_Composable ["useAuth().login Composable"]
-        ProcessSSOReturn --> VerifyToken{"Token & Exp present?"}
+    subgraph useAuth_Composable ["useAuth().login(username?, password?, token?, exp?)"]
+        ProcessSSOReturn --> EntryPoint((Invoke login))
+        ProcessBasic --> EntryPoint
+        
+        EntryPoint --> VerifyToken{"token & exp provided?"}
         VerifyToken -- Yes --> SetSSOCookie[Set Token & Expiration to Cookie]
         
-        ProcessBasic --> LoginAPI[Call Login API]
+        VerifyToken -- No --> VerifyCredentials{"username & password provided?"}
+        VerifyCredentials -- Yes --> LoginAPI[Call Login API]
         LoginAPI -- Success --> SetBasicCookie[Set Token & Expiration to Cookie]
         
         SetSSOCookie --> AfterLoginFetch[After Login Data Fetch]
@@ -141,25 +145,48 @@ The user identity values, active facility entitlements, and user-level component
 ### 4.5 Pseudocode / Logic Flow
 **Global Router Abstraction:**
 ```javascript
-// Within setup or index mapping for the vue router
-router.beforeEach((to, from, next) => {
-  if (!isAuthenticated && to.path !== '/login') {
-    next('/login'); // auth guard triggers
-  } else if (isAuthenticated && to.path === '/login') {
-    next('/'); // login guard bounces
+// Global authGuard (applied to protected routes)
+const authGuard = async (to: any, from: any, next: any) => {
+  const { isAuthenticated } = useAuth()
+  if (!isAuthenticated.value) {
+    next('/login');
   } else {
-    next(); 
+    next()
   }
-});
+};
+
+// Route-specific loginGuard (applied exclusively to /login)
+const loginGuard = (to: any, from: any, next: any) => {
+  const { isAuthenticated } = useAuth()
+  if (isAuthenticated.value) {
+    next('/')
+  }
+  next();
+};
 ```
 
 **Login Component Initialization Sequence:**
 ```javascript
+// useAuth.ts Composable API design
+const login = async (username?: string, password?: string, token?: string, expirationDate?: string) => {
+  if (token && expirationDate) {
+    // SAML/SSO logic
+    cookieHelper().set('token', token);
+    cookieHelper().set('expirationTime', expirationDate);
+  } else if (username && password) {
+    // BASIC authentication logic via API
+    const resp = await apiCall({ username, password });
+    cookieHelper().set('token', resp.token);
+    cookieHelper().set('expirationTime', resp.expirationTime);
+  }
+  // after login data fetch
+};
+
 // executed via onIonViewWillEnter on Login.vue
 async function initialise() {
   if (route.query.token && route.query.expirationDate) {
     // Escaped out of standard inputs; user arriving with active external assertions.
-    await useAuth().login(route.query.token, route.query.expirationDate);
+    await useAuth().login(undefined, undefined, route.query.token, route.query.expirationDate);
   } else {
     // Interactive Boot Protocol
     oms.value = readCookie('oms');
