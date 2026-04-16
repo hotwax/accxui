@@ -74,7 +74,7 @@ flowchart TD
     OnIonEnter --> InitCall(initialise)
     
     %% First check: Is this a return trip from SSO?
-    InitCall --> CheckURLToken{"Token exists in Query Parameters?"}
+    InitCall --> CheckURLToken{"Token and expiration date exists in Query Parameters?"}
     
     CheckURLToken -- Yes --> ProcessSSOReturn["useAuth().login(token, exp)"]
     
