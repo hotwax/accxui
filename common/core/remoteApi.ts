@@ -4,15 +4,24 @@ import { setupCache } from 'axios-cache-adapter'
 import qs from "qs"
 import merge from 'deepmerge'
 import { commonUtil } from '../utils/commonUtil';
+import { useAuth } from '@/composables/auth';
 
 const requestInterceptor = async (config: any) => {
   const token = commonUtil.getToken();
 
-  const noAuthEndpoints = ["login", "logout", "checkLoginOptions", "profile"]
+  // The following are the endpoints needs to bypass the auth check and when this calls are made we will assume
+  // that we are always relogin with the new credentials presend in cookies.
+  const noAuthEndpoints = ["login", "logout", "checkLoginOptions", "admin/user/profile"]
 
-  if (apiConfig.events.isAuthenticated && apiConfig.events.isAuthenticated.value && !token && !noAuthEndpoints.includes(config.url)) {
-    apiConfig.events.logout({ invalidAppContext: true })
-    return Promise.reject();
+  // When the same app is opened in multiple tabs and logout from one tab, then another tab still uses the old
+  // session, to handle this scenario we have added check to always validate authentication before api calls
+  // so if the current apps session becomes invalid, due to external change to cookies/state, then the app updates
+  // the session automatically.
+  // Bypass the check for endpoints that don't require authentication (like login, logout, profile),
+  // as these are often called during the authentication flow itself or to refresh local state.
+  if (!noAuthEndpoints.includes(config.url) && !useAuth().isAuthenticated.value) {
+    await apiConfig.events.logout({ isUserUnauthorised: true, invalidAppContext: true })
+    return;
   }
 
   if (token) {
@@ -33,7 +42,7 @@ const responseSuccessInterceptor = (response: any) => {
 const responseErrorInterceptor = (error: any) => {
   if (apiConfig.events.responseError) apiConfig.events.responseError(error);
   // As we have yet added support for logout on unauthorization hence emitting unauth event only in case of ofbiz app
-  if (error.response) {
+  if (error?.response) {
     const { status } = error.response;
     if (status == StatusCodes.UNAUTHORIZED) {
       if (apiConfig.events.logout) apiConfig.events.logout({ isUserUnauthorised: true });
