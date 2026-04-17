@@ -7,6 +7,14 @@ import { commonUtil } from '../utils/commonUtil';
 
 const requestInterceptor = async (config: any) => {
   const token = commonUtil.getToken();
+
+  const noAuthEndpoints = ["login", "logout", "checkLoginOptions", "profile"]
+
+  if (apiConfig.events.isAuthenticated && apiConfig.events.isAuthenticated.value && !token && !noAuthEndpoints.includes(config.url)) {
+    apiConfig.events.logout({ invalidAppContext: true })
+    return Promise.reject();
+  }
+
   if (token) {
     config.headers["Authorization"] = "Bearer " + token;
     config.headers['Content-Type'] = 'application/json';
@@ -28,7 +36,7 @@ const responseErrorInterceptor = (error: any) => {
   if (error.response) {
     const { status } = error.response;
     if (status == StatusCodes.UNAUTHORIZED) {
-      if (apiConfig.events.unauthorised) apiConfig.events.unauthorised({ isUserUnauthorised: true });
+      if (apiConfig.events.logout) apiConfig.events.logout({ isUserUnauthorised: true });
     }
   }
   // Any status codes that falls outside the range of 2xx cause this function to trigger
@@ -38,7 +46,8 @@ const responseErrorInterceptor = (error: any) => {
 
 const defaultConfig = {
   events: {
-    unauthorised: undefined,
+    isAuthenticated: undefined,
+    logout: undefined,
     responseSuccess: undefined,
     responseError: undefined
   } as any,
@@ -93,7 +102,12 @@ function resetConfig() {
 
 function initialise(customConfig: any) {
   appConfig = customConfig;
-  apiConfig = merge(apiConfig, customConfig)
+  const { events, ...otherConfig } = customConfig;
+  apiConfig = merge(apiConfig, otherConfig);
+  if(events) {
+    apiConfig.events = { ...apiConfig.events, ...events };
+  }
+
   axios.interceptors.request.use(apiConfig.interceptor.request);
   axios.interceptors.response.use(apiConfig.interceptor.response.success, apiConfig.interceptor.response.error);
 }
