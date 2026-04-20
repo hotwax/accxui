@@ -11,12 +11,7 @@
     "esModuleInterop": true,
     "lib": ["ESNext", "DOM"],
     "skipLibCheck": true,
-    "noEmit": true,
-    "paths": {
-      "@/*": ["./apps/job-manager/src/*"],
-      "@common": ["./common/index.ts"],
-      "@common/*": ["./common/*"]
-    }
+    "noEmit": true
   },
   "include": ["apps/**/*.ts", "apps/**/*.tsx", "apps/**/*.vue", "common/**/*.ts"],
   "exclude": ["node_modules", "**/dist"]

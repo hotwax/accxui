@@ -33,7 +33,6 @@ catalog:
   "axios": "0.21.1"
   "axios-cache-adapter": "2.7.3"
   "comlink": "4.4.2"
-  "deepmerge": "4.3.1"
   "encoding-japanese": "2.2.0"
   "firebase": "10.3.1"
   "http-status-codes": "2.2.0"

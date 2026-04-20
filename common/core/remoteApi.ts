@@ -2,11 +2,27 @@ import axios from 'axios';
 import { StatusCodes } from 'http-status-codes';
 import { setupCache } from 'axios-cache-adapter'
 import qs from "qs"
-import merge from 'deepmerge'
 import { commonUtil } from '../utils/commonUtil';
+import { useAuth } from '../composables/auth';
 
 const requestInterceptor = async (config: any) => {
   const token = commonUtil.getToken();
+
+  // The following are the endpoints needs to bypass the auth check and when this calls are made we will assume
+  // that we are always relogin with the new credentials presend in cookies.
+  const noAuthEndpoints = ["login", "logout", "checkLoginOptions", "admin/user/profile", "getPermissions"]
+
+  // When the same app is opened in multiple tabs and logout from one tab, then another tab still uses the old
+  // session, to handle this scenario we have added check to always validate authentication before api calls
+  // so if the current apps session becomes invalid, due to external change to cookies/state, then the app updates
+  // the session automatically.
+  // Bypass the check for endpoints that don't require authentication (like login, logout, profile),
+  // as these are often called during the authentication flow itself or to refresh local state.
+  if (!useAuth().isAuthenticated.value && !noAuthEndpoints.includes(config.url)) {
+    await useAuth().logout({ isUserUnauthorised: true, invalidAppContext: true })
+    return Promise.reject(new Error("INVALID_APP_CONTEXT"));
+  }
+
   if (token) {
     config.headers["Authorization"] = "Bearer " + token;
     config.headers['Content-Type'] = 'application/json';
@@ -14,43 +30,23 @@ const requestInterceptor = async (config: any) => {
   return config;
 }
 
-// configuration passed from the app
-let appConfig = {};
-
 const responseSuccessInterceptor = (response: any) => {
   // Any status code that lie within the range of 2xx cause this function to trigger
   return response;
 }
 
 const responseErrorInterceptor = (error: any) => {
-  if (apiConfig.events.responseError) apiConfig.events.responseError(error);
   // As we have yet added support for logout on unauthorization hence emitting unauth event only in case of ofbiz app
-  if (error.response) {
+  if (error?.response) {
     const { status } = error.response;
     if (status == StatusCodes.UNAUTHORIZED) {
-      if (apiConfig.events.unauthorised) apiConfig.events.unauthorised({ isUserUnauthorised: true });
+      useAuth().logout({ isUserUnauthorised: true });
     }
   }
   // Any status codes that falls outside the range of 2xx cause this function to trigger
   // Do something with response error
   return Promise.reject(error);
 }
-
-const defaultConfig = {
-  events: {
-    unauthorised: undefined,
-    responseSuccess: undefined,
-    responseError: undefined
-  } as any,
-  interceptor: {
-    request: requestInterceptor,
-    response: {
-      success: responseSuccessInterceptor,
-      error: responseErrorInterceptor
-    }
-  }
-}
-let apiConfig = { ...defaultConfig }
 
 // `paramsSerializer` is an optional function in charge of serializing `params`
 // (e.g. https://www.npmjs.com/package/qs, http://api.jquery.com/jquery.param/)
@@ -87,24 +83,8 @@ const paramsSerializer = (p: any) => {
   return qs.stringify(params, { arrayFormat: 'repeat' });
 }
 
-function resetConfig() {
-  apiConfig = { ...defaultConfig }
-}
-
-function initialise(customConfig: any) {
-  appConfig = customConfig;
-  apiConfig = merge(apiConfig, customConfig)
-  axios.interceptors.request.use(apiConfig.interceptor.request);
-  axios.interceptors.response.use(apiConfig.interceptor.response.success, apiConfig.interceptor.response.error);
-}
-
-function getConfig() {
-  return appConfig;
-}
-
-axios.interceptors.request.use(apiConfig.interceptor.request);
-
-axios.interceptors.response.use(apiConfig.interceptor.response.success, apiConfig.interceptor.response.error);
+axios.interceptors.request.use(requestInterceptor);
+axios.interceptors.response.use(responseSuccessInterceptor, responseErrorInterceptor);
 
 const maxAge = import.meta.env.VITE_CACHE_MAX_AGE
   ? parseInt(import.meta.env.VITE_CACHE_MAX_AGE)
@@ -160,4 +140,4 @@ const client = (config: any) => {
   return axios.create().request({ paramsSerializer, ...config })
 }
 
-export { api as default, initialise, client, axios, getConfig, resetConfig };
+export { api as default, client, axios };
