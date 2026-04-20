@@ -777,7 +777,12 @@ function getCronString(cronExpression: any) {
 }
 
 function parseCronExpression(cronExpression: any, timeZone?: string) {
-  return cronParser.parseExpression(cronExpression, timeZone ? { tz: timeZone } : {})
+  return cronParser.parse(cronExpression, timeZone ? { tz: timeZone } : {})
+}
+
+function getNextExecutionTime(cronExpression: any, timeZone?: string) {
+  const interval = parseCronExpression(cronExpression, timeZone)
+  return getDateAndTime(interval.next().getTime())
 }
 
 // Helper to convert date string (YYYY-MM-DD) to ISO start/end of day
@@ -830,6 +835,7 @@ export const commonUtil = {
   getIdentificationId,
   getMaargBaseURL,
   getMaargURL,
+  getNextExecutionTime,
   getOMSInstanceName,
   getOmsURL,
   getProductIdentificationValue,
