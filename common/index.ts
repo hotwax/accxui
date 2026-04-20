@@ -9,7 +9,7 @@ import logger from './core/logger'
 import { cookieHelper } from './helpers/cookieHelper'
 import { moduleFederationUtil } from './utils/moduleFederationUtil'
 
-import api, { client, axios, initialise, getConfig, resetConfig } from './core/remoteApi'
+import api, { client, axios } from './core/remoteApi'
 
 import { createDxpI18n, i18n, translate } from './core/i18n'
 
@@ -20,7 +20,7 @@ import { initialiseConfig } from './core/configRegistry'
 import { useAuth } from './composables/auth'
 
 // ✅ These are pure types (erased during build)
-export { api, client, axios, initialise, getConfig, resetConfig }
+export { api, client, axios }
 
 export {
   commonUtil,

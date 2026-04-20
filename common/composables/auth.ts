@@ -143,6 +143,12 @@ export function useAuth() {
     }
     
     await accxuiConfig.value.postLogout();
+
+    if(redirectionUrl) {
+      window.location.href = redirectionUrl
+    } else {
+      accxuiConfig.value.router.replace("/login");
+    }
     emitter.emit("dismissLoader");
   }
 
