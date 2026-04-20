@@ -560,21 +560,8 @@ const formatPhoneNumber = (countryCode: string | null, areaCode: string | null, 
   }
 }
 
-
 const generateInternalId = (name: string) => {
   return name.trim().toUpperCase().split(' ').join('_');
-}
-
-const sortItems = (items: any, sortByField: any) => {
-  items.sort((firstMethod: any, secondMethod: any) => {
-    if (firstMethod[sortByField] === null && secondMethod[sortByField] !== null) {
-      return 1;
-    } else if (firstMethod[sortByField] !== null && secondMethod[sortByField] === null) {
-      return -1;
-    } else {
-      return firstMethod[sortByField] - secondMethod[sortByField];
-    }
-  });
 }
 
 const isValidDeliveryDays = (deliveryDays: any) => {
@@ -860,6 +847,5 @@ export const commonUtil = {
   parseCronExpression,
   parseCsv,
   showToast,
-  sortItems,
   sortSequence
 }
