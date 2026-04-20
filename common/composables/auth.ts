@@ -99,6 +99,10 @@ export function useAuth() {
         return;
       }
 
+      updateToken("", "")
+      accxuiConfig.value.oms = "",
+      accxuiConfig.value.current = {}
+
       commonUtil.showToast(translate("Something went wrong while login. Please contact administrator."));
       logger.error("error: ", err.toString());
 

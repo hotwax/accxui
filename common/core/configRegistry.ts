@@ -7,8 +7,6 @@ export interface Config {
   oms: string;
 
   // Actions
-  fetchUserProfile?: () => Promise<void>;
-  fetchPermissions?: () => Promise<void>;
   $reset?: () => void;
   postLogout: () => Promise<void>;
   postLogin: () => Promise<void>;
