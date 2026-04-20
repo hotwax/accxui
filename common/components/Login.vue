@@ -92,7 +92,7 @@ import { arrowBackOutline, arrowForwardOutline, gridOutline, warningOutline } fr
 import { cookieHelper } from "../helpers/cookieHelper";
 import { translate } from "../core/i18n"
 import { commonUtil } from "../utils/commonUtil";
-import { useAuth } from "../composables/auth";
+import { useAuth } from "../composables/useAuth";
 import { accxuiConfig } from "../core/configRegistry";
 
 let route = null as any;
@@ -104,8 +104,8 @@ const username = ref("");
 const password = ref("");
 const instanceUrl = ref("");
 const errorMessage = ref("");
-const alias = import.meta.env.VITE_VUE_APP_ALIAS ? JSON.parse(import.meta.env.VITE_VUE_APP_ALIAS) : {};
-const defaultAlias = import.meta.env.VITE_VUE_APP_DEFAULT_ALIAS;
+const alias = import.meta.env.VITE_ALIAS ? JSON.parse(import.meta.env.VITE_ALIAS) : {};
+const defaultAlias = import.meta.env.VITE_DEFAULT_ALIAS;
 const showOmsInput = ref(false);
 const isInitializing = ref(true);
 const isConfirmingForActiveSession = ref(false);

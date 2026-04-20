@@ -3,7 +3,7 @@ import { StatusCodes } from 'http-status-codes';
 import { setupCache } from 'axios-cache-adapter'
 import qs from "qs"
 import { commonUtil } from '../utils/commonUtil';
-import { useAuth } from '../composables/auth';
+import { useAuth } from '../composables/useAuth';
 
 const requestInterceptor = async (config: any) => {
   const token = commonUtil.getToken();
