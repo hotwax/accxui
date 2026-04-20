@@ -17,7 +17,7 @@ import { firebaseMessaging } from './core/firebaseMessaging'
 import { useNotificationStore } from './store/notification'
 import { useEmbeddedAppStore } from './store/embeddedApp'
 import { initialiseConfig } from './core/configRegistry'
-import { useAuth } from './composables/auth'
+import { useAuth } from './composables/useAuth'
 
 // ✅ These are pure types (erased during build)
 export { api, client, axios }
