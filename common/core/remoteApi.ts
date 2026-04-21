@@ -10,7 +10,7 @@ const requestInterceptor = async (config: any) => {
 
   // The following are the endpoints needs to bypass the auth check and when this calls are made we will assume
   // that we are always relogin with the new credentials presend in cookies.
-  const noAuthEndpoints = ["login", "logout", "checkLoginOptions", "admin/user/profile", "getPermissions"]
+  const noAuthEndpoints = ["login", "logout", "checkLoginOptions", "admin/user/profile", "getPermissions", "app-bridge/login"]
 
   // When the same app is opened in multiple tabs and logout from one tab, then another tab still uses the old
   // session, to handle this scenario we have added check to always validate authentication before api calls

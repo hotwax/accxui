@@ -3,6 +3,7 @@ import { useEmbeddedAppStore } from "../store/embeddedApp";
 import { createApp } from "@shopify/app-bridge";
 import { getSessionToken } from "@shopify/app-bridge-utils";
 import api from '../core/remoteApi';
+import { accxuiConfig } from '../core/configRegistry';
 
 export function useShopify() {
   const store = useEmbeddedAppStore();
@@ -132,9 +133,10 @@ const openPosScanner = (): Promise<any> => {
       
       // 3. Login API Call
       const loginResp = await api({
-        url: `${maargUrl}/rest/s1/app-bridge/login`,
+        url: `app-bridge/login`,
         method: 'post',
-        data: loginPayload
+        data: loginPayload,
+        baseURL: `${maargUrl}/rest/s1/`
       });
 
       if (!loginResp.data.token || !loginResp.data.omsInstanceUrl) {
@@ -156,6 +158,10 @@ const openPosScanner = (): Promise<any> => {
           lastName: appState.pos?.user?.lastName
         };
       });
+
+      if (accxuiConfig.value.oms !== undefined) {
+        accxuiConfig.value.oms = loginResp.data.omsInstanceUrl;
+      }
 
       return true;
     } catch (error) {
