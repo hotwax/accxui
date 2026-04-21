@@ -1,6 +1,8 @@
 import { defineStore } from 'pinia';
+import 'pinia-plugin-persistedstate'
 
 export const useEmbeddedAppStore = defineStore('embeddedApp', {
+
   state: () => ({
     token: {
       value: '',

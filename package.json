@@ -80,10 +80,14 @@
     "vue-eslint-parser": "catalog:",
     "vue-tsc": "catalog:"
   },
+  "peerDependencies": {
+    "pinia": "catalog:"
+  },
   "pnpm": {
     "overrides": {
       "rollup": "catalog:",
-      "@stencil/core": "catalog:"
+      "@stencil/core": "catalog:",
+      "pinia": "catalog:"
     }
   },
   "description": "An Ionic project"
