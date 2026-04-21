@@ -1,6 +1,8 @@
 import imagePreview from './directives/imagePreview'
 import DxpShopifyImg from "./components/DxpShopifyImg.vue"
 import Login from "./components/Login.vue"
+import ShopifyLogin from "./components/ShopifyLogin.vue"
+import ShopifyAppInstall from "./components/ShopifyAppInstall.vue"
 import emitter from './core/emitter'
 import { commonUtil } from './utils/commonUtil'
 import { useSolrSearch } from './composables/useSolrSearch'
@@ -34,6 +36,8 @@ export {
   initialiseConfig,
   logger,
   Login,
+  ShopifyLogin,
+  ShopifyAppInstall,
   moduleFederationUtil,
   useSolrSearch,
   useShopify,

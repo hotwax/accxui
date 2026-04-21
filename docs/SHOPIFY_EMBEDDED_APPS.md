@@ -287,36 +287,25 @@ const isAuthenticated = computed(() => {
 ### 4.3 App Building Pattern (How to build using common functionality)
 When integrating an app into the Shopify Embedded environment, follow these structural patterns:
 
-1.  **Component Mounting (`ShopifyLogin.vue`)**: You must ensure that whatever component invokes `appBridgeLogin` does it safely when the app loads.
+1.  **Component Mounting (`ShopifyLogin` & `ShopifyAppInstall`)**: The `ShopifyLogin.vue` and `ShopifyAppInstall.vue` views have been centralized into the `@common/components` package. Instead of creating local versions in each app, you simply define the routes in your app's `router/index.ts` pointing to the shared components:
 ```typescript
-import { onMounted } from 'vue';
-import router from '@/router';
-import { useShopify } from '@accxui/common/composables/useShopify';
+import { ShopifyLogin, ShopifyAppInstall } from '@common';
 
-export default {
-  setup() {
-    const route = router.currentRoute.value;
-    const { appBridgeLogin } = useShopify();
-    
-    // Read from route query
-    const host = route.query.host as string;
-    const apiKey = route.query.apiKey as string;
-
-    onMounted(async () => {
-      // Run the composable orchestration function
-      const success = await appBridgeLogin(apiKey, host);
-      
-      if (success) {
-        // App is authenticated, fetch app-specific data
-        fetchUserProfile();
-        fetchProducts();
-      }
-    });
-
-    return {};
+const routes: Array<RouteRecordRaw> = [
+  ...
+  {
+    path: '/shopify-app-install',
+    name: 'ShopifyAppInstall',
+    component: ShopifyAppInstall
+  },
+  {
+    path: '/shopify-login',
+    name: 'ShopifyLogin',
+    component: ShopifyLogin
   }
-}
+];
 ```
+This guarantees uniform parameter handling (`host`, `apiKey`) and orchestration with `useShopify().appBridgeLogin` across all AccxUI apps, utilizing `accxuiConfig.value.router` rather than a local Vue Router import.
 
 2.  **API Communication & Request Interceptors**: 
     All ensuing setup API calls (like `fetchUserProfile` or `fetchProducts`) must pass exchanged OMS JWT token against the Shopify Session Token. Your backend HTTP Client should intercept outgoing calls, retrieve the backend authentication `OMS JWT token` from the Pinia store, and append it natively to the `Authorization: Bearer` header.

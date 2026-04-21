@@ -1,4 +1,4 @@
-import { api, commonUtil, cookieHelper, logger, translate } from "..";
+import { api, commonUtil, cookieHelper, logger, translate, useEmbeddedAppStore } from "..";
 import { DateTime } from "luxon";
 import { computed, ref } from "vue";
 import emitter from "../core/emitter";
@@ -14,19 +14,25 @@ const loginOption = ref<LoginOption>({})
 export const omsRef = ref("")
 
 export function useAuth() {
+  const getDuration = (expirationTime?: any) => {
+    const expiry = (expirationTime !== undefined && expirationTime !== null) ? expirationTime : commonUtil.getTokenExpiration();
+    return expiry ? Math.floor(DateTime.fromMillis(Number(expiry)).diffNow().as('seconds')) : undefined;
+  }
+
 
   const updateToken = (token: any, expirationTime: any) => {
-    cookieHelper().set("token", token)
-    cookieHelper().set("expirationTime", expirationTime)
+    const duration = getDuration(expirationTime);
+    cookieHelper().set("token", token, duration)
+    cookieHelper().set("expirationTime", expirationTime, duration)
   }
 
   const updateOMS = (oms: any) => {
-    cookieHelper().set("oms", oms)
+    cookieHelper().set("oms", oms, getDuration())
     omsRef.value = oms
   }
 
   const updateUserId = (userId: any) => {
-    cookieHelper().set("userId", userId)
+    cookieHelper().set("userId", userId, getDuration())
   }
 
   const clearAuth = () => {
@@ -44,7 +50,7 @@ export function useAuth() {
     let isOmsVerified = false;
     let isUserVerified = false;
 
-    const expiry = Number(cookieHelper().get("expirationTime"));
+    const expiry = Number(commonUtil.getTokenExpiration());
     if(expiry) {
       const currTime = DateTime.now().toMillis();
       isTokenExpired = expiry < currTime;
@@ -61,7 +67,7 @@ export function useAuth() {
       isUserVerified = true
     }
 
-    return !isTokenExpired && isOmsVerified && isUserVerified
+    return !isTokenExpired && (commonUtil.isAppEmbedded() || (isOmsVerified && isUserVerified))
   })
 
   const login = async (username?: string, password?: string, token?: string, expirationTime?: string) => {
@@ -135,7 +141,7 @@ export function useAuth() {
       }
     }
 
-    if(!payload?.invalidAppContext) {
+    if(!payload?.invalidAppContext && !commonUtil.isAppEmbedded()) {
       updateToken("", "")
       updateUserId("")
     } else {
@@ -143,6 +149,12 @@ export function useAuth() {
     }
     
     await accxuiConfig.value.postLogout();
+
+    if (commonUtil.isAppEmbedded()) {
+      const embeddedAppStore = useEmbeddedAppStore();
+      redirectionUrl = window.location.origin + '/shopify-login?shop=' + embeddedAppStore.shop + '&host=' + embeddedAppStore.host + '&embedded=1';
+      embeddedAppStore.$reset();
+    }
 
     if(redirectionUrl) {
       window.location.href = redirectionUrl
@@ -162,7 +174,7 @@ export function useAuth() {
       });
       if(!commonUtil.hasError(resp)) {
         loginOption.value = resp.data
-        cookieHelper().set("maarg", resp.data.maargInstanceUrl)
+        cookieHelper().set("maarg", resp.data.maargInstanceUrl, getDuration())
       }
     } catch (error) {
       logger.error(error)

@@ -6,7 +6,7 @@ export const cookieHelper = () => {
         if (maxAge) {
             cookieString += `; max-age=${maxAge}`;
         } else {
-             cookieString += `; max-age=31536000`; // Default to 1 year
+             cookieString += `; max-age=86400`; // Default to 1 day
         }
         document.cookie = cookieString;
     };
