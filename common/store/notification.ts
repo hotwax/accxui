@@ -1,4 +1,5 @@
 import { defineStore } from "pinia";
+import 'pinia-plugin-persistedstate';
 import api from "../core/remoteApi";
 import logger from "../core/logger";
 import { commonUtil } from "../utils/commonUtil";
@@ -30,7 +31,6 @@ export const useNotificationStore = defineStore("notification", {
     getFirebaseDeviceId: (state: NotificationState) => state.firebaseDeviceId,
     getUnreadNotificationsStatus: (state: NotificationState) => state.hasUnreadNotifications,
     getAllNotificationPrefs: (state: NotificationState) => state.allNotificationPrefs,
-    isFirebaseInitialised: (state: NotificationState) => state.isFirebaseInitialised,
   },
   actions: {
     setNotifications(payload: any) {

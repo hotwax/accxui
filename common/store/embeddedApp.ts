@@ -1,17 +1,36 @@
 import { defineStore } from 'pinia';
+import 'pinia-plugin-persistedstate';
+
+interface EmbeddedAppState {
+  token: {
+    value: string;
+    expiration: string | number | undefined;
+  };
+  oms: string;
+  maarg: string;
+  apiKey: string;
+  shop: string;
+  host: string;
+  shopifyAppBridge: any;
+  posContext: {
+    locationId: any;
+    firstName: string;
+    lastName: string;
+  };
+}
 
 export const useEmbeddedAppStore = defineStore('embeddedApp', {
-  state: () => ({
+  state: (): EmbeddedAppState => ({
     token: {
       value: '',
-      expiration: undefined as string | number | undefined
+      expiration: undefined
     },
     oms: '',
     maarg: '',
     apiKey: '',
     shop: '',
     host: '',
-    shopifyAppBridge: null as any,
+    shopifyAppBridge: null,
     posContext: {
       locationId: undefined,
       firstName: "",
@@ -19,16 +38,16 @@ export const useEmbeddedAppStore = defineStore('embeddedApp', {
     }
   }),
   getters: {
-    getToken: (state) => state.token.value,
-    getTokenExpiration: (state) => state.token.expiration,
-    getOms: (state) => state.oms,
-    getMaarg: (state) => state.maarg,
-    getApiKey: (state) => state.apiKey,
-    getShop: (state) => state.shop,
-    getHost: (state) => state.host,
-    getShopifyAppBridge: (state) => state.shopifyAppBridge,
-    getPosContext: (state) => state.posContext,
-    getPosLocationId: (state) => state.posContext.locationId,
+    getToken: (state: EmbeddedAppState) => state.token.value,
+    getTokenExpiration: (state: EmbeddedAppState) => state.token.expiration,
+    getOms: (state: EmbeddedAppState) => state.oms,
+    getMaarg: (state: EmbeddedAppState) => state.maarg,
+    getApiKey: (state: EmbeddedAppState) => state.apiKey,
+    getShop: (state: EmbeddedAppState) => state.shop,
+    getHost: (state: EmbeddedAppState) => state.host,
+    getShopifyAppBridge: (state: EmbeddedAppState) => state.shopifyAppBridge,
+    getPosContext: (state: EmbeddedAppState) => state.posContext,
+    getPosLocationId: (state: EmbeddedAppState) => state.posContext.locationId,
   },
   actions: {
     setToken(token: string) {

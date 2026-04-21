@@ -11,7 +11,8 @@
     "esModuleInterop": true,
     "lib": ["ESNext", "DOM"],
     "skipLibCheck": true,
-    "noEmit": true
+    "noEmit": true,
+    "types": ["pinia-plugin-persistedstate"]
   },
   "include": ["apps/**/*.ts", "apps/**/*.tsx", "apps/**/*.vue", "common/**/*.ts"],
   "exclude": ["node_modules", "**/dist"]
