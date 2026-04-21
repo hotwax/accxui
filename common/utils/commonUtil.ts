@@ -19,7 +19,7 @@ export interface JsonToCsvOption {
 
 const goToOms = () => {
   const oms = getOmsURL()!
-  const token = getMaargURL()!
+  const token = getToken()!
   const link = (oms.startsWith('http') ? oms.replace(/\/api\/?|\/$/, "") : `https://${oms}.hotwax.io`) + `/commerce/control/main?token=${token}`
 
   window.open(link, '_blank', 'noopener, noreferrer')

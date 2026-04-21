@@ -1,15 +1,18 @@
 <template>
   <ion-page>
     <ion-content>
-      <div class="center-div" v-if="!errorMessage">
-        <p>{{ translate("Logging in...") }}</p>
-      </div>
       <div class="center-div">
-        <ion-item lines="none" v-if='errorMessage'>
-          <ion-icon slot="start" color="warning" :icon="warningOutline" />
-          <h4>{{ translate('Login failed') }}</h4>
-        </ion-item>
-        <p>{{ translate(errorMessage) }}</p>
+        <Logo />
+        <div v-if="!errorMessage">
+          <p>{{ translate("Logging in...") }}</p>
+        </div>
+        <div v-else>
+          <ion-item lines="none">
+            <ion-icon slot="start" color="warning" :icon="warningOutline" />
+            <h4>{{ translate('Login failed') }}</h4>
+          </ion-item>
+          <p>{{ translate(errorMessage) }}</p>
+        </div>
       </div>
     </ion-content>
   </ion-page>
@@ -19,6 +22,7 @@
 import { IonContent, IonIcon, IonItem, IonPage, onIonViewDidEnter, onIonViewDidLeave } from "@ionic/vue";
 import { ref } from "vue";
 import { emitter, translate, useShopify, useEmbeddedAppStore } from "../index";
+import Logo from "./Logo.vue";
 import { accxuiConfig } from "../core/configRegistry";
 import { warningOutline } from "ionicons/icons";
 
