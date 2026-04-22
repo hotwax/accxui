@@ -1,4 +1,4 @@
-import { createLogger, StringifyObjectsHook } from 'vue-logger-plugin'
+import { StringifyObjectsHook, createLogger } from "vue-logger-plugin"
 
 // TODO Implement logic to send logs to server
 // https://github.com/dev-tavern/vue-logger-plugin#sample-custom-hook---leveraging-axios-to-send-logs-to-server
@@ -20,19 +20,20 @@ import { createLogger, StringifyObjectsHook } from 'vue-logger-plugin'
 
 const logger = createLogger({
   enabled: true,
-  beforeHooks: [ StringifyObjectsHook ]
+  beforeHooks: [StringifyObjectsHook]
 });
 
 function getStack(error: any) {
   // Handling incompatibilities
-  // Non-standard: This feature is non-standard and is not on a standards track. Do not use it on production sites facing the Web: it will not work for every user. 
+  // Non-standard: This feature is non-standard and is not on a standards track. Do not use it on production sites facing the Web: it will not work for every user.
   // There may also be large incompatibilities between implementations and the behavior may change in the future.
   // https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Error/stack
   try {
-    return error.stack;
-  } catch (err) {
+    return error.stack || error;
+  } catch {
     logger.warn("Error stack is not supported");
   }
+
   return error;
 }
 
@@ -40,8 +41,7 @@ export default {
   install(app: any, options: any) {
 
     app.config.errorHandler = (error: any, instance: any, info: any) => {
-      // TODO Improve code to add more information related to code failed
-      logger.error("Global handler:" + getStack(error));
+      logger.error("Global handler:", getStack(error), instance, info);
     }
     const level = options.level ? options.level : "error"
 
