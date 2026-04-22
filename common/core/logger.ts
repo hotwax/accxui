@@ -41,7 +41,11 @@ export default {
   install(app: any, options: any) {
 
     app.config.errorHandler = (error: any, instance: any, info: any) => {
-      logger.error("Global handler:", getStack(error), instance, info);
+      const componentInfo = instance ? {
+        name: instance.$options?.name || instance?.$options?.__name,
+        uid: instance?._uid || instance?.$?.uid
+      } : null;
+      logger.error("Global handler:", getStack(error), componentInfo, info);
     }
     const level = options.level ? options.level : "error"
 
