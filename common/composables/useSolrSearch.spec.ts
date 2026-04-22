@@ -41,6 +41,14 @@ describe('prepareOrderLookupQuery', () => {
     expect(payload.json.filter).toContain('{!tag=orderLookupFilter}orderStatusDesc: ("Ordered" OR "Completed")');
   });
 
+  it('should escape special characters in array filters', () => {
+    const query = {
+      facility: ['Facility (A)', 'Facility [B]']
+    };
+    const payload = prepareOrderLookupQuery(query);
+    expect(payload.json.filter).toContain('{!tag=orderLookupFilter}facilityName: ("Facility \\(A\\)" OR "Facility \\[B\\]")');
+  });
+
   it('should handle queryString correctly', () => {
     const query = { queryString: 'testOrder' };
     const payload = prepareOrderLookupQuery(query);

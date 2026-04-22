@@ -227,7 +227,8 @@ const prepareOrderLookupQuery = (query: any) => {
 
   Object.entries(arrayFilterMapping).forEach(([queryField, solrField]: any) => {
     if (query[queryField]?.length) {
-      payload.json.filter.push(`{!tag=orderLookupFilter}${solrField}: ("${query[queryField].join('" OR "')}")`)
+      const filterValues = query[queryField].map((value: any) => escapeSolrSpecialChars(value))
+      payload.json.filter.push(`{!tag=orderLookupFilter}${solrField}: ("${filterValues.join('" OR "')}")`)
     }
   })
 
