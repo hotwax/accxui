@@ -17,10 +17,49 @@ export interface JsonToCsvOption {
   download?: boolean;
 }
 
+const getMaargURL = () => {
+  const maarg = useEmbeddedAppStore().getMaarg || cookieHelper().get("maarg")
+  let maargURL = ""
+  if (maarg) {
+    maargURL = maarg.startsWith('http') ? maarg.includes('/rest/s1') ? maarg : `${maarg}/rest/s1/` : `https://${maarg}.hotwax.io/rest/s1/`;
+  }
+  return maargURL
+}
+
+const getMaargBaseURL = () => {
+  return useEmbeddedAppStore().getMaarg ||  cookieHelper().get("maarg")
+}
+
+const getOmsURL = () => {
+  const oms = useEmbeddedAppStore().getOms || cookieHelper().get("oms")
+  let omsURL = ""
+  if (oms) {
+    omsURL = oms.startsWith('http') ? oms.includes('/api') ? oms : `${oms}/api/` : `https://${oms}.hotwax.io/api/`
+  }
+  return omsURL;
+}
+
+const getToken = () => {
+  return useEmbeddedAppStore().getToken || cookieHelper().get("token")
+}
+
+const getTokenExpiration = () => {
+  return useEmbeddedAppStore().getTokenExpiration || cookieHelper().get("expirationTime")
+}
+
+const isAppEmbedded = () => {
+  return !!useEmbeddedAppStore().getShopifyAppBridge
+}
+
 const goToOms = () => {
   const oms = getOmsURL()!
-  const token = getMaargURL()!
-  const link = (oms.startsWith('http') ? oms.replace(/\/api\/?|\/$/, "") : `https://${oms}.hotwax.io`) + `/commerce/control/main?token=${token}`
+  const token = getToken()
+  const maargURL = getMaargURL()
+
+  if (token) cookieHelper().set("token", token)
+  if (maargURL) cookieHelper().set("maarg", maargURL)
+
+  const link = (oms.startsWith('http') ? oms.replace(/\/api\/?|\/$/, "") : `https://${oms}.hotwax.io`) + `/commerce/control/main`
 
   window.open(link, '_blank', 'noopener, noreferrer')
 }
@@ -357,39 +396,6 @@ const telecomCode = {
   "ZW": "+263"
 } as any;
 
-const getMaargURL = () => {
-  const maarg = useEmbeddedAppStore().getMaarg || cookieHelper().get("maarg")
-  let maargURL = ""
-  if (maarg) {
-    maargURL = maarg.startsWith('http') ? maarg.includes('/rest/s1') ? maarg : `${maarg}/rest/s1/` : `https://${maarg}.hotwax.io/rest/s1/`;
-  }
-  return maargURL
-}
-
-const getMaargBaseURL = () => {
-  return useEmbeddedAppStore().getMaarg ||  cookieHelper().get("maarg")
-}
-
-const getOmsURL = () => {
-  const oms = useEmbeddedAppStore().getOms || cookieHelper().get("oms")
-  let omsURL = ""
-  if (oms) {
-    omsURL = oms.startsWith('http') ? oms.includes('/api') ? oms : `${oms}/api/` : `https://${oms}.hotwax.io/api/`
-  }
-  return omsURL;
-}
-
-const getToken = () => {
-  return useEmbeddedAppStore().getToken || cookieHelper().get("token")
-}
-
-const getTokenExpiration = () => {
-  return useEmbeddedAppStore().getTokenExpiration || cookieHelper().get("expirationTime")
-}
-
-const isAppEmbedded = () => {
-  return !!useEmbeddedAppStore().getShopifyAppBridge
-}
 
 const statusColor = {
   // DMLS
