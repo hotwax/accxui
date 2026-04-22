@@ -2,11 +2,11 @@ export const cookieHelper = () => {
 
     // Function to set a cookie with an optional expiration
     const set = (name: string, value: string, maxAge?: number) => {
-        let cookieString = `${encodeURIComponent(name)}=${encodeURIComponent(value)}; path=/; SameSite=Lax; domain=hotwax.io`;
+        let cookieString = `${encodeURIComponent(name)}=${encodeURIComponent(value)}; path=/; SameSite=Lax; ${!import.meta.env.DEV && "domain=hotwax.io"}`;
         if (maxAge) {
             cookieString += `; max-age=${maxAge}`;
         } else {
-             cookieString += `; max-age=86400`; // Default to 1 day
+            cookieString += `; max-age=86400`; // Default to 1 day
         }
         document.cookie = cookieString;
     };
