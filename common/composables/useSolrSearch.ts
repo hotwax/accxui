@@ -307,9 +307,9 @@ async function searchProducts(params: { keyword?: string, sort?: string, qf?: st
       // create string in the format, abc* OR xyz* or qwe*
       const keywordTokens = keyword.split(" ")
       const tokens: Array<string> = []
+      const regEx = /[`!@#$%^&*()_+\-=\\|,.<>?~]/
 
       keywordTokens.forEach((token: string) => {
-        const regEx = /[`!@#$%^&*()_+\-=\\|,.<>?~]/
         if (regEx.test(token)) {
           const matchedTokens = [...new Set(token.match(regEx))]
           matchedTokens?.forEach((matchedToken: string) => {
