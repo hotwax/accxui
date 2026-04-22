@@ -31,7 +31,7 @@ const prepareOrderQuery = (params: any) => {
   // checking that if the params has filters, and then adding the filter values in the payload filter
   // for each key present in the params filters
   if (params.filters) {
-    Object.keys(params.filters).map((key: any) => {
+    Object.keys(params.filters).forEach((key: any) => {
       const filterValue = params.filters[key].value;
 
       if (Array.isArray(filterValue)) {
@@ -94,7 +94,7 @@ const prepareSolrQuery = (params: any) => {
   // checking that if the params has filters, and then adding the filter values in the payload filter
   // for each key present in the params filters
   if (params.filters) {
-    Object.keys(params.filters).map((key: any) => {
+    Object.keys(params.filters).forEach((key: any) => {
       const filterValue = params.filters[key].value;
 
       if (Array.isArray(filterValue)) {
