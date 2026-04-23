@@ -124,6 +124,8 @@ export function useAuth() {
         message: "Logging out",
         backdropDismiss: false,
       });
+      
+      await accxuiConfig.value.preLogout();
 
       try {
         let resp = await api({
@@ -147,7 +149,7 @@ export function useAuth() {
     } else {
       commonUtil.showToast(translate("Session expired. Refreshing..."))
     }
-    
+
     await accxuiConfig.value.postLogout();
 
     if (commonUtil.isAppEmbedded()) {

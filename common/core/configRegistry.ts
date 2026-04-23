@@ -9,6 +9,7 @@ export interface Config {
   // Actions
   $reset?: () => void;
   postLogout: () => Promise<void>;
+  preLogout: () => Promise<void>; // runs only in case when its manual logout and not unauth or invalid app context
   postLogin: () => Promise<void>;
   router: any;
 }
@@ -16,6 +17,7 @@ export interface Config {
 export const accxuiConfig = ref<Config>({
   postLogin: () => Promise.resolve(),
   postLogout: () => Promise.resolve(),
+  preLogout: () => Promise.resolve(),
   oms: "",
   current: {},
   router: ref(null)
