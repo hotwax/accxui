@@ -47,6 +47,7 @@
     "vue-logger-plugin": "catalog:",
     "vue-markdown-render": "catalog:",
     "vue-router": "catalog:",
+    "workbox-window": "7.4.0",
     "yup": "catalog:"
   },
   "devDependencies": {
@@ -79,8 +80,7 @@
     "vite-plugin-pwa": "1.2.0",
     "vitest": "catalog:",
     "vue-eslint-parser": "catalog:",
-    "vue-tsc": "catalog:",
-    "workbox-window": "7.4.0"
+    "vue-tsc": "catalog:"
   },
   "peerDependencies": {
     "pinia": "catalog:"
