@@ -451,6 +451,8 @@ const getStatusColor = (statusId: string) => {
   return statusColor[statusId] || "medium"
 }
 
+const DEFAULT_DATE_FORMAT = import.meta.env.VITE_DATE_FORMAT || 'MM-dd-yyyy';
+
 const handleDateTimeInput = (dateTimeValue: any) => {
   // TODO Handle it in a better way
   // Remove timezone and then convert to timestamp
@@ -460,11 +462,10 @@ const handleDateTimeInput = (dateTimeValue: any) => {
 }
 
 const formatDate = (value: any, inFormat?: string, outFormat?: string) => {
-  // TODO Make default format configurable and from environment variables
   if (inFormat) {
-    return DateTime.fromFormat(value, inFormat).toFormat(outFormat ? outFormat : 'MM-dd-yyyy');
+    return DateTime.fromFormat(value, inFormat).toFormat(outFormat ? outFormat : DEFAULT_DATE_FORMAT);
   }
-  return DateTime.fromISO(value).toFormat(outFormat ? outFormat : 'MM-dd-yyyy');
+  return DateTime.fromISO(value).toFormat(outFormat ? outFormat : DEFAULT_DATE_FORMAT);
 }
 
 const formatUtcDate = (value: any, userTimeZone: string, outFormat?: string) => {
@@ -475,7 +476,7 @@ const formatUtcDate = (value: any, userTimeZone: string, outFormat?: string) => 
   } else {
     dateTime = DateTime.fromISO(value, { zone: 'utc' });
   }
-  return dateTime.setZone(userTimeZone).toFormat(outFormat ? outFormat : 'MM-dd-yyyy')
+  return dateTime.setZone(userTimeZone).toFormat(outFormat ? outFormat : DEFAULT_DATE_FORMAT)
 }
 
 const getFeatures = (productFeatures: any) => {
