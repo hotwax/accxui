@@ -12,13 +12,12 @@
   },
   "dependencies": {
     "@capacitor/android": "catalog:",
-    "@capacitor/ios": "catalog:",
     "@capacitor/core": "catalog:",
+    "@capacitor/ios": "catalog:",
     "@casl/ability": "^6.7.3",
-    "@ionic/vue": "catalog:",
     "@ionic/core": "catalog:",
+    "@ionic/vue": "catalog:",
     "@ionic/vue-router": "catalog:",
-    "vue-router": "catalog:",
     "@module-federation/runtime": "catalog:",
     "@shopify/app-bridge": "catalog:",
     "@shopify/app-bridge-utils": "catalog:",
@@ -47,6 +46,8 @@
     "vue-i18n": "catalog:",
     "vue-logger-plugin": "catalog:",
     "vue-markdown-render": "catalog:",
+    "vue-router": "catalog:",
+    "workbox-window": "7.4.0",
     "yup": "catalog:"
   },
   "devDependencies": {
@@ -76,6 +77,7 @@
     "terser": "^5.30.0",
     "typescript": "~5.9.3",
     "vite": "catalog:",
+    "vite-plugin-pwa": "1.2.0",
     "vitest": "catalog:",
     "vue-eslint-parser": "catalog:",
     "vue-tsc": "catalog:"
