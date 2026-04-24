@@ -205,29 +205,32 @@ const prepareOrderLookupQuery = (query: any) => {
   }
 
   // updating the filter value in json object as per the filters selected
-  // TODO: optimize this code
-  const shipmentMethodTypeIdValues = []
-  if (query.storePickup) shipmentMethodTypeIdValues.push("STOREPICKUP")
-  if (query.shipFromStore) shipmentMethodTypeIdValues.push("STANDARD")
+  const shipmentMethodMapping: any = {
+    storePickup: "STOREPICKUP",
+    shipFromStore: "STANDARD"
+  }
+
+  const shipmentMethodTypeIdValues = Object.keys(shipmentMethodMapping)
+    .filter((key: string) => query[key])
+    .map((key: string) => shipmentMethodMapping[key])
 
   if (shipmentMethodTypeIdValues.length) {
     payload.json.filter.push(`{!tag=orderLookupFilter}shipmentMethodTypeId: (${shipmentMethodTypeIdValues.join(" OR ")})`)
   }
 
-  if (query.facility?.length) {
-    payload.json.filter.push(`{!tag=orderLookupFilter}facilityName: (\"${query.facility.join('\" OR \"')}\")`)
-  }
-  if (query.productStore?.length) {
-    payload.json.filter.push(`{!tag=orderLookupFilter}productStoreName: (\"${query.productStore.join('\" OR \"')}\")`)
-  }
-
-  if (query.channel?.length) {
-    payload.json.filter.push(`{!tag=orderLookupFilter}salesChannelDesc: (\"${query.channel.join('\" OR \"')}\")`)
+  const arrayFilterMapping: any = {
+    facility: "facilityName",
+    productStore: "productStoreName",
+    channel: "salesChannelDesc",
+    status: "orderStatusDesc"
   }
 
-  if (query.status?.length) {
-    payload.json.filter.push(`{!tag=orderLookupFilter}orderStatusDesc: (\"${query.status.join('\" OR \"')}\")`)
-  }
+  Object.entries(arrayFilterMapping).forEach(([queryField, solrField]: any) => {
+    if (query[queryField]?.length) {
+      const filterValues = query[queryField].map((value: any) => escapeSolrSpecialChars(value))
+      payload.json.filter.push(`{!tag=orderLookupFilter}${solrField}: ("${filterValues.join('" OR "')}")`)
+    }
+  })
 
   if (query.date && query.date !== "custom") {
     payload.json.filter.push(`{!tag=orderLookupFilter}orderDate: [${query.date}]`)
