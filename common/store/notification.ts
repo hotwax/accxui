@@ -29,8 +29,7 @@ export const useNotificationStore = defineStore("notification", {
     getNotificationPrefs: (state: NotificationState) => state.notificationPrefs,
     getFirebaseDeviceId: (state: NotificationState) => state.firebaseDeviceId,
     getUnreadNotificationsStatus: (state: NotificationState) => state.hasUnreadNotifications,
-    getAllNotificationPrefs: (state: NotificationState) => state.allNotificationPrefs,
-    isFirebaseInitialised: (state: NotificationState) => state.isFirebaseInitialised,
+    getAllNotificationPrefs: (state: NotificationState) => state.allNotificationPrefs
   },
   actions: {
     setNotifications(payload: any) {
