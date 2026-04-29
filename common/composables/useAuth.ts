@@ -128,7 +128,11 @@ export function useAuth() {
       });
       
       if(accxuiConfig.value.preLogout) {
-        await accxuiConfig.value.preLogout();
+        try {
+          await accxuiConfig.value.preLogout();
+        } catch (err) {
+          logger.error("Error running preLogout hook", err);
+        }
       }
 
       try {
@@ -155,7 +159,11 @@ export function useAuth() {
     }
 
     if(accxuiConfig.value.postLogout) {
-      await accxuiConfig.value.postLogout();
+      try {
+        await accxuiConfig.value.postLogout();
+      } catch (err) {
+        logger.error("Error running postLogout hook", err);
+      }
     }
 
     if (commonUtil.isAppEmbedded()) {
