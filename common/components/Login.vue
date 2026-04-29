@@ -61,12 +61,6 @@
           </section>
         </form>
       </div>
-    
-      <ion-fab @click="router.push('/')" vertical="bottom" horizontal="end" slot="fixed">
-        <ion-fab-button color="medium">
-          <ion-icon :icon="gridOutline" /> 
-        </ion-fab-button>
-      </ion-fab>
     </ion-content>
   </ion-page>
 </template>
@@ -76,8 +70,6 @@ import {
   IonButton,
   IonChip,
   IonContent,
-  IonFab,
-  IonFabButton,
   IonIcon,
   IonInput,
   IonItem,
@@ -88,7 +80,7 @@ import {
 } from "@ionic/vue";
 import { ref } from "vue";
 import Logo from "./Logo.vue";
-import { arrowBackOutline, arrowForwardOutline, gridOutline, warningOutline } from 'ionicons/icons'
+import { arrowBackOutline, arrowForwardOutline, warningOutline } from 'ionicons/icons'
 import { cookieHelper } from "../helpers/cookieHelper";
 import { translate } from "../core/i18n"
 import { commonUtil } from "../utils/commonUtil";
