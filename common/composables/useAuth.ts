@@ -99,7 +99,9 @@ export function useAuth() {
 
       updateToken(omsToken, expiresAt)
 
-      await accxuiConfig.value.postLogin();
+      if(accxuiConfig.value.postLogin) {
+        await accxuiConfig.value.postLogin();
+      }
     } catch (err: any) {
       if(err?.message?.includes("INVALID_APP_CONTEXT")) {
         return;
@@ -125,7 +127,13 @@ export function useAuth() {
         backdropDismiss: false,
       });
       
-      await accxuiConfig.value.preLogout();
+      if(accxuiConfig.value.preLogout) {
+        try {
+          await accxuiConfig.value.preLogout();
+        } catch (err) {
+          logger.error("Error running preLogout hook", err);
+        }
+      }
 
       try {
         let resp = await api({
@@ -150,7 +158,13 @@ export function useAuth() {
       commonUtil.showToast(translate("Session expired. Refreshing..."))
     }
 
-    await accxuiConfig.value.postLogout();
+    if(accxuiConfig.value.postLogout) {
+      try {
+        await accxuiConfig.value.postLogout();
+      } catch (err) {
+        logger.error("Error running postLogout hook", err);
+      }
+    }
 
     if (commonUtil.isAppEmbedded()) {
       const embeddedAppStore = useEmbeddedAppStore();
