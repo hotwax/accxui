@@ -139,7 +139,7 @@ const toggleOmsInput = () => {
 };
 
 const login = async (params?: any) => {
-  if((!username.value || !password.value) && !params.token) {
+  if((!username.value || !password.value) && !params?.token) {
     commonUtil.showToast(translate("Please fill in the user details"));
     return;
   }
@@ -192,6 +192,7 @@ const initialise = async () => {
     // SAML login handling as only token will be returned in the query when login through SAML
     await login(route.query)
     dismissLoader();
+    isInitializing.value = false;
     return;
   }
 
@@ -209,6 +210,7 @@ const initialise = async () => {
   if (isAuthenticated.value) {
     router.value.push("/");
     dismissLoader();
+    isInitializing.value = false;
     return;
   }
 
@@ -216,6 +218,7 @@ const initialise = async () => {
     accxuiConfig.value.oms = cookieHelper().get("oms") as string
     await login({ token: cookieHelper().get("token"), expirationTime: cookieHelper().get("expirationTime") })
     dismissLoader();
+    isInitializing.value = false;
     return;
   }
 
