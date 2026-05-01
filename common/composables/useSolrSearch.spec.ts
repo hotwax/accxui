@@ -8,7 +8,7 @@ describe('prepareOrderLookupQuery', () => {
     const query = {};
     const payload = prepareOrderLookupQuery(query);
     expect(payload.json.filter).toEqual(["docType: ORDER", "orderTypeId: SALES_ORDER"]);
-    expect(payload.json.params.q.op).toBe("AND");
+    expect(payload.json.params["q.op"]).toBe("AND");
     expect(payload.json.query).toBe("*:*");
   });
 
