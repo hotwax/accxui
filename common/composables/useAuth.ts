@@ -140,11 +140,11 @@ export function useAuth() {
           url: "logout",
           method: "GET",
           baseURL: commonUtil.getOmsURL()
-        });
+        }) as any;
         resp = JSON.parse(resp.data.startsWith("//") ? resp.data.replace("//", "") : resp.data);
 
-        if(resp?.data?.logoutAuthType == "SAML2SSO") {
-          redirectionUrl = resp.data.logoutUrl;
+        if(resp?.logoutAuthType == "SAML2SSO") {
+          redirectionUrl = resp.logoutUrl;
         }
       } catch (err) {
         logger.error("Error logging out", err);
