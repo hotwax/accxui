@@ -12,6 +12,10 @@ const requestInterceptor = async (config: any) => {
   // that we are always relogin with the new credentials present in cookies.
   const noAuthEndpoints = ["login", "logout", "checkLoginOptions", "admin/user/profile", "getPermissions", "app-bridge/login"]
 
+  // Endpoints that re-issue auth tokens must not carry a stale Bearer token, otherwise the OMS rejects the
+  // request with 401 "logged out elsewhere" when the prior session was invalidated externally.
+  const reLoginEndpoints = ["login", "app-bridge/login"]
+
   // When the same app is opened in multiple tabs and logout from one tab, then another tab still uses the old
   // session, to handle this scenario we have added check to always validate authentication before api calls
   // so if the current apps session becomes invalid, due to external change to cookies/state, then the app updates
@@ -23,7 +27,7 @@ const requestInterceptor = async (config: any) => {
     return Promise.reject(new Error("INVALID_APP_CONTEXT"));
   }
 
-  if (token) {
+  if (token && !reLoginEndpoints.includes(config.url)) {
     config.headers["Authorization"] = "Bearer " + token;
     config.headers['Content-Type'] = 'application/json';
   }
