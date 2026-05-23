@@ -73,6 +73,8 @@ sandbox/
 
 `circuit/src/mastra/index.ts` adds brokering agents and routes alongside the existing `orderRoutingAgent`/workflows. Storage, logger, observability blocks are untouched.
 
+The brokering tools are wired into their owning agents inside `brokering/agents.ts` (each agent's `tools` block), matching the current per-agent pattern in the original `index.ts`. They are not registered at the Mastra config level. `circuit/src/mastra/tools/` is a flat directory of tool factories shared by both `orderRoutingAgent` (existing) and the brokering agents (newly added).
+
 ```ts
 import { brokeringAgents } from './brokering/agents';
 import { brokeringApiRoutes } from './brokering/routes';
@@ -320,6 +322,6 @@ If Phase 2 or Phase 3 surfaces a regression, the PWA branch has not merged and t
 - `rg 'mastra' accxui/apps/order-routing/src accxui/apps/order-routing/tests` returns only the two HTTP-client services and their tests, with no imports from `../mastra/` or `@mastra/*`.
 - `accxui/apps/order-routing/package.json` contains no `@mastra/*` or `mastra` dependencies and no `mastra:*` scripts.
 - `accxui/apps/order-routing/mastra/` directory does not exist.
-- `circuit/src/mastra/brokering/` contains all 19 relocated source files and a working `agents.ts` + `routes.ts`.
+- `circuit/src/mastra/brokering/` contains every relocated source file (13 `.ts` files plus the `domain/knowledge/` yaml asset) and a working `agents.ts` + `routes.ts`. `circuit/src/mastra/tools/` contains the 7 relocated brokering tools.
 - `circuit/src/mastra/test/brokering/` contains all 12 test files and the fixtures dir; every test exits 0.
 - A locally-running circuit Mastra (`pnpm mastra:dev`) serves the three documented routes; the locally-running PWA (`npm run dev`) successfully completes a draft, an inquiry, and a runs-list inquiry against it.
