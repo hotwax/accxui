@@ -358,7 +358,7 @@ const telecomCode = {
 } as any;
 
 const getMaargURL = () => {
-  const maarg = useEmbeddedAppStore().getMaarg || cookieHelper().get("maarg")
+  const maarg = useEmbeddedAppStore().maarg || cookieHelper().get("maarg")
   let maargURL = ""
   if (maarg) {
     maargURL = maarg.startsWith('http') ? maarg.includes('/rest/s1') ? maarg : `${maarg}/rest/s1/` : `https://${maarg}.hotwax.io/rest/s1/`;
@@ -367,11 +367,11 @@ const getMaargURL = () => {
 }
 
 const getMaargBaseURL = () => {
-  return useEmbeddedAppStore().getMaarg ||  cookieHelper().get("maarg")
+  return useEmbeddedAppStore().maarg || cookieHelper().get("maarg")
 }
 
 const getOmsURL = () => {
-  const oms = useEmbeddedAppStore().getOms || cookieHelper().get("oms")
+  const oms = useEmbeddedAppStore().oms || cookieHelper().get("oms")
   let omsURL = ""
   if (oms) {
     omsURL = oms.startsWith('http') ? oms.includes('/api') ? oms : `${oms}/api/` : `https://${oms}.hotwax.io/api/`
@@ -380,15 +380,15 @@ const getOmsURL = () => {
 }
 
 const getToken = () => {
-  return useEmbeddedAppStore().getToken || cookieHelper().get("token")
+  return useEmbeddedAppStore().token.value || cookieHelper().get("token")
 }
 
 const getTokenExpiration = () => {
-  return useEmbeddedAppStore().getTokenExpiration || cookieHelper().get("expirationTime")
+  return useEmbeddedAppStore().token.expiration || cookieHelper().get("expirationTime")
 }
 
 const isAppEmbedded = () => {
-  return !!useEmbeddedAppStore().getShopifyAppBridge
+  return !!useEmbeddedAppStore().shopifyAppBridge
 }
 
 const statusColor = {
@@ -644,6 +644,45 @@ const hasWebcamAccess = async () => {
   }
 }
 
+
+// Utility for parsing CSV file 
+// Package Used : PapaParse (Link to Documentation : https://www.papaparse.com/docs#config)
+
+// In this we will be receiving the file and options in the function 
+// and we are returning a promise with results in it 
+
+// We have used the parse method of the papaparse library which will take a config object with File.
+// In the config object we have passed various keys:
+//   - header : It tells papaparse that there will be a header in the CSV. 
+//   - skipEmptyLines : It will ignore any empty lines in the CSV.
+//   - complete : A parse result always contains three objects: data, errors, and meta. 
+//     data and errors are arrays, and meta is an object. In the step callback, the data 
+//     array will only contain one element.
+
+// Also, we have passed options, as if user wants to add some more properties to the method 
+// or if he want to modify some pre-build keys then he can do so.
+
+// Types of Responses
+
+// CSV FILE :
+// columnA,columnB,columnC
+// "Susan",41,a
+// "Mike",5,b
+// "Jake",33,c
+// "Jill",30,d
+
+// For (header:true) we get
+// [{columnA: 'Susan', columnB: '41', columnC: 'a'},
+// {columnA: 'Mike', columnB: '5', columnC: 'b'},
+// {columnA: 'Jake', columnB: '33', columnC: 'c'},
+// {columnA: 'Jill', columnB: '30', columnC: 'd'}]
+
+// // For (header:false) we get
+// [['columnA', 'columnB', 'columnC'],
+// ['Susan', '41', 'a'],
+// ['Mike', '5', 'b'],
+// ['Jake', '33', 'c'],
+// ['Jill', '30', 'd']]
 
 const parseCsv = async (file: File, options?: any) => {
   return new Promise((resolve, reject) => {
