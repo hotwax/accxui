@@ -10,6 +10,9 @@ on:
       appDir:
         required: true
         type: string
+      firebaseProject:
+        default: 'default'
+        type: string
     secrets:
       envPAT:
         required: true
@@ -79,7 +82,7 @@ jobs:
         run: npm install -g firebase-tools
 
       - name: Set Firebase project
-        run: firebase use default --token "$HOTWAX_PUBLIC_SECRET"
+        run: firebase use ${{ inputs.firebaseProject }} --token "$HOTWAX_PUBLIC_SECRET"
         env:
           HOTWAX_PUBLIC_SECRET: ${{ secrets.HOTWAX_PUBLIC_SECRET }}
         working-directory: apps/${{ inputs.appDir }}
