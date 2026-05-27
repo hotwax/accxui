@@ -160,6 +160,7 @@ Discriminated union on `op` (see `circuit/src/mastra/tools/runBrokeringGroupSimu
 | `REMOVE_RULE` | `routingRuleId` |
 | `SET_RULE_ACTION` | `routingRuleId`, `actionTypeEnumId`, `actionValue` |
 | `SET_RULE_INV_COND` | `routingRuleId`, `fieldName`, `fieldValue` |
+| `SET_RULE_ASSIGNMENT` | `routingRuleId`, `assignmentEnumId` — **new op** (per-rule "allow partial allocation" toggle, `ORA_SINGLE`/`ORA_MULTI`). Not in the original tool union; backend must add it. |
 | `SET_ROUTING_FILTER` | `orderRoutingId`, `fieldName`, `fieldValue` |
 | `SET_ROUTING_SEQUENCE_NUM` | `orderRoutingId`, `sequenceNum` |
 | `SET_RULE_SEQUENCE_NUM` | `routingRuleId`, `sequenceNum` |
@@ -253,8 +254,11 @@ diff(baseline, snapshot) → { parameterOverrides: Partial<SimulationConfig>, ro
   - routing/rule present in snapshot but not baseline → `ADD_RULE` (new rules carry a temp client id
     in `ruleSeed`, never a real `routingRuleId`).
   - present in baseline but not snapshot → `REMOVE_RULE`.
-  - same id, changed action → `SET_RULE_ACTION`; changed inventory condition → `SET_RULE_INV_COND`;
-    changed routing filter → `SET_ROUTING_FILTER`.
+  - same id, changed action → `SET_RULE_ACTION`; changed per-rule allocation toggle → `SET_RULE_ASSIGNMENT`.
+  - filters (order filters and rule inventory conditions) are diffed by `fieldName`, emitting **one
+    delta per change**: every changed/added filter → `SET_ROUTING_FILTER` / `SET_RULE_INV_COND` with
+    the new value; every **removed** filter (present in baseline, gone from snapshot) → the same op
+    with `fieldValue: null` (the backend reads a null `fieldValue` as "clear this field").
   - changed order → `SET_ROUTING_SEQUENCE_NUM` / `SET_RULE_SEQUENCE_NUM`.
 - A variation that diffs to an empty override + empty delta list is flagged in the UI as a no-op and
   excluded from submit (with a warning).
