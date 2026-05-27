@@ -1055,7 +1055,7 @@ Note: `SimulationCanvas`, `VariationRail`, and `SimulationResults` are created i
 
 - [ ] **Step 5: Verify the app boots and the tab loads**
 
-Run: `npm run serve` (note the port). With the app running, use the Chrome DevTools MCP server (per repo convention) to open `/tabs/simulate` and confirm: the tab appears, the group list renders, clicking a group navigates to `/tabs/simulate/:id` and shows "Loading group…" then the empty editor stubs. Confirm no console errors.
+Run: `npm run dev` (note the port). With the app running, use the Chrome DevTools MCP server (per repo convention) to open `/tabs/simulate` and confirm: the tab appears, the group list renders, clicking a group navigates to `/tabs/simulate/:id` and shows "Loading group…" then the empty editor stubs. Confirm no console errors.
 
 - [ ] **Step 6: Commit**
 
@@ -1109,7 +1109,7 @@ Add a primary action that calls `simulationStore().saveAsVariation(label)`. Prom
 
 - [ ] **Step 6: Verify in the running app**
 
-With `npm run serve` running, via Chrome DevTools MCP: open a group, change `distance`, change a rule action, click "Save as variation"; confirm a variation appears in the store (check it shows up in the rail after Task 11, or inspect `simulationStore().variations` via the Vue devtools). Confirm no network POST to `order-routing/groups` fires (Network tab) — nothing should persist.
+With `npm run dev` running, via Chrome DevTools MCP: open a group, change `distance`, change a rule action, click "Save as variation"; confirm a variation appears in the store (check it shows up in the rail after Task 11, or inspect `simulationStore().variations` via the Vue devtools). Confirm no network POST to `order-routing/groups` fires (Network tab) — nothing should persist.
 
 - [ ] **Step 7: Commit**
 
@@ -1360,7 +1360,7 @@ git commit -m "feat(simulation): results scorecard + drill-downs"
 
 - [ ] **Step 1: Full flow check**
 
-With `npm run serve` running, via Chrome DevTools MCP:
+With `npm run dev` running, via Chrome DevTools MCP:
 1. Open `/tabs/simulate`, pick a group.
 2. Edit distance + an action; "Save as variation" (label "A").
 3. Reset to baseline; remove a rule; "Save as variation" (label "B").
