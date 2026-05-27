@@ -46,8 +46,11 @@ variants by hand.
 ## Key decisions (from brainstorming)
 
 1. **Simulation target** — the same group-run simulation backend the `runBrokeringGroupSimulation`
-   tool uses. The screen produces the same logical payload (flat params + `routingConfigDeltas` +
-   `variants[]`) and consumes the same `{ groupRun } | { variation }` result envelope.
+   tool uses (`simulate#BrokeringGroupRun`). The screen produces the group-run payload
+   (`variants[]` + `routingConfigDeltas[]` + run options) and consumes the parsed
+   `{ groupRun } | { variation }` result Maps. Note: the group service does **not** accept flat
+   parameter overrides at the root — per-variant overrides live inside `variants[].parameterOverrides`
+   (see "Backend dependency").
 2. **Variation model** — each variation is a **full snapshot** (photograph) of the edited group
    config. The baseline is the live group config as loaded and is never edited. The
    *changes-only* payload the backend wants is computed by **diffing** each snapshot against the
@@ -67,7 +70,9 @@ variants by hand.
 7. **Async job model** — the screen submits to an **async job-based group endpoint**
    (submit → `jobId` → poll), mirroring the single-run job model, rather than the existing
    synchronous group endpoint. **This endpoint does not exist yet** and is a hard backend
-   dependency (see "Backend dependency").
+   dependency (see "Backend dependency"). The async poll returns a **new** clean
+   `{ groupRun? , variation? }` parsed-Map envelope — *not* the shape the synchronous endpoint
+   returns today.
 
 ---
 
@@ -76,10 +81,24 @@ variants by hand.
 ### Current reality
 
 - **Group run is synchronous today.** `runBrokeringGroupSimulation` POSTs to
-  `/rest/s1/order-routing/routingGroups/{routingGroupId}/simulation` and **blocks** until the
-  simulation completes (typically 3–10 minutes, longer with variants). The HTTP response body *is*
-  the result: `{ groupRun }` (no variants) or `{ variation }` (variants present). There is no
-  `jobId`, no status field, no polling. Errors are non-2xx HTTP.
+  `/rest/s1/order-routing/routingGroups/{routingGroupId}/simulation` (service
+  `simulate#BrokeringGroupRun`) and **blocks** until the simulation completes (typically 3–10
+  minutes, longer with variants). There is no `jobId`, no status field, no polling; errors are
+  non-2xx HTTP.
+- **The synchronous response is NOT a `{ groupRun } | { variation }` envelope.** It returns the
+  service out-params: `groupRunResult` (typed) + `impactPayloadJson` (a JSON *string* of the
+  group-run tree), and — only when `variants[]` was sent — `variationResult` (typed) +
+  `variationImpactPayloadJson` (a JSON *string*). The clean parsed `{ groupRun }` / `{ variation }`
+  Maps are what the async endpoint below will expose; they are obtained by parsing those
+  `*ImpactPayloadJson` strings.
+- **The group service does not accept flat root parameter overrides.** The flat vocabulary
+  (`distance`, `brokeringSafetyStock`, `minimumStockOverrides`, …) belongs to the *single-store*
+  `simulate#BrokeringWhatIf` service. The group service's in-params are `routingGroupId` (URL),
+  `simulationConfig` (typed; in-process callers only — not buildable from a JSON client),
+  `routingConfigDeltas` (`List`), `variants` (`List<Map>` — the JSON-friendly path), `sampleCap`,
+  `changeReasonEnumId`, `simUser`, `simNow`, `entityGroupName`. Per-variant parameter overrides go
+  in `variants[].parameterOverrides` (parsed by `SimulationConfig.fromFlatMap`); per-variant rule
+  changes go in `variants[].routingDeltas` (parsed by `RoutingConfigDelta.fromFlatMap`).
 - **The async job model exists only for single-run.** `submitBrokeringSimulation` /
   `getBrokeringSimulationStatus` use `/rest/s1/order-routing/productStores/{productStoreId}/brokeringSimulation/jobs/{jobId}`
   and return `{ jobId, status, impact?, error? }`. This is a different endpoint and resource and is
@@ -94,35 +113,37 @@ async job variant.
 
 ```
 POST /rest/s1/order-routing/routingGroups/{routingGroupId}/brokeringSimulation/jobs
-  body (flat — simulationConfig fields promoted to root, routingGroupId in URL only):
+  body (routingGroupId in URL only — NO flat root parameter overrides):
     {
-      // parameter / data overrides (all optional)
-      distance, brokeringSafetyStock, weekOfSupplyFilterEnabled, weekOfSupplyThreshold,
-      facilityGroupId, ignoreFacilityOrderLimit, facilityOrderLimitOverride,
-      splitOrderItemGroup, assignmentEnumId, inventorySortByList, modelInventoryConsumption,
-      minimumStockOverrides, inventoryCountOverrides, allowBrokeringOverrides,
-      maximumOrderLimitOverrides, facilitiesToSimulateAtLimit,
-      facilitiesToAddToGroup, facilitiesToRemoveFromGroup,
-      // structural deltas applied to the baseline before the run
-      routingConfigDeltas: RoutingConfigDelta[],
-      // up to 5 variants, each its own overrides + structural deltas
+      // up to 5 variants; each carries its own flat-vocabulary overrides + structural deltas
       variants: [{ label, parameterOverrides?, routingDeltas? }],
-      sampleCap
+      //   parameterOverrides uses the flat SimulationConfig vocabulary (distance,
+      //   brokeringSafetyStock, …) and is parsed by SimulationConfig.fromFlatMap
+      //   routingDeltas is RoutingConfigDelta[], parsed by RoutingConfigDelta.fromFlatMap
+
+      // single-shot structural deltas applied to the baseline; usually EMPTY for this screen
+      // since baseline = live config and all changes live inside variants[]
+      routingConfigDeltas: RoutingConfigDelta[],
+
+      // run options
+      sampleCap, changeReasonEnumId, simUser, simNow, entityGroupName
     }
-  → 200 { jobId }
+  → 200 { jobId }   // does NOT block
 
 GET /rest/s1/order-routing/routingGroups/{routingGroupId}/brokeringSimulation/jobs/{jobId}
   → 200 {
       jobId,
       status: 'running' | 'complete' | 'failed' | 'not_found',
-      groupRun?,    // present when status === 'complete' and no variants were sent
-      variation?,   // present when status === 'complete' and variants were sent
+      groupRun?,    // present when status === 'complete' and no variants were sent (parsed Map)
+      variation?,   // present when status === 'complete' and variants were sent (parsed Map)
       error?        // present when status === 'failed'
     }
 ```
 
-- `complete` → body carries the same `{ groupRun }` / `{ variation }` envelope the synchronous
-  endpoint returns today (so the result-reading code is shared regardless of how the job is run).
+- `complete` → body carries a **new** clean `{ groupRun }` / `{ variation }` envelope: the *parsed*
+  form of the synchronous endpoint's `impactPayloadJson` / `variationImpactPayloadJson` strings.
+  This is the shape `SimulationResults` consumes — it is **not** the raw shape the synchronous
+  endpoint returns (which is `groupRunResult` + `*ImpactPayloadJson` strings).
 - Completed jobs stay pollable for ~5 minutes, then return `not_found` (same lifecycle as the
   single-run job endpoint).
 
@@ -311,9 +332,14 @@ Reads the merged `variation` envelope:
 1. **Async group endpoint** — the submit/poll contract above is assumed and **must be confirmed or
    built by the backend team**. If they instead keep only the synchronous endpoint, the
    submit/poll path must be reworked (e.g. proxy the long blocking call through the circuit server).
-2. **Flat body shape** — assumes the job endpoint accepts the same flat body the synchronous
-   endpoint does (params promoted to root, `routingGroupId` in URL). Confirm with backend.
-3. **Result envelope keys** — assumes `complete` jobs return `{ groupRun }` / `{ variation }`
-   unchanged from the synchronous endpoint. If keys differ, only the result-reading code changes.
+2. **Body shape** — the job endpoint takes `variants[]` (with flat-vocabulary
+   `parameterOverrides` per variant), `routingConfigDeltas[]`, and the run options; it does **not**
+   accept flat parameter overrides at the root (those belong to the single-store what-if service).
+   Confirm the backend wraps the existing `simulate#BrokeringGroupRun` with this submit shape.
+3. **Result envelope** — the async `complete` body is the **parsed** `{ groupRun }` / `{ variation }`
+   Map (parsed from `impactPayloadJson` / `variationImpactPayloadJson`), not the synchronous
+   endpoint's raw `groupRunResult` + `*ImpactPayloadJson`-string shape. The backend owns the
+   parsing in the job worker. If the final key names differ, only `SimulationResults`/the service's
+   result-reading code changes.
 4. **`ruleSeed` shape for `ADD_RULE`** — the exact field map a new rule needs is defined by the
    backend; the diff engine assembles it from the canvas's new-rule state and passes it through.
