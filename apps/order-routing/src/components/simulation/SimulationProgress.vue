@@ -12,9 +12,9 @@
         {{ translate("Brokered") }} {{ bp.brokered }} · {{ translate("Queued") }} {{ bp.queued }}
       </p>
       <ion-segment
-        class="stage-toggle"
         :value="viewMode[bp.batchIndex] ?? 'animation'"
-        @ion-change="(e: CustomEvent) => viewMode[bp.batchIndex] = e.detail.value as 'live' | 'animation'"
+        @ionChange="viewMode[bp.batchIndex] = $event.detail.value as 'live' | 'animation'"
+        class="stage-toggle"
       >
         <ion-segment-button value="live">
           <ion-label>{{ translate("Live") }} 📜</ion-label>
