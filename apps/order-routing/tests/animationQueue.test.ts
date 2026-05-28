@@ -1,5 +1,5 @@
 import assert from "assert";
-import { initAnimState, enqueueNew, LOG_CAP } from "../src/util/animationQueue";
+import { initAnimState, enqueueNew, tick, LOG_CAP } from "../src/util/animationQueue";
 import { OrderEvent } from "../src/types/simulation";
 
 const ev = (seq: number, facilityId: string | null = "STORE_42"): OrderEvent => ({
@@ -55,12 +55,11 @@ const ev = (seq: number, facilityId: string | null = "STORE_42"): OrderEvent => 
 // LOG_CAP is exported and is a positive integer
 assert.ok(Number.isInteger(LOG_CAP) && LOG_CAP > 0, "LOG_CAP exported");
 
-import { tick } from "../src/util/animationQueue";
-
 // tick on empty queue: idles, returns equal state when already idle
 {
   const s = initAnimState();
   const t = tick(s);
+  assert.strictEqual(t, s, "already-idle returns the same state ref");
   assert.strictEqual(t.current, null);
   assert.strictEqual(t.pose, "idle");
   assert.strictEqual(t.queue.length, 0);
