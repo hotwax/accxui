@@ -103,19 +103,21 @@ function glyphForReason(ev: OrderEvent): string {
   font-family: inherit;
   white-space: pre;
   line-height: 1.1;
-  /* Re-keyed on every (seq, pose) change → element remounts → animation restarts. */
-  animation: pose-in 450ms ease-out;
+  /* Re-keyed on every (seq, pose) change → element remounts → animation restarts.
+     Character settles quickly into the new pose, then dwells for the rest of the tick. */
+  animation: pose-in 1000ms ease-out;
 }
 @keyframes pose-in {
   0%   { opacity: 0.3; transform: translateY(-2px); }
+  30%  { opacity: 1;   transform: translateY(0); }
   100% { opacity: 1;   transform: translateY(0); }
 }
 .thought { margin: 4px 0 6px; font-family: inherit; min-height: 1.4em; }
 .thought .dim { color: var(--ion-color-medium); }
 .thought .warn { color: var(--ion-color-warning-shade); }
-.thought .dots { display: inline-block; animation: dots-pulse 900ms ease-in-out infinite; }
+.thought .dots { display: inline-block; animation: dots-pulse 1000ms ease-in-out infinite; }
 @keyframes dots-pulse {
-  0%, 100% { opacity: 0.3; }
+  0%, 100% { opacity: 0.25; }
   50%      { opacity: 1; }
 }
 .connector {
@@ -124,8 +126,9 @@ function glyphForReason(ev: OrderEvent): string {
   white-space: pre;
   line-height: 1.1;
   min-height: 2.2em;
-  /* Only reveals during routing/sad phase (connectorFor returns "" otherwise). */
-  animation: connector-draw 450ms ease-out;
+  /* Only reveals during routing/sad (connectorFor returns "" otherwise).
+     Slow linear reveal across the full tick to feel like the order is being sent. */
+  animation: connector-draw 1000ms linear;
 }
 @keyframes connector-draw {
   0%   { clip-path: inset(0 100% 0 0); }

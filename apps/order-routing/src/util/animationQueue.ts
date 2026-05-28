@@ -20,8 +20,11 @@ export interface AnimState {
 export const LOG_CAP = 20;
 
 /** Animator tick cadence in ms (one PHASE per tick — each order takes two phases:
- *  thinking → routing/sad — so total per-order time is 2 × TICK_MS). */
-export const TICK_MS = 450;
+ *  thinking → routing/sad — so total per-order time is 2 × TICK_MS).
+ *  Tuned for a calm, "live" feel rather than to keep up with polling bursts (the
+ *  user explicitly chose steady pace over fast-forward; counters above the stage
+ *  are authoritative for real progress). */
+export const TICK_MS = 1000;
 
 export function initAnimState(): AnimState {
   return {
