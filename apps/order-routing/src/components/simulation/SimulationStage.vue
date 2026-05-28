@@ -11,11 +11,11 @@
           routed <strong>{{ currentOrder.orderId }}</strong> → <strong>{{ currentOrder.facilityId }}</strong> ✓
         </span>
         <span v-else-if="pose === 'sad' && currentOrder" class="warn">
-          <template v-if="currentOrder.facilityId">
+          <template v-if="currentOrder.facilityId && currentOrder.facilityId !== 'UNFILLABLE_PARKING'">
             couldn't fill <strong>{{ currentOrder.orderId }}</strong> at {{ currentOrder.facilityId }} ✗
           </template>
           <template v-else>
-            no facility for <strong>{{ currentOrder.orderId }}</strong> ✗
+            couldn't fill <strong>{{ currentOrder.orderId }}</strong> — parked ✗
           </template>
         </span>
         <span v-else-if="pose === 'searching'" class="dim">
@@ -42,7 +42,7 @@
     <!-- Log: SR-readable, newest first. -->
     <ul class="log" aria-live="polite">
       <li v-for="ev in log" :key="ev.seq" :class="logClassFor(ev)">
-        &gt; {{ ev.orderId }} → {{ ev.facilityId ?? translate("unfilled") }}
+        &gt; {{ ev.orderId }} → {{ destLabelFor(ev) }}
         {{ glyphForReason(ev) }} {{ ev.finalReason }}
       </li>
       <li v-if="!log.length" class="dim">{{ translate("No orders yet.") }}</li>
@@ -90,16 +90,28 @@ function connectorFor(ev: OrderEvent | null, pose: Pose): string {
   return `   │\n   └──▶ [🏪 ${ev.facilityId}]`;
 }
 
+// Routing to UNFILLABLE_PARKING is a failure outcome, not a real fulfillment, even when the
+// backend reports finalReason === "FULLY_BROKERED" for it.
+function isHappyOutcome(ev: OrderEvent): boolean {
+  if (!ev.facilityId || ev.facilityId === "UNFILLABLE_PARKING") return false;
+  return ev.finalReason === "FULLY_BROKERED" || ev.finalReason === "PARTIALLY_BROKERED";
+}
+
 function logClassFor(ev: OrderEvent): string {
-  if (ev.facilityId && (ev.finalReason === "FULLY_BROKERED" || ev.finalReason === "PARTIALLY_BROKERED")) return "ok";
+  if (isHappyOutcome(ev)) return "ok";
   if (ev.finalReason === "QUEUED") return "muted";
   return "warn";
 }
 
 function glyphForReason(ev: OrderEvent): string {
-  if (ev.facilityId && (ev.finalReason === "FULLY_BROKERED" || ev.finalReason === "PARTIALLY_BROKERED")) return "✓";
+  if (isHappyOutcome(ev)) return "✓";
   if (ev.finalReason === "QUEUED") return "⊙";
   return "✗";
+}
+
+function destLabelFor(ev: OrderEvent): string {
+  if (!ev.facilityId || ev.facilityId === "UNFILLABLE_PARKING") return translate("unfilled");
+  return ev.facilityId;
 }
 </script>
 

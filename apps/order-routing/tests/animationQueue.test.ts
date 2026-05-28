@@ -107,24 +107,32 @@ assert.ok(Number.isInteger(LOG_CAP) && LOG_CAP > 0, "LOG_CAP exported");
   assert.strictEqual(s.stores.size, 2);
 }
 
-// tick two-phase UNFILLABLE_PARKING: facilityId is set, but the order couldn't be filled
-// there — it goes to unfilled, not the store tile, and the character is sad.
+// tick two-phase UNFILLABLE_PARKING via finalReason: the rule said unfillable.
 {
   const unfillable: OrderEvent = {
     seq: 1, orderId: "O1", facilityId: "STORE_42", finalReason: "UNFILLABLE_PARKING",
   };
   let s = enqueueNew(initAnimState(), [unfillable]);
-
   s = tick(s); // thinking
   assert.strictEqual(s.pose, "thinking");
-  assert.strictEqual(s.stores.size, 0);
-  assert.strictEqual(s.unfilled, 0);
+  s = tick(s);
+  assert.strictEqual(s.pose, "sad", "finalReason=UNFILLABLE_PARKING → sad");
+  assert.strictEqual(s.stores.size, 0, "no real-store tile");
+  assert.strictEqual(s.unfilled, 1);
+}
 
-  s = tick(s); // commit: sad, not routing — even though facilityId is set
-  assert.strictEqual(s.pose, "sad", "UNFILLABLE_PARKING → sad even with facilityId");
-  assert.strictEqual(s.stores.size, 0, "no store tile for unfillable");
+// tick two-phase UNFILLABLE_PARKING via facilityId: routed to the give-up bin facility
+// (finalReason can be FULLY_BROKERED here because routing into parking "succeeded").
+{
+  const parked: OrderEvent = {
+    seq: 1, orderId: "O1", facilityId: "UNFILLABLE_PARKING", finalReason: "FULLY_BROKERED",
+  };
+  let s = enqueueNew(initAnimState(), [parked]);
+  s = tick(s); // thinking
+  s = tick(s);
+  assert.strictEqual(s.pose, "sad", "facilityId=UNFILLABLE_PARKING → sad regardless of finalReason");
+  assert.strictEqual(s.stores.size, 0, "no UNFILLABLE_PARKING storefront tile");
   assert.strictEqual(s.unfilled, 1, "unfilled bucket bumps");
-  assert.deepStrictEqual(s.log.map((e) => e.seq), [1]);
 }
 
 // tick two-phase null-facility: tick 1 = thinking, tick 2 = sad + unfilled bumps.

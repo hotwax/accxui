@@ -66,11 +66,15 @@ export function tick(state: AnimState): AnimState {
     const stores = new Map(state.stores);
     let unfilled = state.unfilled;
     let pose: Pose;
-    // UNFILLABLE_PARKING events can carry a facilityId (the facility that was *attempted*),
-    // but the order ultimately couldn't be filled there — semantically the same outcome as a
-    // null-facility unfilled event. So we send it to the unfilled bucket and the character
-    // gets the sad pose, not routing.
-    const unfillable = head.finalReason === "UNFILLABLE_PARKING";
+    // UNFILLABLE_PARKING shows up two ways in the feed:
+    //   (a) finalReason === "UNFILLABLE_PARKING" — the rule decided it was unfillable.
+    //   (b) facilityId === "UNFILLABLE_PARKING"  — the order was "routed" to the parking
+    //       facility (the give-up bin). The backend will often report finalReason as
+    //       FULLY_BROKERED for these because routing succeeded into the parking facility,
+    //       but for the user it's still a failure outcome.
+    // Either signal → unfilled bucket + sad pose; no storefront tile for the parking facility.
+    const unfillable =
+      head.finalReason === "UNFILLABLE_PARKING" || head.facilityId === "UNFILLABLE_PARKING";
     if (head.facilityId && !unfillable) {
       stores.set(head.facilityId, (stores.get(head.facilityId) ?? 0) + 1);
       pose = "routing";
