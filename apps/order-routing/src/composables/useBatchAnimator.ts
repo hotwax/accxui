@@ -1,10 +1,11 @@
 // src/composables/useBatchAnimator.ts
 // Bridges simulationStore.batchProgress[i].events into the animationQueue state machine
-// and drives a TICK_MS-cadence tick loop (one phase per tick, two phases per order).
-// One instance per mounted SimulationStage.
+// and drives an adaptive-pace tick loop (one phase per tick, two phases per order; the
+// per-tick delay shrinks as backlog grows so the animation never falls more than ~1 poll
+// behind real progress). One instance per mounted SimulationStage.
 import { computed, onUnmounted, ref, watch, watchEffect } from "vue";
 import { simulationStore } from "@/store/simulationStore";
-import { initAnimState, enqueueNew, tick, TICK_MS } from "@/util/animationQueue";
+import { initAnimState, enqueueNew, tick, paceFor } from "@/util/animationQueue";
 
 export function useBatchAnimator(batchIndex: number) {
   const sim = simulationStore();
@@ -20,21 +21,35 @@ export function useBatchAnimator(batchIndex: number) {
 
   // Run the tick driver while the batch is doing something (running or backlog to drain).
   // Stops cleanly once the run is over AND the queue has been drained to idle.
-  let intervalId: ReturnType<typeof setInterval> | null = null;
+  // Plain let — not reactive; managed exclusively by the watchEffect below and onUnmounted.
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
   const shouldTick = computed(
     () => sim.isRunning || state.value.queue.length > 0 || state.value.current !== null
   );
 
+  // Current pace (ms per phase), recomputed each tick from queue length. Component reads
+  // this to scale CSS animation durations so keyframes don't get yanked mid-draw at fast paces.
+  const pace = ref(paceFor(state.value.queue.length));
+
+  function scheduleNext() {
+    pace.value = paceFor(state.value.queue.length);
+    timeoutId = setTimeout(() => {
+      state.value = tick(state.value);
+      if (shouldTick.value) scheduleNext();
+      else timeoutId = null;
+    }, pace.value);
+  }
+
   watchEffect(() => {
-    if (shouldTick.value && intervalId === null) {
-      intervalId = setInterval(() => { state.value = tick(state.value); }, TICK_MS);
-    } else if (!shouldTick.value && intervalId !== null) {
-      clearInterval(intervalId);
-      intervalId = null;
+    if (shouldTick.value && timeoutId === null) {
+      scheduleNext();
+    } else if (!shouldTick.value && timeoutId !== null) {
+      clearTimeout(timeoutId);
+      timeoutId = null;
     }
   });
 
-  onUnmounted(() => { if (intervalId !== null) clearInterval(intervalId); });
+  onUnmounted(() => { if (timeoutId !== null) clearTimeout(timeoutId); });
 
   return {
     // While the run is in progress, an empty queue means "between bursts" — the backend is
@@ -49,5 +64,6 @@ export function useBatchAnimator(batchIndex: number) {
     stores: computed(() => state.value.stores),
     unfilled: computed(() => state.value.unfilled),
     log: computed(() => state.value.log),
+    pace: computed(() => pace.value),
   };
 }

@@ -1,6 +1,9 @@
 <template>
-  <div class="stage-wrapper">
-    <!-- ASCII stage: bordered monospace box. aria-hidden because the log below is the SR source. -->
+  <div class="stage-wrapper" :style="{ '--tick-ms': `${pace}ms` }">
+    <!-- ASCII stage: bordered monospace box. aria-hidden because the log below is the SR source.
+         CSS animations scale with --tick-ms (the adaptive per-phase pace from the composable)
+         so keyframes finish in step with the state machine even when the backlog forces a faster
+         cadence — no yanking mid-draw. -->
     <div class="stage" aria-hidden="true">
       <pre class="character" :data-pose="pose" :key="`${currentOrder?.seq ?? 'idle'}-${pose}`">{{ glyphFor(pose) }}</pre>
       <p class="thought">
@@ -59,7 +62,7 @@ import type { Pose } from "@/util/animationQueue";
 
 const props = defineProps<{ batchIndex: number }>();
 
-const { pose, currentOrder, stores, unfilled, log } = useBatchAnimator(props.batchIndex);
+const { pose, currentOrder, stores, unfilled, log, pace } = useBatchAnimator(props.batchIndex);
 
 // Map → entries for stable rendering order (Map preserves insertion order).
 const storeEntries = computed(() => Array.from(stores.value.entries()));
@@ -130,8 +133,10 @@ function destLabelFor(ev: OrderEvent): string {
   white-space: pre;
   line-height: 1.1;
   /* Re-keyed on every (seq, pose) change → element remounts → animation restarts.
-     Character settles quickly into the new pose, then dwells for the rest of the tick. */
-  animation: pose-in 1000ms ease-out;
+     Character settles quickly into the new pose, then dwells for the rest of the tick.
+     Duration scales with --tick-ms (adaptive pace) so the keyframe completes within the tick
+     even when the backlog forces a faster cadence. */
+  animation: pose-in var(--tick-ms, 1000ms) ease-out;
 }
 /* Searching = run is live but we're between event bursts. Bob gently side-to-side
    so the character stays alive instead of going frozen-idle between polls. */
@@ -163,8 +168,9 @@ function destLabelFor(ev: OrderEvent): string {
   line-height: 1.1;
   min-height: 2.2em;
   /* Only reveals during routing/sad (connectorFor returns "" otherwise).
-     Slow linear reveal across the full tick to feel like the order is being sent. */
-  animation: connector-draw 1000ms linear;
+     Linear reveal across the full tick — at the calm pace this feels like the order is being
+     sent; at fast paces it still completes in step with the state machine. */
+  animation: connector-draw var(--tick-ms, 1000ms) linear;
 }
 @keyframes connector-draw {
   0%   { clip-path: inset(0 100% 0 0); }

@@ -1,5 +1,5 @@
 import assert from "assert";
-import { initAnimState, enqueueNew, tick, LOG_CAP } from "../src/util/animationQueue";
+import { initAnimState, enqueueNew, tick, LOG_CAP, paceFor } from "../src/util/animationQueue";
 import { OrderEvent } from "../src/types/simulation";
 
 const ev = (seq: number, facilityId: string | null = "STORE_42"): OrderEvent => ({
@@ -54,6 +54,18 @@ const ev = (seq: number, facilityId: string | null = "STORE_42"): OrderEvent => 
 
 // LOG_CAP is exported and is a positive integer
 assert.ok(Number.isInteger(LOG_CAP) && LOG_CAP > 0, "LOG_CAP exported");
+
+// paceFor: tiered adaptive cadence. Boundaries at 5/15/30; values monotonically decrease.
+{
+  assert.strictEqual(paceFor(0), 1000, "empty queue → calm");
+  assert.strictEqual(paceFor(5), 1000, "5 → calm boundary");
+  assert.strictEqual(paceFor(6), 600,  "6 → snappy");
+  assert.strictEqual(paceFor(15), 600, "15 → snappy boundary");
+  assert.strictEqual(paceFor(16), 300, "16 → quick");
+  assert.strictEqual(paceFor(30), 300, "30 → quick boundary");
+  assert.strictEqual(paceFor(31), 150, "31 → fast");
+  assert.strictEqual(paceFor(500), 150, "huge backlog stays at fast");
+}
 
 // tick on empty queue: idles, returns equal state when already idle
 {

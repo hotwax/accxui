@@ -19,12 +19,21 @@ export interface AnimState {
 /** How many recent events to keep in the on-stage scrolling log. */
 export const LOG_CAP = 20;
 
-/** Animator tick cadence in ms (one PHASE per tick — each order takes two phases:
- *  thinking → routing/sad — so total per-order time is 2 × TICK_MS).
- *  Tuned for a calm, "live" feel rather than to keep up with polling bursts (the
- *  user explicitly chose steady pace over fast-forward; counters above the stage
- *  are authoritative for real progress). */
+/** Calm-pace tick cadence in ms (one PHASE per tick — each order takes two phases:
+ *  thinking → routing/sad — so total per-order time is 2 × TICK_MS at the calm pace).
+ *  The actual cadence is adaptive — see paceFor(). */
 export const TICK_MS = 1000;
+
+/** Adaptive pace for one phase in ms, based on how many orders are still waiting in the
+ *  animator queue (not counting the one currently being animated). Tiers chosen so the
+ *  animation never falls more than ~1 poll (~2.5s) behind real progress, while staying
+ *  calm when the backlog is small. Pure function — testable. */
+export function paceFor(queueLen: number): number {
+  if (queueLen <= 5) return 1000;   // calm: 2.0s/order
+  if (queueLen <= 15) return 600;   // snappy: 1.2s/order
+  if (queueLen <= 30) return 300;   // quick: 0.6s/order
+  return 150;                       // fast: 0.3s/order
+}
 
 export function initAnimState(): AnimState {
   return {
