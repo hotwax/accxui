@@ -4,11 +4,11 @@
 // progressBuffer.ts (a pure peer in the same simulation pipeline).
 import type { OrderEvent } from "../types/simulation";
 
-export type Pose = "idle" | "routing" | "sad";
+export type Pose = "idle" | "thinking" | "routing" | "sad";
 
 export interface AnimState {
   queue: OrderEvent[];              // FIFO, enqueued from batchProgress.events
-  current: OrderEvent | null;       // the event being animated this tick
+  current: OrderEvent | null;       // the event being animated this tick (thinking or routing/sad)
   pose: Pose;
   stores: Map<string, number>;      // facilityId → lifetime count for this batch
   unfilled: number;                 // lifetime null-facility count for this batch
@@ -19,8 +19,9 @@ export interface AnimState {
 /** How many recent events to keep in the on-stage scrolling log. */
 export const LOG_CAP = 20;
 
-/** Animator tick cadence in ms (one order per tick). */
-export const TICK_MS = 400;
+/** Animator tick cadence in ms (one PHASE per tick — each order takes two phases:
+ *  thinking → routing/sad — so total per-order time is 2 × TICK_MS). */
+export const TICK_MS = 450;
 
 export function initAnimState(): AnimState {
   return {
@@ -48,25 +49,36 @@ export function enqueueNew(state: AnimState, events: OrderEvent[]): AnimState {
   };
 }
 
-/** Dequeue one order and update derived state. Returns a new state object so Vue refs detect
- *  the change. On empty queue, settles to idle (returns the same ref if already idle to avoid
- *  spurious reactive cycles). */
+/** Advance the animator by one phase. Each order takes TWO ticks:
+ *   1. THINKING — dequeue head, set `current = head`, `pose = "thinking"`; stores / log unchanged.
+ *   2. ROUTING or SAD — keep `current`, bump store count (or `unfilled`), append to log,
+ *      set `pose = "routing"` (or `"sad"`).
+ *  On a third tick with an empty queue, settles to idle (`current = null`, `pose = "idle"`).
+ *  Returns a new state object so Vue refs detect the change; returns the same ref when
+ *  already idle to avoid spurious reactive cycles. */
 export function tick(state: AnimState): AnimState {
+  // Phase 2 — previous tick set `thinking`; now commit the decision.
+  if (state.pose === "thinking" && state.current !== null) {
+    const head = state.current;
+    const stores = new Map(state.stores);
+    let unfilled = state.unfilled;
+    let pose: Pose;
+    if (head.facilityId) {
+      stores.set(head.facilityId, (stores.get(head.facilityId) ?? 0) + 1);
+      pose = "routing";
+    } else {
+      unfilled += 1;
+      pose = "sad";
+    }
+    const log = [head, ...state.log].slice(0, LOG_CAP);
+    return { ...state, pose, stores, unfilled, log };
+  }
+
+  // Otherwise: dequeue next order into thinking, or settle to idle if empty.
   if (state.queue.length === 0) {
     if (state.current === null && state.pose === "idle") return state;
     return { ...state, current: null, pose: "idle" };
   }
   const [head, ...rest] = state.queue;
-  const stores = new Map(state.stores);
-  let unfilled = state.unfilled;
-  let pose: Pose;
-  if (head.facilityId) {
-    stores.set(head.facilityId, (stores.get(head.facilityId) ?? 0) + 1);
-    pose = "routing";
-  } else {
-    unfilled += 1;
-    pose = "sad";
-  }
-  const log = [head, ...state.log].slice(0, LOG_CAP);
-  return { ...state, queue: rest, current: head, pose, stores, unfilled, log };
+  return { ...state, queue: rest, current: head, pose: "thinking" };
 }
