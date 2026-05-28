@@ -55,4 +55,69 @@ const ev = (seq: number, facilityId: string | null = "STORE_42"): OrderEvent => 
 // LOG_CAP is exported and is a positive integer
 assert.ok(Number.isInteger(LOG_CAP) && LOG_CAP > 0, "LOG_CAP exported");
 
-console.log("animationQueue init/enqueue tests passed");
+import { tick } from "../src/util/animationQueue";
+
+// tick on empty queue: idles, returns equal state when already idle
+{
+  const s = initAnimState();
+  const t = tick(s);
+  assert.strictEqual(t.current, null);
+  assert.strictEqual(t.pose, "idle");
+  assert.strictEqual(t.queue.length, 0);
+}
+
+// tick with brokered order: pose=routing, store count bumps, log gets newest-first entry
+{
+  let s = enqueueNew(initAnimState(), [ev(1, "STORE_42"), ev(2, "STORE_42"), ev(3, "WH_WEST")]);
+  s = tick(s);
+  assert.strictEqual(s.current?.seq, 1);
+  assert.strictEqual(s.pose, "routing");
+  assert.strictEqual(s.stores.get("STORE_42"), 1);
+  assert.strictEqual(s.unfilled, 0);
+  assert.deepStrictEqual(s.log.map((e) => e.seq), [1]);
+
+  s = tick(s);
+  assert.strictEqual(s.current?.seq, 2);
+  assert.strictEqual(s.stores.get("STORE_42"), 2, "repeat facility bumps count");
+  assert.deepStrictEqual(s.log.map((e) => e.seq), [2, 1], "log is newest-first");
+
+  s = tick(s);
+  assert.strictEqual(s.current?.seq, 3);
+  assert.strictEqual(s.stores.get("WH_WEST"), 1, "new facility appears");
+  assert.strictEqual(s.stores.size, 2);
+}
+
+// tick with null-facility order: pose=sad, unfilled bumps
+{
+  let s = enqueueNew(initAnimState(), [ev(1, null), ev(2, null)]);
+  s = tick(s);
+  assert.strictEqual(s.pose, "sad");
+  assert.strictEqual(s.unfilled, 1);
+  assert.strictEqual(s.stores.size, 0);
+  s = tick(s);
+  assert.strictEqual(s.unfilled, 2);
+}
+
+// tick after queue empties: pose returns to idle, current becomes null
+{
+  let s = enqueueNew(initAnimState(), [ev(1, "STORE_42")]);
+  s = tick(s); // process the single event
+  assert.strictEqual(s.pose, "routing");
+  assert.strictEqual(s.current?.seq, 1);
+  s = tick(s); // queue empty now
+  assert.strictEqual(s.current, null);
+  assert.strictEqual(s.pose, "idle");
+  assert.strictEqual(s.stores.get("STORE_42"), 1, "stores persist across idle");
+}
+
+// log caps at LOG_CAP, keeping newest
+{
+  const seqs = Array.from({ length: LOG_CAP + 5 }, (_, i) => i + 1);
+  let s = enqueueNew(initAnimState(), seqs.map((n) => ev(n, "STORE_42")));
+  for (const _ of seqs) s = tick(s);
+  assert.strictEqual(s.log.length, LOG_CAP, "log capped at LOG_CAP");
+  assert.strictEqual(s.log[0].seq, seqs[seqs.length - 1], "newest first");
+  assert.strictEqual(s.log[s.log.length - 1].seq, seqs[seqs.length - LOG_CAP], "oldest kept is LOG_CAP-back");
+}
+
+console.log("animationQueue tests passed");

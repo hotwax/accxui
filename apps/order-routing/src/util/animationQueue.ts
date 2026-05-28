@@ -47,3 +47,26 @@ export function enqueueNew(state: AnimState, events: OrderEvent[]): AnimState {
     lastSeq: fresh[fresh.length - 1].seq,
   };
 }
+
+/** Dequeue one order and update derived state. Returns a new state object so Vue refs detect
+ *  the change. On empty queue, settles to idle (returns the same ref if already idle to avoid
+ *  spurious reactive cycles). */
+export function tick(state: AnimState): AnimState {
+  if (state.queue.length === 0) {
+    if (state.current === null && state.pose === "idle") return state;
+    return { ...state, current: null, pose: "idle" };
+  }
+  const [head, ...rest] = state.queue;
+  const stores = new Map(state.stores);
+  let unfilled = state.unfilled;
+  let pose: Pose;
+  if (head.facilityId) {
+    stores.set(head.facilityId, (stores.get(head.facilityId) ?? 0) + 1);
+    pose = "routing";
+  } else {
+    unfilled += 1;
+    pose = "sad";
+  }
+  const log = [head, ...state.log].slice(0, LOG_CAP);
+  return { ...state, queue: rest, current: head, pose, stores, unfilled, log };
+}
