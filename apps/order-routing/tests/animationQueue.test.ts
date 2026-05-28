@@ -107,6 +107,26 @@ assert.ok(Number.isInteger(LOG_CAP) && LOG_CAP > 0, "LOG_CAP exported");
   assert.strictEqual(s.stores.size, 2);
 }
 
+// tick two-phase UNFILLABLE_PARKING: facilityId is set, but the order couldn't be filled
+// there — it goes to unfilled, not the store tile, and the character is sad.
+{
+  const unfillable: OrderEvent = {
+    seq: 1, orderId: "O1", facilityId: "STORE_42", finalReason: "UNFILLABLE_PARKING",
+  };
+  let s = enqueueNew(initAnimState(), [unfillable]);
+
+  s = tick(s); // thinking
+  assert.strictEqual(s.pose, "thinking");
+  assert.strictEqual(s.stores.size, 0);
+  assert.strictEqual(s.unfilled, 0);
+
+  s = tick(s); // commit: sad, not routing — even though facilityId is set
+  assert.strictEqual(s.pose, "sad", "UNFILLABLE_PARKING → sad even with facilityId");
+  assert.strictEqual(s.stores.size, 0, "no store tile for unfillable");
+  assert.strictEqual(s.unfilled, 1, "unfilled bucket bumps");
+  assert.deepStrictEqual(s.log.map((e) => e.seq), [1]);
+}
+
 // tick two-phase null-facility: tick 1 = thinking, tick 2 = sad + unfilled bumps.
 {
   let s = enqueueNew(initAnimState(), [ev(1, null), ev(2, null)]);

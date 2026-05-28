@@ -66,7 +66,12 @@ export function tick(state: AnimState): AnimState {
     const stores = new Map(state.stores);
     let unfilled = state.unfilled;
     let pose: Pose;
-    if (head.facilityId) {
+    // UNFILLABLE_PARKING events can carry a facilityId (the facility that was *attempted*),
+    // but the order ultimately couldn't be filled there — semantically the same outcome as a
+    // null-facility unfilled event. So we send it to the unfilled bucket and the character
+    // gets the sad pose, not routing.
+    const unfillable = head.finalReason === "UNFILLABLE_PARKING";
+    if (head.facilityId && !unfillable) {
       stores.set(head.facilityId, (stores.get(head.facilityId) ?? 0) + 1);
       pose = "routing";
     } else {

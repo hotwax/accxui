@@ -11,7 +11,12 @@
           routed <strong>{{ currentOrder.orderId }}</strong> → <strong>{{ currentOrder.facilityId }}</strong> ✓
         </span>
         <span v-else-if="pose === 'sad' && currentOrder" class="warn">
-          no facility for <strong>{{ currentOrder.orderId }}</strong> ✗
+          <template v-if="currentOrder.facilityId">
+            couldn't fill <strong>{{ currentOrder.orderId }}</strong> at {{ currentOrder.facilityId }} ✗
+          </template>
+          <template v-else>
+            no facility for <strong>{{ currentOrder.orderId }}</strong> ✗
+          </template>
         </span>
         <span v-else-if="pose === 'searching'" class="dim">
           …scanning for next order<span class="dots" aria-hidden="true">...</span>
@@ -74,11 +79,15 @@ function glyphFor(p: Pose): string {
 }
 
 // Connector is only drawn during routing/sad — it represents the committed decision.
-// During thinking, the decision hasn't happened yet, so the arrow stays empty.
+// During thinking/searching/idle, no decision yet (or none active), so the arrow stays empty.
+// Routing → arrow points to the assigned store tile.
+// Sad → arrow points to the unfilled bin, regardless of whether facilityId is set (the order
+//       was attempted at that facility but couldn't be filled — UNFILLABLE_PARKING).
 function connectorFor(ev: OrderEvent | null, pose: Pose): string {
-  if (!ev || pose === "thinking" || pose === "idle") return "";
-  if (ev.facilityId) return `   │\n   └──▶ [🏪 ${ev.facilityId}]`;
-  return "   │\n   └──▶ [📦 unfilled]";
+  if (!ev || pose === "thinking" || pose === "idle" || pose === "searching") return "";
+  if (pose === "sad") return "   │\n   └──▶ [📦 unfilled]";
+  // pose === "routing"
+  return `   │\n   └──▶ [🏪 ${ev.facilityId}]`;
 }
 
 function logClassFor(ev: OrderEvent): string {
