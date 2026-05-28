@@ -4,7 +4,7 @@
 // progressBuffer.ts (a pure peer in the same simulation pipeline).
 import type { OrderEvent } from "../types/simulation";
 
-export type Pose = "idle" | "thinking" | "routing" | "sad";
+export type Pose = "idle" | "searching" | "thinking" | "routing" | "sad";
 
 export interface AnimState {
   queue: OrderEvent[];              // FIFO, enqueued from batchProgress.events

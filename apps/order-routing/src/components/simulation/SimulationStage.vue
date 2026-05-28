@@ -13,6 +13,9 @@
         <span v-else-if="pose === 'sad' && currentOrder" class="warn">
           no facility for <strong>{{ currentOrder.orderId }}</strong> ✗
         </span>
+        <span v-else-if="pose === 'searching'" class="dim">
+          …scanning for next order<span class="dots" aria-hidden="true">...</span>
+        </span>
         <span v-else class="dim">…waiting for orders</span>
       </p>
       <pre class="connector" :key="`c-${currentOrder?.seq ?? 'idle'}-${pose}`">{{ connectorFor(currentOrder, pose) }}</pre>
@@ -56,12 +59,14 @@ const { pose, currentOrder, stores, unfilled, log } = useBatchAnimator(props.bat
 // Map → entries for stable rendering order (Map preserves insertion order).
 const storeEntries = computed(() => Array.from(stores.value.entries()));
 
-const IDLE_GLYPH = "  (•_•)  \n <(   )> \n  /   \\  ";
-const THINKING_GLYPH = "  (o_O)  \n <( ? )> \n  /   \\  ";
-const ROUTING_GLYPH = "  (^_^)  \n <( ▸ )> \n  /   \\  ";
-const SAD_GLYPH = "  (˘_˘)  \n <(   )> \n  /   \\  ";
+const IDLE_GLYPH      = "  (•_•)  \n <(   )> \n  /   \\  ";
+const SEARCHING_GLYPH = "  (°v°)  \n <( ~ )> \n  /   \\  ";
+const THINKING_GLYPH  = "  (o_O)  \n <( ? )> \n  /   \\  ";
+const ROUTING_GLYPH   = "  (^_^)  \n <( ▸ )> \n  /   \\  ";
+const SAD_GLYPH       = "  (˘_˘)  \n <(   )> \n  /   \\  ";
 
 function glyphFor(p: Pose): string {
+  if (p === "searching") return SEARCHING_GLYPH;
   if (p === "thinking") return THINKING_GLYPH;
   if (p === "routing") return ROUTING_GLYPH;
   if (p === "sad") return SAD_GLYPH;
@@ -107,10 +112,20 @@ function glyphForReason(ev: OrderEvent): string {
      Character settles quickly into the new pose, then dwells for the rest of the tick. */
   animation: pose-in 1000ms ease-out;
 }
+/* Searching = run is live but we're between event bursts. Bob gently side-to-side
+   so the character stays alive instead of going frozen-idle between polls. */
+.character[data-pose="searching"] {
+  animation: bob 1800ms ease-in-out infinite;
+}
 @keyframes pose-in {
   0%   { opacity: 0.3; transform: translateY(-2px); }
   30%  { opacity: 1;   transform: translateY(0); }
   100% { opacity: 1;   transform: translateY(0); }
+}
+@keyframes bob {
+  0%, 100% { transform: translateX(0); }
+  25%      { transform: translateX(-3px); }
+  75%      { transform: translateX(3px); }
 }
 .thought { margin: 4px 0 6px; font-family: inherit; min-height: 1.4em; }
 .thought .dim { color: var(--ion-color-medium); }
@@ -172,6 +187,11 @@ function glyphForReason(ev: OrderEvent): string {
 .muted { color: var(--ion-color-medium); }
 .warn { color: var(--ion-color-warning-shade); }
 @media (prefers-reduced-motion: reduce) {
-  .character, .connector, .tile-count, .popin-enter-active, .thought .dots { animation: none !important; }
+  .character,
+  .character[data-pose="searching"],
+  .connector,
+  .tile-count,
+  .popin-enter-active,
+  .thought .dots { animation: none !important; }
 }
 </style>

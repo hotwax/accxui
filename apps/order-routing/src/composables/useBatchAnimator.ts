@@ -1,6 +1,7 @@
 // src/composables/useBatchAnimator.ts
 // Bridges simulationStore.batchProgress[i].events into the animationQueue state machine
-// and drives a ~400ms tick loop. One instance per mounted SimulationStage.
+// and drives a TICK_MS-cadence tick loop (one phase per tick, two phases per order).
+// One instance per mounted SimulationStage.
 import { computed, onUnmounted, ref, watch, watchEffect } from "vue";
 import { simulationStore } from "@/store/simulationStore";
 import { initAnimState, enqueueNew, tick, TICK_MS } from "@/util/animationQueue";
@@ -36,7 +37,14 @@ export function useBatchAnimator(batchIndex: number) {
   onUnmounted(() => { if (intervalId !== null) clearInterval(intervalId); });
 
   return {
-    pose: computed(() => state.value.pose),
+    // While the run is in progress, an empty queue means "between bursts" — the backend is
+    // still processing but we haven't received the next event yet. Promote `idle` to
+    // `searching` so the character stays visibly alive instead of going dead between polls.
+    // Once the run ends and the queue drains, we fall back to a true `idle`.
+    pose: computed(() => {
+      const p = state.value.pose;
+      return p === "idle" && sim.isRunning ? "searching" : p;
+    }),
     currentOrder: computed(() => state.value.current),
     stores: computed(() => state.value.stores),
     unfilled: computed(() => state.value.unfilled),
