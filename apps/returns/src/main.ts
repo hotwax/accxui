@@ -1,0 +1,49 @@
+import { createApp } from "vue";
+import App from "./App.vue";
+import router from "./router";
+import { IonicVue } from "@ionic/vue";
+
+/* Core CSS required for Ionic components to work properly */
+import "@ionic/vue/css/core.css";
+
+/* Basic CSS for apps built with Ionic */
+import "@ionic/vue/css/normalize.css";
+import "@ionic/vue/css/structure.css";
+import "@ionic/vue/css/typography.css";
+
+/* Optional CSS utils that can be commented out */
+import "@ionic/vue/css/padding.css";
+import "@ionic/vue/css/flex-utils.css";
+import "@ionic/vue/css/display.css";
+
+/* Theme variables */
+import "@common/css/settings.css";
+import "@common/css/theme.css";
+import "./theme/variables.css";
+
+import { createPinia } from "pinia";
+import piniaPluginPersistedstate from "pinia-plugin-persistedstate";
+import { logger, createDxpI18n, initialiseConfig } from "@common";
+import localeMessages from "./locales";
+import { useUserStore } from "@/store/userStore";
+
+const i18n = createDxpI18n(localeMessages);
+const pinia = createPinia().use(piniaPluginPersistedstate);
+const app = createApp(App)
+  .use(IonicVue, { mode: "md" })
+  .use(logger, { level: import.meta.env.VITE_VUE_APP_DEFAULT_LOG_LEVEL })
+  .use(router)
+  .use(i18n)
+  .use(pinia);
+
+initialiseConfig({
+  postLogin: useUserStore().postLogin,
+  postLogout: useUserStore().postLogout,
+  get oms() { return useUserStore().oms; },
+  set oms(val) { useUserStore().oms = val; },
+  get current() { return useUserStore().current; },
+  set current(val) { useUserStore().current = val; },
+  router: router,
+});
+
+router.isReady().then(() => { app.mount("#app"); });
