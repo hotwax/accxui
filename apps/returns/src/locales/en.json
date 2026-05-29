@@ -19,5 +19,11 @@
   "Nothing on this order can be returned": "Nothing on this order can be returned",
   "Reason": "Reason",
   "Submit return": "Submit return",
-  "Quantity": "Quantity"
+  "Quantity": "Quantity",
+  "Return": "Return",
+  "Status": "Status",
+  "Shopify sync": "Shopify sync",
+  "Push to Shopify": "Push to Shopify",
+  "Retry": "Retry",
+  "Shopify return ID": "Shopify return ID"
 }
