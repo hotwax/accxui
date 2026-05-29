@@ -40,17 +40,19 @@ export const useReturnsStore = defineStore("returns", {
       return getReturnsService().listReturnReasons();
     },
     /** Trigger an outbound push, then poll sync status until synced/failed or attempts exhausted. */
-    async pushAndPoll(returnId: string, target: SyncTarget, opts = { intervalMs: 3000, maxAttempts: 30 }) {
+    async pushAndPoll(returnId: string, target: SyncTarget, opts: { intervalMs?: number; maxAttempts?: number } = {}) {
+      const intervalMs = opts.intervalMs ?? 3000;
+      const maxAttempts = opts.maxAttempts ?? 30;
       const svc = getReturnsService();
       await svc.pushToTarget(returnId, target);
-      for (let attempt = 0; attempt < opts.maxAttempts; attempt++) {
+      for (let attempt = 0; attempt < maxAttempts; attempt++) {
         const sync = await svc.getSyncStatus(returnId);
         if (this.current && this.current.returnId === returnId) {
           this.current = { ...this.current, sync };
         }
         const state: SyncState = sync[target];
         if (state === "synced" || state === "failed") return state;
-        await sleep(opts.intervalMs);
+        await sleep(intervalMs);
       }
       return "pending" as SyncState;
     },
