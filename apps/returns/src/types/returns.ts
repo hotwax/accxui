@@ -14,11 +14,14 @@ export interface ReturnItemInput {
 
 export interface ReturnSummary {
   returnId: string;
-  orderId: string;
+  // The list endpoint (GET /oms/returns) is lightweight: it returns neither orderId nor sync/origin.
+  // Those are only available from the detail endpoint, so they are optional on a summary.
+  orderId?: string;
   statusId: string;
   entryDate: string;
-  origin: ReturnOrigin;
-  sync: Record<SyncTarget, SyncState>;
+  returnChannelEnumId?: string;
+  origin?: ReturnOrigin;
+  sync?: Record<SyncTarget, SyncState>;
 }
 
 export interface ReturnItemDetail {
@@ -35,6 +38,10 @@ export interface ReturnStatus {
 }
 
 export interface ReturnDetail extends ReturnSummary {
+  // The detail endpoint always provides these (narrowing the optionals on ReturnSummary).
+  orderId: string;
+  origin: ReturnOrigin;
+  sync: Record<SyncTarget, SyncState>;
   items: ReturnItemDetail[];
   statuses: ReturnStatus[];
   externalIds: Record<SyncTarget, string | null>;

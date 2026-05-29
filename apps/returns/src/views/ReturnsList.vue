@@ -23,10 +23,11 @@
         <ion-item v-for="r in store.returns" :key="r.returnId" :router-link="`/tabs/returns/${r.returnId}`">
           <ion-label>
             <h2>#{{ r.returnId }}</h2>
-            <p>{{ translate("Order") }} {{ r.orderId }}</p>
+            <p v-if="r.orderId">{{ translate("Order") }} {{ r.orderId }}</p>
+            <p>{{ r.statusId }} · {{ fmtDate(r.entryDate) }}</p>
           </ion-label>
           <ion-badge v-if="r.origin === 'shopify'" slot="end" color="tertiary">{{ translate("From Shopify") }}</ion-badge>
-          <ion-badge slot="end" :color="syncColor(r.sync.shopify)">{{ syncLabel(r.sync.shopify) }}</ion-badge>
+          <ion-badge v-if="r.sync" slot="end" :color="syncColor(r.sync.shopify)">{{ syncLabel(r.sync.shopify) }}</ion-badge>
         </ion-item>
       </ion-list>
     </ion-content>
@@ -35,6 +36,7 @@
 
 <script setup lang="ts">
 import { onMounted } from "vue";
+import { DateTime } from "luxon";
 import { translate } from "@common";
 import {
   IonBadge, IonButton, IonButtons, IonContent, IonHeader, IonIcon, IonItem,
@@ -46,6 +48,10 @@ import type { SyncState } from "@/types/returns";
 
 const store = useReturnsStore();
 
+function fmtDate(d: string) {
+  const dt = /^\d+$/.test(d) ? DateTime.fromMillis(Number(d)) : DateTime.fromISO(d);
+  return dt.isValid ? dt.toLocaleString(DateTime.DATETIME_MED) : d;
+}
 function syncColor(s: SyncState) {
   return { synced: "success", pending: "warning", failed: "danger", not_synced: "medium" }[s];
 }

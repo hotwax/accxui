@@ -1,4 +1,4 @@
-import { api, commonUtil, logger } from "@common";
+import { api, commonUtil } from "@common";
 import type { ReturnsService } from "@/services/ReturnsService";
 import type {
   CreateReturnInput, OrderForReturn, PushOutcome, ReturnableLine, ReturnDetail, ReturnReason,
@@ -8,15 +8,12 @@ import {
   resolveOrigin, resolveShopifySyncState, type Identification, type ShopifySync,
 } from "@/util/syncState";
 
-// Service endpoints live under getMaargURL() (".../rest/s1/"); Entity REST lives under ".../rest/e1/".
-const entityBaseURL = () => commonUtil.getMaargURL().replace("/rest/s1", "/rest/e1");
-
 // ---- Pure mappers (unit-tested) ----
 
 interface RawReturnDetail {
-  returnDetail: { returnId: string; statusId: string; entryDate: string };
+  returnDetail: { returnId: string; statusId: string; entryDate: string | number };
   items?: Array<{ orderId?: string; orderItemSeqId: string; productId?: string; returnQuantity: number | string; returnReasonId: string; itemDescription?: string }>;
-  statusHistory?: Array<{ statusId: string; statusDatetime: string }>;
+  statusHistory?: Array<{ statusId: string; statusDatetime: string | number }>;
   identifications?: Identification[];
   shopifySync?: ShopifySync | null;
 }
@@ -34,7 +31,7 @@ export function mapReturnDetail(raw: RawReturnDetail): ReturnDetail {
     returnId: raw.returnDetail.returnId,
     orderId: items[0]?.orderId ?? "",
     statusId: raw.returnDetail.statusId,
-    entryDate: raw.returnDetail.entryDate,
+    entryDate: String(raw.returnDetail.entryDate),
     origin,
     sync: { shopify },
     items: items.map((i) => ({
@@ -44,7 +41,7 @@ export function mapReturnDetail(raw: RawReturnDetail): ReturnDetail {
       returnReasonId: i.returnReasonId,
       // Backend getReturn does not join ReturnReason.description; view falls back to the id.
     })),
-    statuses: (raw.statusHistory ?? []).map((s) => ({ statusId: s.statusId, statusDate: s.statusDatetime })),
+    statuses: (raw.statusHistory ?? []).map((s) => ({ statusId: s.statusId, statusDate: String(s.statusDatetime) })),
     externalIds: { shopify: shopifyReturnId },
   };
 }
@@ -82,30 +79,26 @@ export function mapOrderToReturnable(raw: RawOrder): OrderForReturn {
   return { orderId: raw.orderDetail.orderId, billingEmail: raw.orderDetail.billingEmail, items };
 }
 
-function toSummary(d: ReturnDetail): ReturnSummary {
-  return { returnId: d.returnId, orderId: d.orderId, statusId: d.statusId, entryDate: d.entryDate, origin: d.origin, sync: d.sync };
-}
-
 // ---- Adapter ----
 
 export const omsAdapter: ReturnsService = {
-  // No dedicated list service endpoint exists; we page ReturnHeader via Entity REST and enrich each
-  // row through the detail endpoint (which is the only source of origin/sync/orderId). Demo-scale only.
-  async listReturns({ pageIndex = 0, pageSize = 20 }) {
+  // v2 service endpoint. The list is lightweight: rows carry no orderId or shopifySync, so a list
+  // summary omits origin/sync — the detail endpoint is the source for those.
+  async listReturns({ pageIndex = 0, pageSize = 20, statusId }) {
     const resp: any = await api({
-      url: "org.apache.ofbiz.order.return.ReturnHeader", method: "GET", baseURL: entityBaseURL(),
-      params: { limit: pageSize, offset: pageIndex * pageSize, orderByField: "-entryDate" },
+      url: "oms/returns", method: "GET", baseURL: commonUtil.getMaargURL(),
+      params: { pageIndex, pageSize, returnHeaderTypeId: "CUSTOMER_RETURN", ...(statusId ? { statusId } : {}) },
     });
     if (commonUtil.hasError(resp)) throw new Error("Failed to list returns");
-    const rows: Array<{ returnId: string }> = Array.isArray(resp.data) ? resp.data : (resp.data?.returnHeaderList ?? []);
-    // Enrich each row via the detail endpoint; tolerate individual failures so one bad row can't blank the page.
-    const settled = await Promise.allSettled(rows.map((row) => omsAdapter.getReturn(row.returnId)));
-    const items = settled
-      .filter((s): s is PromiseFulfilledResult<ReturnDetail> => s.status === "fulfilled")
-      .map((s) => toSummary(s.value));
-    const dropped = settled.length - items.length;
-    if (dropped > 0) logger.warn?.(`listReturns: ${dropped}/${settled.length} returns failed to load and were omitted`);
-    const total = Number(resp.headers?.["x-total-count"] ?? rows.length);
+    const rows: any[] = resp.data?.returns ?? [];
+    const items: ReturnSummary[] = rows.map((r) => ({
+      returnId: r.returnId,
+      statusId: r.statusId,
+      entryDate: String(r.entryDate),
+      returnChannelEnumId: r.returnChannelEnumId,
+    }));
+    // returnsCount is the count in this response; treated as the total for the demo's pagination.
+    const total = Number(resp.data?.returnsCount ?? items.length);
     return { items, total };
   },
 
