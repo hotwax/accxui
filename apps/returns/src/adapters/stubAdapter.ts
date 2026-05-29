@@ -92,6 +92,7 @@ export const stubAdapter: ReturnsService = {
     r.pushAttempted = true;
     r.pollsUntilSynced = 1; // one poll shows "pending", the next shows "synced"
     r.sync = { shopify: "pending" };
+    return "pushed";
   },
   async getSyncStatus(returnId): Promise<Record<SyncTarget, SyncState>> {
     const r = store.get(returnId);

@@ -1,7 +1,7 @@
-import { api, commonUtil } from "@common";
+import { api, commonUtil, logger } from "@common";
 import type { ReturnsService } from "@/services/ReturnsService";
 import type {
-  CreateReturnInput, OrderForReturn, ReturnableLine, ReturnDetail, ReturnReason,
+  CreateReturnInput, OrderForReturn, PushOutcome, ReturnableLine, ReturnDetail, ReturnReason,
   ReturnSummary, SyncState, SyncTarget,
 } from "@/types/returns";
 import {
@@ -98,8 +98,15 @@ export const omsAdapter: ReturnsService = {
     });
     if (commonUtil.hasError(resp)) throw new Error("Failed to list returns");
     const rows: Array<{ returnId: string }> = Array.isArray(resp.data) ? resp.data : (resp.data?.returnHeaderList ?? []);
-    const items = await Promise.all(rows.map((row) => omsAdapter.getReturn(row.returnId).then(toSummary)));
-    return { items, total: items.length };
+    // Enrich each row via the detail endpoint; tolerate individual failures so one bad row can't blank the page.
+    const settled = await Promise.allSettled(rows.map((row) => omsAdapter.getReturn(row.returnId)));
+    const items = settled
+      .filter((s): s is PromiseFulfilledResult<ReturnDetail> => s.status === "fulfilled")
+      .map((s) => toSummary(s.value));
+    const dropped = settled.length - items.length;
+    if (dropped > 0) logger.warn?.(`listReturns: ${dropped}/${settled.length} returns failed to load and were omitted`);
+    const total = Number(resp.headers?.["x-total-count"] ?? rows.length);
+    return { items, total };
   },
 
   async getReturn(returnId): Promise<ReturnDetail> {
@@ -142,14 +149,15 @@ export const omsAdapter: ReturnsService = {
     return (resp.data?.reasons ?? []).map((r: any) => ({ returnReasonId: r.returnReasonId, description: r.description }));
   },
 
-  async pushToTarget(returnId, _target: SyncTarget) {
+  async pushToTarget(returnId, _target: SyncTarget): Promise<PushOutcome> {
     // Manual retry of the OMS→Shopify push. In Phase B the push also fires automatically on create.
     const resp: any = await api({
       url: `oms/returns/${returnId}/pushToShopify`, method: "POST", baseURL: commonUtil.getMaargURL(),
     });
     if (commonUtil.hasError(resp)) throw new Error("Failed to push to Shopify");
-    // status: "pushed" | "already_synced" | "skipped" | "failed"
-    if (resp.data?.status === "failed") throw new Error(resp.data.errorMessage || "Push to Shopify failed");
+    const status = resp.data?.status; // "pushed" | "already_synced" | "skipped" | "failed"
+    if (status === "failed") throw new Error(resp.data.errorMessage || "Push to Shopify failed");
+    return (status as PushOutcome) ?? "pushed";
   },
 
   async getSyncStatus(returnId): Promise<Record<SyncTarget, SyncState>> {

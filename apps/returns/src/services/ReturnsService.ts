@@ -1,5 +1,5 @@
 import type {
-  CreateReturnInput, OrderForReturn, ReturnDetail, ReturnReason,
+  CreateReturnInput, OrderForReturn, PushOutcome, ReturnDetail, ReturnReason,
   ReturnSummary, SyncState, SyncTarget,
 } from "@/types/returns";
 import { stubAdapter } from "@/adapters/stubAdapter";
@@ -11,7 +11,7 @@ export interface ReturnsService {
   createReturn(input: CreateReturnInput): Promise<{ returnId: string }>;
   getOrderForReturn(orderId: string): Promise<OrderForReturn>;
   listReturnReasons(): Promise<ReturnReason[]>;
-  pushToTarget(returnId: string, target: SyncTarget): Promise<void>;
+  pushToTarget(returnId: string, target: SyncTarget): Promise<PushOutcome>;
   getSyncStatus(returnId: string): Promise<Record<SyncTarget, SyncState>>;
 }
 

@@ -2,9 +2,12 @@ export type SyncTarget = "shopify";
 export type SyncState = "not_synced" | "pending" | "synced" | "failed";
 export type ReturnOrigin = "pwa" | "shopify";
 
+/** Outcome of an outbound push trigger (the "failed" case is surfaced as a thrown error instead). */
+export type PushOutcome = "pushed" | "already_synced" | "skipped";
+
 export interface ReturnItemInput {
   orderItemSeqId: string;
-  productId: string;
+  productId?: string; // display-only context; not submitted to the create endpoint
   returnQuantity: number;
   returnReasonId: string;
 }

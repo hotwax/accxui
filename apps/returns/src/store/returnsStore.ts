@@ -61,7 +61,12 @@ export const useReturnsStore = defineStore("returns", {
     },
     /** Manually trigger an outbound push (retry), then poll until it settles. */
     async pushAndPoll(returnId: string, target: SyncTarget, opts: { intervalMs?: number; maxAttempts?: number } = {}) {
-      await getReturnsService().pushToTarget(returnId, target);
+      const outcome = await getReturnsService().pushToTarget(returnId, target);
+      if (outcome === "skipped") {
+        // Backend won't change sync state (e.g. non-Shopify order); refresh once, don't poll for 90s.
+        if (this.current && this.current.returnId === returnId) await this.fetchReturn(returnId);
+        return (this.current?.sync[target] ?? "not_synced") as SyncState;
+      }
       return this.pollSync(returnId, target, opts);
     },
   },
