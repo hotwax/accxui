@@ -113,7 +113,8 @@ export const omsAdapter: ReturnsService = {
   },
 
   async getSyncStatus(returnId): Promise<Record<SyncTarget, SyncState>> {
-    const detail = await this.getReturn(returnId);
+    // Self-reference by name (not `this`) so the method is safe even if destructured.
+    const detail = await omsAdapter.getReturn(returnId);
     return detail.sync;
   },
 };
