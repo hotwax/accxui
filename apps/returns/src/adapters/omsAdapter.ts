@@ -1,4 +1,4 @@
-import { api, commonUtil } from "@common";
+import { api, commonUtil, cookieHelper, useEmbeddedAppStore } from "@common";
 import type { ReturnsService } from "@/services/ReturnsService";
 import type {
   CreateReturnInput, OrderForReturn, PushOutcome, ReturnableLine, ReturnDetail, ReturnReason,
@@ -81,12 +81,33 @@ export function mapOrderToReturnable(raw: RawOrder): OrderForReturn {
 
 // ---- Adapter ----
 
+// This Moqui build authenticates ONLY via the `api_key` (UserLoginKey) header — Bearer JWT is not wired.
+// @common's remoteApi sends Bearer, so we must attach api_key ourselves. Source it from @common's store/
+// cookie if a login captured it, else a demo-provisioned env key (VITE_RETURNS_API_KEY).
+function maargApiKey(): string {
+  try {
+    const fromStore = useEmbeddedAppStore().getApiKey;
+    if (fromStore) return fromStore;
+  } catch { /* pinia not active (e.g. unit context) — fall through */ }
+  return cookieHelper().get("api_key") || (import.meta.env.VITE_RETURNS_API_KEY as string) || "";
+}
+
+/** api() wrapper that pins the Maarg base URL and the api_key auth header for every returns call. */
+async function omsApi(config: any) {
+  const key = maargApiKey();
+  return api({
+    baseURL: commonUtil.getMaargURL(),
+    ...config,
+    headers: { ...(key ? { api_key: key } : {}), ...(config.headers || {}) },
+  });
+}
+
 export const omsAdapter: ReturnsService = {
   // v2 service endpoint. The list is lightweight: rows carry no orderId or shopifySync, so a list
   // summary omits origin/sync — the detail endpoint is the source for those.
   async listReturns({ pageIndex = 0, pageSize = 20, statusId }) {
-    const resp: any = await api({
-      url: "oms/returns", method: "GET", baseURL: commonUtil.getMaargURL(),
+    const resp: any = await omsApi({
+      url: "oms/returns", method: "GET",
       params: { pageIndex, pageSize, returnHeaderTypeId: "CUSTOMER_RETURN", ...(statusId ? { statusId } : {}) },
     });
     if (commonUtil.hasError(resp)) throw new Error("Failed to list returns");
@@ -103,9 +124,7 @@ export const omsAdapter: ReturnsService = {
   },
 
   async getReturn(returnId): Promise<ReturnDetail> {
-    const resp: any = await api({
-      url: `oms/returns/${returnId}`, method: "GET", baseURL: commonUtil.getMaargURL(),
-    });
+    const resp: any = await omsApi({ url: `oms/returns/${returnId}`, method: "GET" });
     if (commonUtil.hasError(resp)) throw new Error("Failed to load return");
     return mapReturnDetail(resp.data);
   },
@@ -119,34 +138,26 @@ export const omsAdapter: ReturnsService = {
         returnReasonId: i.returnReasonId,
       })),
     };
-    const resp: any = await api({
-      url: "oms/returns/customerReturn", method: "POST", baseURL: commonUtil.getMaargURL(), data: body,
-    });
+    const resp: any = await omsApi({ url: "oms/returns/customerReturn", method: "POST", data: body });
     if (commonUtil.hasError(resp)) throw new Error("Failed to create return");
     return { returnId: resp.data.returnId };
   },
 
   async getOrderForReturn(orderId) {
-    const resp: any = await api({
-      url: `oms/orders/${orderId}`, method: "GET", baseURL: commonUtil.getMaargURL(),
-    });
+    const resp: any = await omsApi({ url: `oms/orders/${orderId}`, method: "GET" });
     if (commonUtil.hasError(resp)) throw new Error("Order not found");
     return mapOrderToReturnable(resp.data);
   },
 
   async listReturnReasons(): Promise<ReturnReason[]> {
-    const resp: any = await api({
-      url: "oms/returnReasons", method: "GET", baseURL: commonUtil.getMaargURL(),
-    });
+    const resp: any = await omsApi({ url: "oms/returnReasons", method: "GET" });
     if (commonUtil.hasError(resp)) throw new Error("Failed to load reasons");
     return (resp.data?.reasons ?? []).map((r: any) => ({ returnReasonId: r.returnReasonId, description: r.description }));
   },
 
   async pushToTarget(returnId, _target: SyncTarget): Promise<PushOutcome> {
     // Manual retry of the OMS→Shopify push. In Phase B the push also fires automatically on create.
-    const resp: any = await api({
-      url: `oms/returns/${returnId}/pushToShopify`, method: "POST", baseURL: commonUtil.getMaargURL(),
-    });
+    const resp: any = await omsApi({ url: `oms/returns/${returnId}/pushToShopify`, method: "POST" });
     if (commonUtil.hasError(resp)) throw new Error("Failed to push to Shopify");
     const status = resp.data?.status; // "pushed" | "already_synced" | "skipped" | "failed"
     if (status === "failed") throw new Error(resp.data.errorMessage || "Push to Shopify failed");
