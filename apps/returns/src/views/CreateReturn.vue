@@ -45,7 +45,7 @@
 
 <script setup lang="ts">
 import { computed, reactive, ref } from "vue";
-import { useRouter } from "vue-router";
+import router from "@/router";
 import { translate } from "@common";
 import {
   IonBackButton, IonButton, IonButtons, IonContent, IonHeader, IonInput, IonItem,
@@ -55,7 +55,6 @@ import { useReturnsStore } from "@/store/returnsStore";
 import { describeApiError } from "@/util/errorMessage";
 import type { OrderForReturn, ReturnReason } from "@/types/returns";
 
-const router = useRouter();
 const store = useReturnsStore();
 
 const orderId = ref("");
