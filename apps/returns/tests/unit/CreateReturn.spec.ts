@@ -3,8 +3,8 @@ import { setActivePinia, createPinia } from "pinia";
 import { mount, flushPromises } from "@vue/test-utils";
 
 vi.stubEnv("VITE_RETURNS_BACKEND", "stub");
-vi.mock("@common", () => ({ translate: (s: string) => s, logger: { error: () => {} } }));
-vi.mock("vue-router", () => ({ useRouter: () => ({ push: () => {} }) }));
+vi.mock("@common", () => ({ translate: (s: string) => s, logger: { error: () => {/* noop */} } }));
+vi.mock("vue-router", () => ({ useRouter: () => ({ push: () => {/* noop */} }) }));
 
 import CreateReturn from "@/views/CreateReturn.vue";
 import { __resetStub } from "@/adapters/stubAdapter";

@@ -39,7 +39,7 @@ const app = createApp(App)
 initialiseConfig({
   postLogin: useUserStore().postLogin,
   postLogout: useUserStore().postLogout,
-  preLogout: async () => {},
+  preLogout: async () => { /* no-op: returns PWA has no pre-logout work */ },
   get oms() { return useUserStore().oms; },
   set oms(val) { useUserStore().oms = val; },
   get current() { return useUserStore().current; },
