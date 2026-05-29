@@ -12,7 +12,7 @@
         <ion-button slot="end" @click="lookupOrder">{{ translate("Look up order") }}</ion-button>
       </ion-item>
 
-      <p v-if="error" class="ion-padding-start" style="color: var(--ion-color-danger)">{{ translate(error) }}</p>
+      <p v-if="error" class="ion-padding-start" style="color: var(--ion-color-danger); white-space: pre-wrap">{{ error }}</p>
 
       <template v-if="order">
         <p v-if="!hasReturnable" class="ion-padding-start">{{ translate("Nothing on this order can be returned") }}</p>
@@ -52,6 +52,7 @@ import {
   IonLabel, IonList, IonPage, IonSelect, IonSelectOption, IonTitle, IonToolbar,
 } from "@ionic/vue";
 import { useReturnsStore } from "@/store/returnsStore";
+import { describeApiError } from "@/util/errorMessage";
 import type { OrderForReturn, ReturnReason } from "@/types/returns";
 
 const router = useRouter();
@@ -74,8 +75,8 @@ async function lookupOrder() {
   try {
     order.value = await store.loadOrder(orderId.value.trim());
     reasons.value = await store.loadReasons();
-  } catch {
-    error.value = "Order not found";
+  } catch (e) {
+    error.value = describeApiError(e, "Order not found");
   }
 }
 function setQty(seqId: string, qty: number) {
@@ -93,9 +94,14 @@ async function submit(): Promise<string | undefined> {
       return { orderItemSeqId, productId: line.productId, returnQuantity: s.qty, returnReasonId: s.returnReasonId! };
     });
   if (!items.length) return;
-  const returnId = await store.submitReturn({ orderId: order.value.orderId, items });
-  router.push(`/tabs/returns/${returnId}`);
-  return returnId;
+  error.value = "";
+  try {
+    const returnId = await store.submitReturn({ orderId: order.value.orderId, items });
+    router.push(`/tabs/returns/${returnId}`);
+    return returnId;
+  } catch (e) {
+    error.value = describeApiError(e, "Failed to create return");
+  }
 }
 
 defineExpose({ orderId, order, selections, lookupOrder, submit });

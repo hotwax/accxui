@@ -7,6 +7,7 @@
       </ion-toolbar>
     </ion-header>
     <ion-content class="ion-padding">
+      <p v-if="error" style="color: var(--ion-color-danger); white-space: pre-wrap">{{ error }}</p>
       <template v-if="r">
         <ion-item lines="none">
           <ion-label>
@@ -60,11 +61,13 @@ import {
   IonChip, IonContent, IonHeader, IonItem, IonLabel, IonList, IonPage, IonSpinner, IonTitle, IonToolbar,
 } from "@ionic/vue";
 import { useReturnsStore } from "@/store/returnsStore";
+import { describeApiError } from "@/util/errorMessage";
 import type { SyncState } from "@/types/returns";
 
 const props = defineProps<{ returnId: string }>();
 const store = useReturnsStore();
 const busy = ref(false);
+const error = ref("");
 
 const r = computed(() => store.current);
 
@@ -75,20 +78,27 @@ function syncLabel(s: SyncState) {
   return translate({ synced: "Synced", pending: "Pending", failed: "Failed", not_synced: "Not synced" }[s]);
 }
 async function push() {
+  error.value = "";
   busy.value = true;
   try {
     await store.pushAndPoll(props.returnId, "shopify");
+  } catch (e) {
+    error.value = describeApiError(e, "Push to Shopify failed");
   } finally {
     busy.value = false;
   }
 }
 
 onMounted(async () => {
-  await store.fetchReturn(props.returnId);
-  // The backend auto-pushes on create, so a freshly-created return loads as "pending" — poll to completion.
-  if (store.current?.sync.shopify === "pending") {
-    busy.value = true;
-    try { await store.pollSync(props.returnId, "shopify"); } finally { busy.value = false; }
+  try {
+    await store.fetchReturn(props.returnId);
+    // The backend auto-pushes on create, so a freshly-created return loads as "pending" — poll to completion.
+    if (store.current?.sync.shopify === "pending") {
+      busy.value = true;
+      try { await store.pollSync(props.returnId, "shopify"); } finally { busy.value = false; }
+    }
+  } catch (e) {
+    error.value = describeApiError(e, "Failed to load return");
   }
 });
 </script>
