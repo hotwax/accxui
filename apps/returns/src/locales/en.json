@@ -4,5 +4,13 @@
   "Instance": "Instance",
   "User": "User",
   "Logout": "Logout",
-  "Coming soon": "Coming soon"
+  "Coming soon": "Coming soon",
+  "Create return": "Create return",
+  "Order": "Order",
+  "From Shopify": "From Shopify",
+  "Synced": "Synced",
+  "Pending": "Pending",
+  "Not synced": "Not synced",
+  "Failed": "Failed",
+  "No returns yet": "No returns yet"
 }
