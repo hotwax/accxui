@@ -12,5 +12,12 @@
   "Pending": "Pending",
   "Not synced": "Not synced",
   "Failed": "Failed",
-  "No returns yet": "No returns yet"
+  "No returns yet": "No returns yet",
+  "Look up order": "Look up order",
+  "Order ID": "Order ID",
+  "Order not found": "Order not found",
+  "Nothing on this order can be returned": "Nothing on this order can be returned",
+  "Reason": "Reason",
+  "Submit return": "Submit return",
+  "Quantity": "Quantity"
 }
