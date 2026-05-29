@@ -14,12 +14,13 @@ const routes: Array<RouteRecordRaw> = [
   {
     path: "/tabs",
     component: Tabs,
+    beforeEnter: authGuard,
     children: [
       { path: "", redirect: "/tabs/returns" },
-      { path: "returns", component: () => import("@/views/ReturnsList.vue"), beforeEnter: authGuard },
-      { path: "returns/create", component: () => import("@/views/CreateReturn.vue"), beforeEnter: authGuard },
-      { path: "returns/:returnId", component: () => import("@/views/ReturnDetail.vue"), props: true, beforeEnter: authGuard },
-      { path: "settings", component: () => import("@/views/Settings.vue"), beforeEnter: authGuard },
+      { path: "returns", component: () => import("@/views/ReturnsList.vue") },
+      { path: "returns/create", component: () => import("@/views/CreateReturn.vue") },
+      { path: "returns/:returnId", component: () => import("@/views/ReturnDetail.vue"), props: true },
+      { path: "settings", component: () => import("@/views/Settings.vue") },
     ],
   },
 ];

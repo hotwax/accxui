@@ -11,7 +11,7 @@ export const useUserStore = defineStore('user', {
     getOms: (state) => state.oms,
   },
   actions: {
-    async setOms(oms: any) { this.oms = oms },
+    setOms(oms: any) { this.oms = oms },
     async fetchUserProfile(): Promise<any> {
       try {
         const resp = await api({ url: 'admin/user/profile', method: 'GET', baseURL: commonUtil.getMaargURL() })
@@ -26,7 +26,7 @@ export const useUserStore = defineStore('user', {
     },
     async postLogin() {
       await this.fetchUserProfile()
-      await this.setOms(commonUtil.getOmsURL())
+      this.setOms(commonUtil.getOmsURL())
     },
     async postLogout() { this.$reset() },
   },
