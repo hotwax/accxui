@@ -9,17 +9,30 @@ export function resolveOrigin(identifications: Identification[]): ReturnOrigin {
   return identifications.some((i) => i.returnIdentificationTypeId === "SHOPIFY_RTN_ID") ? "shopify" : "pwa";
 }
 
-export interface SyncStateInput {
-  hasShopifyId: boolean;
-  origin: ReturnOrigin;
-  pushAttempted: boolean;
-  pushFailed: boolean;
+/** The backend `shopifySync` map on a return detail (null when there is no Shopify state). */
+export interface ShopifySync {
+  shopifyReturnId?: string | null;
+  pushStatusId?: string | null; // PUSH_OK | PUSH_PENDING | PUSH_FAILED | null
 }
 
-export function resolveSyncState({ hasShopifyId, origin, pushAttempted, pushFailed }: SyncStateInput): SyncState {
-  if (hasShopifyId) return "synced";
-  if (pushFailed) return "failed";
-  if (pushAttempted) return "pending";
-  // Shopify-origin returns are mid-ingest until their GID is recorded; PWA returns await a push.
-  return origin === "shopify" ? "pending" : "not_synced";
+/**
+ * Collapse the backend `shopifySync` map into the PWA's SyncState.
+ * - PUSH_OK            → synced
+ * - PUSH_PENDING       → pending (outbound push in flight)
+ * - PUSH_FAILED        → failed
+ * - no push status but a Shopify return id present (inbound-origin) → synced
+ * - null / no id       → not_synced (OMS-only return awaiting a push)
+ */
+export function resolveShopifySyncState(shopifySync: ShopifySync | null | undefined): SyncState {
+  if (!shopifySync) return "not_synced";
+  switch (shopifySync.pushStatusId) {
+    case "PUSH_OK":
+      return "synced";
+    case "PUSH_PENDING":
+      return "pending";
+    case "PUSH_FAILED":
+      return "failed";
+    default:
+      return shopifySync.shopifyReturnId ? "synced" : "not_synced";
+  }
 }

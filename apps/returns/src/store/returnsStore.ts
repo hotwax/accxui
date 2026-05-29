@@ -39,12 +39,11 @@ export const useReturnsStore = defineStore("returns", {
     async loadReasons() {
       return getReturnsService().listReturnReasons();
     },
-    /** Trigger an outbound push, then poll sync status until synced/failed or attempts exhausted. */
-    async pushAndPoll(returnId: string, target: SyncTarget, opts: { intervalMs?: number; maxAttempts?: number } = {}) {
+    /** Poll sync status until synced/failed or attempts exhausted (no push triggered). */
+    async pollSync(returnId: string, target: SyncTarget, opts: { intervalMs?: number; maxAttempts?: number } = {}) {
       const intervalMs = opts.intervalMs ?? 3000;
       const maxAttempts = opts.maxAttempts ?? 30;
       const svc = getReturnsService();
-      await svc.pushToTarget(returnId, target);
       for (let attempt = 0; attempt < maxAttempts; attempt++) {
         const sync = await svc.getSyncStatus(returnId);
         if (this.current && this.current.returnId === returnId) {
@@ -59,6 +58,11 @@ export const useReturnsStore = defineStore("returns", {
         await sleep(intervalMs);
       }
       return "pending" as SyncState;
+    },
+    /** Manually trigger an outbound push (retry), then poll until it settles. */
+    async pushAndPoll(returnId: string, target: SyncTarget, opts: { intervalMs?: number; maxAttempts?: number } = {}) {
+      await getReturnsService().pushToTarget(returnId, target);
+      return this.pollSync(returnId, target, opts);
     },
   },
 });

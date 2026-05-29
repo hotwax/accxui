@@ -83,5 +83,12 @@ async function push() {
   }
 }
 
-onMounted(() => store.fetchReturn(props.returnId));
+onMounted(async () => {
+  await store.fetchReturn(props.returnId);
+  // The backend auto-pushes on create, so a freshly-created return loads as "pending" — poll to completion.
+  if (store.current?.sync.shopify === "pending") {
+    busy.value = true;
+    try { await store.pollSync(props.returnId, "shopify"); } finally { busy.value = false; }
+  }
+});
 </script>
