@@ -1782,3 +1782,11 @@ The `omsAdapter` assumes these endpoints; until they exist, run with `VITE_RETUR
 - Unpause the Shopify ServiceJobs in the target deployment for the inbound leg to flow.
 
 When the real endpoints land, set `VITE_RETURNS_BACKEND=oms` and re-run the manual smoke against a live instance; adjust the `omsAdapter` URL prefixes per the confirmed base-URL shape.
+
+### Known caveats from the final holistic review (address during backend wiring)
+
+1. **Entity REST base-URL prefix.** `commonUtil.getMaargURL()` returns a `…/rest/s1/` base, but `getReturn` (`ReturnHeader/{id}`) and `listReturnReasons` (`ReturnReason`) are Entity REST and need `/rest/e1/`. Either prepend the correct path in those `omsAdapter` calls (e.g. `url: "rest/e1/ReturnHeader/" + returnId` against the host base) or expose `/oms/returns/{id}` and `/oms/returnReasons` service mounts. The stub is unaffected.
+
+2. **Inbound `pending` is unreachable in the OMS mapper.** In `omsAdapter.mapReturnHeaderToSummary`, `origin` and `hasShopifyId` are both derived from the same `SHOPIFY_RTN_ID` identification, so `origin === "shopify"` ⟺ synced — the `resolveSyncState` "shopify-origin → pending" branch (spec §5, inbound mid-ingest before the GID lands) can never fire. A real inbound return whose `ReturnHeader` exists but whose `SHOPIFY_RTN_ID` row isn't written yet would map as `pwa`/`not_synced`. When wiring the backend, derive `origin` from a distinct signal (order source, or a separate in-progress identification type) rather than from the GID identification itself. Not demo-blocking (the seeded stub Shopify return is already `synced`).
+
+3. **OMS `getReturn` doesn't populate `returnReasonDesc`.** The stub fills it; the OMS path leaves it undefined and the detail view falls back to the raw `returnReasonId`. Join `ReturnReason.description` in the composite/detail service (or map it client-side) for parity.

@@ -51,7 +51,11 @@ export const useReturnsStore = defineStore("returns", {
           this.current = { ...this.current, sync };
         }
         const state: SyncState = sync[target];
-        if (state === "synced" || state === "failed") return state;
+        if (state === "synced" || state === "failed") {
+          // Refresh the full return so externalIds (the Shopify return ID) and statuses surface.
+          if (this.current && this.current.returnId === returnId) await this.fetchReturn(returnId);
+          return state;
+        }
         await sleep(intervalMs);
       }
       return "pending" as SyncState;
