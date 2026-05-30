@@ -38,7 +38,14 @@
         </aside>
 
         <main class="ion-content-scroll-host">
-          <div class="empty-state" data-testid="returns-loading" v-if="store.loading && !store.returns.length">
+          <div class="empty-state" data-testid="returns-error" v-if="error">
+            <ion-icon :icon="alertCircleOutline" color="danger" />
+            <h1>{{ translate("Couldn't load returns") }}</h1>
+            <p style="white-space: pre-wrap">{{ error }}</p>
+            <ion-button fill="outline" @click="reload">{{ translate("Retry") }}</ion-button>
+          </div>
+
+          <div class="empty-state" data-testid="returns-loading" v-else-if="store.loading && !store.returns.length">
             <ion-spinner name="crescent" />
             <p>{{ translate("Fetching returns") }}</p>
           </div>
@@ -100,25 +107,27 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref } from "vue";
 import { translate } from "@common";
 import {
   IonBadge, IonButton, IonButtons, IonContent, IonFab, IonFabButton, IonHeader, IonIcon,
   IonInfiniteScroll, IonInfiniteScrollContent, IonItem, IonLabel, IonMenu, IonMenuButton,
   IonPage, IonSearchbar, IonSpinner, IonTitle, IonToolbar, onIonViewWillEnter,
 } from "@ionic/vue";
-import { addOutline, receiptOutline, filterOutline } from "ionicons/icons";
+import { addOutline, alertCircleOutline, receiptOutline, filterOutline } from "ionicons/icons";
 import router from "@/router";
 import { useMobile } from "@/composables/useMobile";
 import ReturnFiltersContent from "@/components/ReturnFiltersContent.vue";
 import { useReturnsStore } from "@/store/returnsStore";
 import { formatStatus } from "@/util/labels";
 import { formatDate } from "@/util/dates";
+import { describeApiError } from "@/util/errorMessage";
 import { syncColor, syncLabel } from "@/util/syncState";
 import type { ReturnSummary } from "@/types/returns";
 
 const store = useReturnsStore();
 const isMobile = useMobile();
+const error = ref("");
 const filteredReturns = computed(() => store.getFilteredReturns);
 const isAnyFilterApplied = computed(() => !!(store.query.searchTerm || store.query.statusId));
 
@@ -132,7 +141,17 @@ async function loadMore(event: any) {
   await event.target.complete();
 }
 
-onIonViewWillEnter(() => store.fetchReturns(0));
+// Surface a failed list fetch instead of masking it as the "No returns yet" empty state.
+async function reload() {
+  error.value = "";
+  try {
+    await store.fetchReturns(0);
+  } catch (e) {
+    error.value = describeApiError(e, "Failed to load returns");
+  }
+}
+
+onIonViewWillEnter(reload);
 </script>
 
 <style scoped>
