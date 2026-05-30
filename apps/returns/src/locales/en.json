@@ -31,6 +31,7 @@
   "Completed": "Completed",
   "Cancelled": "Cancelled",
   "Status": "Status",
+  "All": "All",
   "Shopify sync": "Shopify sync",
   "Push to Shopify": "Push to Shopify",
   "Retry": "Retry",
