@@ -5,7 +5,7 @@
 //   in one terminal and `pnpm --filter returns test:e2e` in another (log in once if auth blocks).
 describe("Returns happy path (stub backend)", () => {
   it("creates a return and syncs it to Shopify", () => {
-    cy.visit("/tabs/returns/create");
+    cy.visit("/create-return");
     cy.get("ion-input[label='Order ID'] input").type("DEMO-1001");
     cy.contains("ion-button", "Look up order").click();
 
@@ -17,11 +17,11 @@ describe("Returns happy path (stub backend)", () => {
     cy.contains("ion-item", "Classic Tee").find("ion-select").last().click();
     cy.get("ion-select-option").first().click();
 
-    cy.contains("ion-button", "Submit return").click();
+    cy.get("[data-testid=create-submit-btn]").click();
 
     // Lands on detail; push and watch sync
     cy.contains("Shopify sync");
-    cy.contains("ion-button", "Push to Shopify").click();
+    cy.get("[data-testid=detail-push-btn]").click();
     cy.contains("Synced", { timeout: 15000 });
   });
 
