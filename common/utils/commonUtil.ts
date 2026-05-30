@@ -9,6 +9,7 @@ import Encoding from 'encoding-japanese';
 import cronParser from "cron-parser";
 import cronstrue from "cronstrue"
 import { useEmbeddedAppStore } from "../store/embeddedApp";
+import { getMoquiBaseURL, isMoquiAuthBackend } from "../core/authBackend";
 
 export interface JsonToCsvOption {
   parse?: object | null;
@@ -370,6 +371,9 @@ const getMaargURL = () => {
   let maargURL = ""
   if (maarg) {
     maargURL = maarg.startsWith('http') ? maarg.includes('/rest/s1') ? maarg : `${maarg}/rest/s1/` : `https://${maarg}.hotwax.io/rest/s1/`;
+  }
+  if (isMoquiAuthBackend()) {
+    maargURL = getMoquiBaseURL();
   }
   return maargURL
 }

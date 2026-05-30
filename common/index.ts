@@ -20,6 +20,7 @@ import { useNotificationStore } from './store/notification'
 import { useEmbeddedAppStore } from './store/embeddedApp'
 import { initialiseConfig } from './core/configRegistry'
 import { useAuth } from './composables/useAuth'
+import { getAuthBackend, getMoquiBaseURL, isMoquiAuthBackend } from './core/authBackend'
 
 // ✅ These are pure types (erased during build)
 export { api, client, axios }
@@ -44,5 +45,8 @@ export {
   translate,
   useNotificationStore,
   useEmbeddedAppStore,
-  useAuth
+  useAuth,
+  getAuthBackend,
+  getMoquiBaseURL,
+  isMoquiAuthBackend
 }

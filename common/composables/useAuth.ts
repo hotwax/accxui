@@ -3,6 +3,7 @@ import { DateTime } from "luxon";
 import { computed, ref } from "vue";
 import emitter from "../core/emitter";
 import { accxuiConfig } from "../core/configRegistry";
+import { getMoquiBaseURL, isMoquiAuthBackend } from "../core/authBackend";
 
 interface LoginOption {
   loginAuthType?: string,
@@ -33,6 +34,7 @@ export function useAuth() {
   const updateOMS = (oms: any) => {
     cookieHelper().set("oms", oms, getDuration())
     omsRef.value = oms
+    accxuiConfig.value.oms = oms
   }
 
   const updateUserId = (userId: any) => {
@@ -81,15 +83,30 @@ export function useAuth() {
     let expiresAt = expirationTime
     try {
       if(!omsToken && username && password) {
-        const resp = await api({
-          url: "login",
-          method: "post",
-          data: {
-            "USERNAME": username,
-            "PASSWORD": password
-          },
-          baseURL: commonUtil.getOmsURL()
-        });
+        const useMoquiAuth = isMoquiAuthBackend();
+        let resp;
+        try {
+          resp = await api({
+            url: useMoquiAuth ? "admin/login" : "login",
+            method: "post",
+            data: useMoquiAuth ? {
+              "username": username,
+              "password": password
+            } : {
+              "USERNAME": username,
+              "PASSWORD": password
+            },
+            baseURL: useMoquiAuth ? getMoquiBaseURL() : commonUtil.getOmsURL()
+          });
+        } catch (err: any) {
+          if(useMoquiAuth && err?.response?.status === 401) {
+            commonUtil.showToast(translate("Sorry, your username or password is incorrect. Please try again."));
+            updateUserId("")
+            updateToken("", "")
+            return Promise.reject(err);
+          }
+          throw err;
+        }
         if(commonUtil.hasError(resp)) {
           commonUtil.showToast(translate("Sorry, your username or password is incorrect. Please try again."));
           logger.error("error", resp.data._ERROR_MESSAGE_);
@@ -101,6 +118,12 @@ export function useAuth() {
 
         omsToken = resp.data.token
         expiresAt = resp.data.expirationTime
+        if(useMoquiAuth && !cookieHelper().get("maarg")) {
+          const moquiBaseURL = getMoquiBaseURL();
+          if(moquiBaseURL) {
+            cookieHelper().set("maarg", moquiBaseURL, getDuration(expiresAt))
+          }
+        }
       }
 
       updateToken(omsToken, expiresAt)
@@ -141,19 +164,21 @@ export function useAuth() {
         }
       }
 
-      try {
-        let resp = await api({
-          url: "logout",
-          method: "GET",
-          baseURL: commonUtil.getOmsURL()
-        }) as any;
-        resp = JSON.parse(resp.data.startsWith("//") ? resp.data.replace("//", "") : resp.data);
+      if(!isMoquiAuthBackend()) {
+        try {
+          let resp = await api({
+            url: "logout",
+            method: "GET",
+            baseURL: commonUtil.getOmsURL()
+          }) as any;
+          resp = JSON.parse(resp.data.startsWith("//") ? resp.data.replace("//", "") : resp.data);
 
-        if(resp?.logoutAuthType == "SAML2SSO") {
-          redirectionUrl = resp.logoutUrl;
+          if(resp?.logoutAuthType == "SAML2SSO") {
+            redirectionUrl = resp.logoutUrl;
+          }
+        } catch (err) {
+          logger.error("Error logging out", err);
         }
-      } catch (err) {
-        logger.error("Error logging out", err);
       }
     }
 
@@ -191,14 +216,16 @@ export function useAuth() {
   const fetchLoginOptions = async () => {
     loginOption.value = {}
     try {
+      const useMoquiAuth = isMoquiAuthBackend();
       const resp = await api({
-        url: "checkLoginOptions",
+        url: useMoquiAuth ? "admin/checkLoginOptions" : "checkLoginOptions",
         method: "GET",
-        baseURL: commonUtil.getOmsURL()
+        baseURL: useMoquiAuth ? getMoquiBaseURL() : commonUtil.getOmsURL()
       });
       if(!commonUtil.hasError(resp)) {
         loginOption.value = resp.data
-        cookieHelper().set("maarg", resp.data.maargInstanceUrl, getDuration())
+        const maargInstanceUrl = resp.data.maargInstanceUrl || resp.data.omsInstanceUrl || (useMoquiAuth ? getMoquiBaseURL() : "");
+        if(maargInstanceUrl) cookieHelper().set("maarg", maargInstanceUrl, getDuration())
       }
     } catch (error) {
       logger.error(error)

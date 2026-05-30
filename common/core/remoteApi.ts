@@ -4,13 +4,18 @@ import { setupCache } from 'axios-cache-adapter'
 import qs from "qs"
 import { commonUtil } from '../utils/commonUtil';
 import { useAuth } from '../composables/useAuth';
+import { getMoquiBaseURL, isMoquiAuthBackend } from './authBackend';
+
+const authBypassEndpoints = ["login", "logout", "checkLoginOptions", "admin/login", "admin/checkLoginOptions", "admin/user/profile", "getPermissions", "admin/user/permissions", "app-bridge/login"]
+
+const isAuthBypassEndpoint = (url?: string) => {
+  return !!url && authBypassEndpoints.includes(url);
+}
 
 const requestInterceptor = async (config: any) => {
   const token = commonUtil.getToken();
 
-  // The following are the endpoints needs to bypass the auth check and when this calls are made we will assume
-  // that we are always relogin with the new credentials present in cookies.
-  const noAuthEndpoints = ["login", "logout", "checkLoginOptions", "admin/user/profile", "getPermissions", "app-bridge/login"]
+  // The following endpoints bypass the auth check because they are part of login setup.
 
   // When the same app is opened in multiple tabs and logout from one tab, then another tab still uses the old
   // session, to handle this scenario we have added check to always validate authentication before api calls
@@ -18,7 +23,7 @@ const requestInterceptor = async (config: any) => {
   // the session automatically.
   // Bypass the check for endpoints that don't require authentication (like login, logout, profile),
   // as these are often called during the authentication flow itself or to refresh local state.
-  if (!useAuth().isAuthenticated.value && !noAuthEndpoints.includes(config.url)) {
+  if (!useAuth().isAuthenticated.value && !isAuthBypassEndpoint(config.url)) {
     await useAuth().logout({ isUserUnauthorised: true, invalidAppContext: true })
     useAuth().clearAuth()
     return Promise.reject(new Error("INVALID_APP_CONTEXT"));
@@ -108,7 +113,7 @@ const axiosCache = setupCache({
  * @param {boolean} [cache] - Optional: Apply caching to it
  * @return {Promise} Response from API as returned by Axios
  */
-const api = async (customConfig: any) => {
+const prepareApiConfig = (customConfig: any) => {
   // Prepare configuration
   const config: any = {
     url: customConfig.url,
@@ -126,8 +131,25 @@ const api = async (customConfig: any) => {
 
   config.baseURL = customConfig.baseURL ? customConfig.baseURL : commonUtil.getMaargURL();
 
+  if(isMoquiAuthBackend() && typeof config.baseURL === "string" && config.baseURL.includes("/api")) {
+    config.baseURL = getMoquiBaseURL();
+  }
+
+  if(isMoquiAuthBackend() && customConfig.url === "getPermissions") {
+    config.url = "admin/user/permissions";
+    config.method = "get";
+    config.params = customConfig.params || customConfig.data;
+    delete config.data;
+    config.baseURL = getMoquiBaseURL();
+  }
+
   if (customConfig.cache) config.adapter = axiosCache.adapter;
 
+  return config;
+}
+
+const api = async (customConfig: any) => {
+  const config = prepareApiConfig(customConfig);
   return axios(config);
 }
 
@@ -141,4 +163,4 @@ const client = (config: any) => {
   return axios.create().request({ paramsSerializer, ...config })
 }
 
-export { api as default, client, axios };
+export { api as default, client, axios, prepareApiConfig, isAuthBypassEndpoint };
