@@ -190,6 +190,8 @@ const setOms = async () => {
 };
 
 const initialise = async () => {
+  // Guard against multiple concurrent calls (Ionic fires onIonViewWillEnter on each navigation)
+  if (isInitializing.value) return;
   isInitializing.value = true;
   await presentLoader("Processing");
 
@@ -229,8 +231,8 @@ const initialise = async () => {
     await fetchLoginOptions();
   }
 
-  // show OMS input if SAML if configured or if query or state does not have OMS
-  if (loginOption.value.loginAuthType !== 'BASIC' || !cookieHelper().get("OMS")) {
+  // show OMS input if SAML is configured or if OMS cookie is not set
+  if (loginOption.value.loginAuthType !== 'BASIC' || !cookieHelper().get("oms")) {
     showOmsInput.value = true;
   }
 
