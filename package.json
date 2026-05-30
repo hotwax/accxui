@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@capacitor/android": "catalog:",
+    "@capacitor/clipboard": "catalog:",
     "@capacitor/core": "catalog:",
     "@capacitor/ios": "catalog:",
     "@casl/ability": "^6.7.3",
