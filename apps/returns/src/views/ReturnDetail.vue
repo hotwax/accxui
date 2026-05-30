@@ -27,9 +27,9 @@
         <ion-list>
           <ion-item v-for="it in r.items" :key="it.orderItemSeqId">
             <ion-label>
-              <h2>{{ it.productName || it.productId }}</h2>
+              <h2>{{ it.productName || it.sku || it.productId }}</h2>
               <p>{{ translate("Quantity") }}: {{ it.returnQuantity }} · {{ translate(formatReason(it.returnReasonId, it.returnReasonDesc)) }}</p>
-              <p v-if="it.productName" class="muted">{{ it.productId }}</p>
+              <p v-if="it.sku" class="muted">{{ translate("SKU") }}: {{ it.sku }}</p>
             </ion-label>
           </ion-item>
         </ion-list>

@@ -26,7 +26,8 @@
         <ion-list>
           <ion-item v-for="line in order.items" :key="line.orderItemSeqId" :disabled="line.returnableQty === 0">
             <ion-label>
-              <h2>{{ line.productName || line.productId }}</h2>
+              <h2>{{ line.productName || line.sku || line.productId }}</h2>
+              <p v-if="line.sku" style="color: var(--ion-color-medium)">{{ translate("SKU") }}: {{ line.sku }}</p>
               <p>{{ translate("Returnable") }}: {{ line.returnableQty }}</p>
             </ion-label>
             <ion-select

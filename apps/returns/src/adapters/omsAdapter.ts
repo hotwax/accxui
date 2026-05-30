@@ -18,7 +18,7 @@ interface RawReturnDetail {
     // (OrderHeader.orderName, equal values); orderExternalId is the Shopify GID and is NEVER displayed.
     orderId?: string; orderName?: string; externalOrderId?: string; orderExternalId?: string; orderDate?: string | number;
   };
-  items?: Array<{ orderId?: string; externalOrderId?: string; orderItemSeqId: string; productId?: string; productName?: string; returnQuantity: number | string; returnReasonId: string; itemDescription?: string }>;
+  items?: Array<{ orderId?: string; externalOrderId?: string; orderItemSeqId: string; productId?: string; productName?: string; sku?: string; returnQuantity: number | string; returnReasonId: string; itemDescription?: string }>;
   statusHistory?: Array<{ statusId: string; statusDatetime: string | number }>;
   identifications?: Identification[];
   shopifySync?: ShopifySync | null;
@@ -49,8 +49,9 @@ export function mapReturnDetail(raw: RawReturnDetail): ReturnDetail {
     items: items.map((i) => ({
       orderItemSeqId: i.orderItemSeqId,
       productId: i.productId ?? "",
-      // Prefer an explicit productName; fall back to the order item's itemDescription. "" -> view shows productId.
+      // Prefer an explicit productName; fall back to the order item's itemDescription. "" -> view shows sku/productId.
       productName: i.productName ?? i.itemDescription ?? "",
+      sku: i.sku ?? undefined,
       returnQuantity: Number(i.returnQuantity),
       returnReasonId: i.returnReasonId,
       // Backend getReturn does not join ReturnReason.description; view prettifies the reasonId instead.
@@ -64,6 +65,7 @@ interface RawOrderItem {
   orderItemSeqId: string;
   productId?: string;
   productName?: string;
+  sku?: string;
   quantity: number | string;
   unitPrice: number | string;
   alreadyReturnedQuantity?: number | string;
@@ -87,6 +89,7 @@ export function mapOrderToReturnable(raw: RawOrder): OrderForReturn {
       orderItemSeqId: it.orderItemSeqId,
       productId: it.productId ?? "",
       productName: it.productName ?? "",
+      sku: it.sku ?? undefined,
       orderedQty,
       alreadyReturnedQty,
       returnableQty,
@@ -134,6 +137,8 @@ export const omsAdapter: ReturnsService = {
       orderId: r.orderId ?? undefined,
       // Customer-facing name: orderName, or its alias externalOrderId. Never orderExternalId (the GID).
       orderName: r.orderName ?? r.externalOrderId ?? undefined,
+      // Shopify order GID — not displayed, indexed only so search can match a Shopify order id.
+      orderExternalId: r.orderExternalId ?? undefined,
       orderDate: r.orderDate != null ? String(r.orderDate) : undefined,
       statusId: r.statusId,
       entryDate: String(r.entryDate),

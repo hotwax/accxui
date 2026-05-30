@@ -21,6 +21,9 @@ export interface ReturnSummary {
   // Customer-facing Shopify order name/number (e.g. "#1001"); preferred over the internal orderId for display.
   // NB: this is OrderHeader.orderName, NOT the Shopify GID (orderExternalId) — the GID is never displayed.
   orderName?: string;
+  // Shopify order GID / external id (e.g. "gid://shopify/Order/5512…" or the raw numeric id). NOT displayed —
+  // indexed only so search can match a Shopify order id. Populated once the backend returns it on list rows.
+  orderExternalId?: string;
   // The order's placement date — distinct from entryDate/returnDate (the return's own dates).
   orderDate?: string;
   statusId: string;
@@ -33,7 +36,8 @@ export interface ReturnSummary {
 export interface ReturnItemDetail {
   orderItemSeqId: string;
   productId: string;
-  productName: string; // "" when the backend doesn't supply one; views fall back to productId
+  productName: string; // "" when the backend doesn't supply one; views fall back to sku, then productId
+  sku?: string; // Product SKU — the customer/merchant-facing product identifier, preferred over the internal productId. Populated once the backend returns it.
   returnQuantity: number;
   returnReasonId: string;
   returnReasonDesc?: string;
@@ -57,7 +61,8 @@ export interface ReturnDetail extends ReturnSummary {
 export interface ReturnableLine {
   orderItemSeqId: string;
   productId: string;
-  productName: string; // "" when the backend doesn't supply one; views fall back to productId
+  productName: string; // "" when the backend doesn't supply one; views fall back to sku, then productId
+  sku?: string; // Product SKU — preferred customer/merchant-facing identifier over the internal productId. Populated once the backend returns it.
   orderedQty: number;
   alreadyReturnedQty: number;
   returnableQty: number;

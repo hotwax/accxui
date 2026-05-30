@@ -16,12 +16,13 @@ export const useReturnsStore = defineStore("returns", {
   getters: {
     // More loaded pages are available while we hold fewer rows than the server reports.
     isScrollable: (state) => state.returns.length < state.total,
-    // Client-side free-text filter (the list endpoint has no search param): match id/order fields.
+    // Client-side free-text filter (the list endpoint has no search param): match id/order fields,
+    // including the Shopify order id (orderExternalId) so a Shopify order id/GID finds its return.
     getFilteredReturns: (state) => {
       const term = state.query.searchTerm.trim().toLowerCase();
       if (!term) return state.returns;
       return state.returns.filter((r) =>
-        [r.returnId, r.orderName, r.orderId].some((v) => v?.toLowerCase().includes(term)),
+        [r.returnId, r.orderName, r.orderId, r.orderExternalId].some((v) => v?.toLowerCase().includes(term)),
       );
     },
   },

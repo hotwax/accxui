@@ -118,4 +118,15 @@ describe("mapOrderToReturnable", () => {
     expect(order.orderName).toBe("");
     expect(order.items[0].productName).toBe("");
   });
+
+  it("maps the product sku through when present, undefined when omitted", () => {
+    const withSku = mapOrderToReturnable({
+      orderDetail: { orderId: "10003", shipGroups: [{ items: [{ orderItemSeqId: "00001", productId: "P1", sku: "TEE-BLK-M", quantity: 1, unitPrice: 10 }] }] },
+    });
+    expect(withSku.items[0].sku).toBe("TEE-BLK-M");
+    const withoutSku = mapOrderToReturnable({
+      orderDetail: { orderId: "10004", shipGroups: [{ items: [{ orderItemSeqId: "00001", productId: "P1", quantity: 1, unitPrice: 10 }] }] },
+    });
+    expect(withoutSku.items[0].sku).toBeUndefined();
+  });
 });

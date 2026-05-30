@@ -59,4 +59,15 @@ describe("returnsStore pagination + query", () => {
     store.query.searchTerm = "";
     expect(store.getFilteredReturns).toHaveLength(2);
   });
+
+  it("getFilteredReturns matches the Shopify order id (orderExternalId)", async () => {
+    const store = useReturnsStore();
+    listReturns.mockResolvedValueOnce({ items: [
+      { returnId: "ABC-1", orderName: "#1001", orderExternalId: "gid://shopify/Order/5512123", statusId: "RETURN_REQUESTED", entryDate: "1" },
+      { returnId: "XYZ-2", orderName: "#2002", orderExternalId: "gid://shopify/Order/9999000", statusId: "RETURN_REQUESTED", entryDate: "2" },
+    ], total: 2 });
+    await store.fetchReturns(0);
+    store.query.searchTerm = "5512123"; // numeric Shopify order id, a substring of the GID
+    expect(store.getFilteredReturns.map((r) => r.returnId)).toEqual(["ABC-1"]);
+  });
 });
