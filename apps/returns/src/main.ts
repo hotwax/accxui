@@ -30,7 +30,7 @@ import { useUserStore } from "@/store/userStore";
 const i18n = createDxpI18n(localeMessages);
 const pinia = createPinia().use(piniaPluginPersistedstate);
 const app = createApp(App)
-  .use(IonicVue, { mode: "md" })
+  .use(IonicVue, { mode: "md", innerHTMLTemplatesEnabled: true })
   .use(logger, { level: import.meta.env.VITE_VUE_APP_DEFAULT_LOG_LEVEL })
   .use(router)
   .use(i18n)
