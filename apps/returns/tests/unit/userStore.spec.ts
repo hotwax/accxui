@@ -7,7 +7,9 @@ vi.mock("@common", () => ({
   logger: { error: vi.fn() },
   useAuth: () => ({ updateUserId: vi.fn() }),
 }));
+vi.mock("@/util/maargAuth", () => ({ maargApiKey: () => "TEST_KEY" }));
 
+import { api } from "@common";
 import { useUserStore } from "@/store/userStore";
 
 describe("userStore.hasPermission", () => {
@@ -23,5 +25,22 @@ describe("userStore.hasPermission", () => {
     const store = useUserStore();
     store.permissions = ["APP_RETURNS_VIEW"];
     expect(store.hasPermission("APP_RETURNS_VIEW")).toBe(true);
+  });
+});
+
+describe("userStore.fetchUserProfile", () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    vi.mocked(api).mockReset();
+  });
+
+  // Regression: this Moqui build authenticates only via the api_key header; a bare profile call 403s.
+  it("attaches the api_key header to the profile call", async () => {
+    vi.mocked(api).mockResolvedValue({ data: { userId: "u1" } } as any);
+    const store = useUserStore();
+    await store.fetchUserProfile();
+    expect(api).toHaveBeenCalledWith(
+      expect.objectContaining({ url: "admin/user/profile", headers: { api_key: "TEST_KEY" } }),
+    );
   });
 });
