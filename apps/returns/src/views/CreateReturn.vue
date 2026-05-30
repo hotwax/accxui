@@ -8,8 +8,8 @@
     </ion-header>
     <ion-content class="ion-padding">
       <ion-item>
-        <ion-input v-model="orderId" :label="translate('Order ID')" label-placement="stacked" />
-        <ion-button slot="end" @click="lookupOrder">{{ translate("Look up order") }}</ion-button>
+        <ion-input v-model="orderId" :label="translate('Order ID')" label-placement="stacked" data-testid="create-orderid-input" />
+        <ion-button slot="end" @click="lookupOrder" data-testid="create-lookup-btn">{{ translate("Look up order") }}</ion-button>
       </ion-item>
 
       <p v-if="error" class="ion-padding-start" style="color: var(--ion-color-danger); white-space: pre-wrap">{{ error }}</p>
@@ -44,7 +44,7 @@
           </ion-item>
         </ion-list>
 
-        <ion-button expand="block" :disabled="!canSubmit" @click="submit">{{ translate("Submit return") }}</ion-button>
+        <ion-button expand="block" :disabled="!canSubmit" @click="submit" data-testid="create-submit-btn">{{ translate("Submit return") }}</ion-button>
       </template>
     </ion-content>
   </ion-page>
@@ -53,7 +53,7 @@
 <script setup lang="ts">
 import { computed, reactive, ref } from "vue";
 import router from "@/router";
-import { translate } from "@common";
+import { emitter, translate } from "@common";
 import {
   IonBackButton, IonButton, IonButtons, IonContent, IonHeader, IonInput, IonItem,
   IonLabel, IonList, IonPage, IonSelect, IonSelectOption, IonTitle, IonToolbar,
@@ -78,11 +78,14 @@ const canSubmit = computed(() =>
 async function lookupOrder() {
   error.value = "";
   order.value = null;
+  emitter.emit("presentLoader", { message: "Looking up order" });
   try {
     order.value = await store.loadOrder(orderId.value.trim());
     reasons.value = await store.loadReasons();
   } catch (e) {
     error.value = describeApiError(e, "Order not found");
+  } finally {
+    emitter.emit("dismissLoader");
   }
 }
 function setQty(seqId: string, qty: number) {
@@ -101,12 +104,15 @@ async function submit(): Promise<string | undefined> {
     });
   if (!items.length) return;
   error.value = "";
+  emitter.emit("presentLoader", { message: "Submitting return" });
   try {
     const returnId = await store.submitReturn({ orderId: order.value.orderId, items });
     router.push(`/return-detail/${returnId}`);
     return returnId;
   } catch (e) {
     error.value = describeApiError(e, "Failed to create return");
+  } finally {
+    emitter.emit("dismissLoader");
   }
 }
 

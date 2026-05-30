@@ -42,5 +42,8 @@
   "Fetching returns": "Fetching returns",
   "No returns found for the applied filters.": "No returns found for the applied filters.",
   "No returns were found. Create a return to get started.": "No returns were found. Create a return to get started.",
-  "Loading": "Loading"
+  "Loading": "Loading",
+  "Submitting return": "Submitting return",
+  "Looking up order": "Looking up order",
+  "Pushing to Shopify": "Pushing to Shopify"
 }

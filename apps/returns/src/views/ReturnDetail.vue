@@ -43,10 +43,10 @@
             </ion-chip>
             <p v-if="r.externalIds.shopify">{{ translate("Shopify return ID") }}: {{ r.externalIds.shopify }}</p>
 
-            <ion-button v-if="r.sync.shopify === 'not_synced'" expand="block" :disabled="busy" @click="push">
+            <ion-button v-if="r.sync.shopify === 'not_synced'" expand="block" :disabled="busy" @click="push" data-testid="detail-push-btn">
               {{ translate("Push to Shopify") }}
             </ion-button>
-            <ion-button v-if="r.sync.shopify === 'failed'" expand="block" color="danger" :disabled="busy" @click="push">
+            <ion-button v-if="r.sync.shopify === 'failed'" expand="block" color="danger" :disabled="busy" @click="push" data-testid="detail-retry-btn">
               {{ translate("Retry") }}
             </ion-button>
           </ion-card-content>
@@ -58,7 +58,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
-import { translate } from "@common";
+import { emitter, translate } from "@common";
 import {
   IonBackButton, IonButton, IonButtons, IonCard, IonCardContent, IonCardHeader, IonCardTitle,
   IonChip, IonContent, IonHeader, IonItem, IonLabel, IonList, IonPage, IonSpinner, IonTitle, IonToolbar,
@@ -85,12 +85,14 @@ function syncLabel(s: SyncState) {
 async function push() {
   error.value = "";
   busy.value = true;
+  emitter.emit("presentLoader", { message: "Pushing to Shopify" });
   try {
     await store.pushAndPoll(props.returnId, "shopify");
   } catch (e) {
     error.value = describeApiError(e, "Push to Shopify failed");
   } finally {
     busy.value = false;
+    emitter.emit("dismissLoader");
   }
 }
 
