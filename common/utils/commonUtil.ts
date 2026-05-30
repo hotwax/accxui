@@ -380,14 +380,22 @@ const getMaargBaseURL = () => {
 
 const getOmsURL = () => {
   const oms = getEmbeddedAppStoreSafe().oms || cookieHelper().get("oms")
+  // VITE_OMS_TYPE=moqui → use Moqui REST paths (/rest/s1/admin/)
+  // VITE_OMS_TYPE unset  → use OFBiz paths (/api/)  [default, backward-compatible]
+  const isMoqui = import.meta.env.VITE_OMS_TYPE === 'moqui'
   let omsURL = ""
   if (oms) {
-    // Treat URLs already containing /api or /rest/ as fully-qualified (e.g. Moqui REST URLs).
-    // For plain instance names/hostnames, append /api/ (OFBiz convention).
-    omsURL = oms.startsWith('http')
-      ? (oms.includes('/api') || oms.includes('/rest/')) ? oms : `${oms}/api/`
-      : `https://${oms}.hotwax.io/api/`
-    // Ensure trailing slash so appended endpoint paths join correctly
+    if (oms.startsWith('http')) {
+      // Full URL provided — use as-is if it already has a known path suffix
+      omsURL = (oms.includes('/api') || oms.includes('/rest/'))
+        ? oms
+        : isMoqui ? `${oms}/rest/s1/admin/` : `${oms}/api/`
+    } else {
+      // Plain subdomain — build full URL for the configured backend type
+      omsURL = isMoqui
+        ? `https://${oms}.hotwax.io/rest/s1/admin/`
+        : `https://${oms}.hotwax.io/api/`
+    }
     if (omsURL && !omsURL.endsWith('/')) omsURL += '/'
   }
   return omsURL;

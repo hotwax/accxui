@@ -85,8 +85,8 @@ export function useAuth() {
           url: "login",
           method: "post",
           data: {
-            "USERNAME": username,
-            "PASSWORD": password
+            "username": username,
+            "password": password
           },
           baseURL: commonUtil.getOmsURL()
         });
@@ -144,7 +144,7 @@ export function useAuth() {
       try {
         let resp = await api({
           url: "logout",
-          method: "GET",
+          method: "POST",
           baseURL: commonUtil.getOmsURL()
         }) as any;
         resp = JSON.parse(resp.data.startsWith("//") ? resp.data.replace("//", "") : resp.data);
@@ -198,7 +198,13 @@ export function useAuth() {
       });
       if(!commonUtil.hasError(resp)) {
         loginOption.value = resp.data
-        cookieHelper().set("maarg", resp.data.maargInstanceUrl, getDuration())
+        if (resp.data.maargInstanceUrl) {
+          // OFBiz deployment: OFBiz tells the PWA where its Moqui instance is
+          cookieHelper().set("maarg", resp.data.maargInstanceUrl, getDuration())
+        } else if (import.meta.env.VITE_OMS_TYPE === 'moqui') {
+          // Moqui-only deployment: the OMS IS the maarg — same subdomain the user entered
+          cookieHelper().set("maarg", cookieHelper().get("oms") as string, getDuration())
+        }
       }
     } catch (error) {
       logger.error(error)
