@@ -1,8 +1,24 @@
 <template>
   <ion-page>
+    <ion-menu v-if="isMobile" menu-id="returns-filter" content-id="filter-content" type="overlay">
+      <ion-header>
+        <ion-toolbar>
+          <ion-title>{{ translate("Filters") }}</ion-title>
+        </ion-toolbar>
+      </ion-header>
+      <ion-content>
+        <ReturnFiltersContent />
+      </ion-content>
+    </ion-menu>
+
     <ion-header>
       <ion-toolbar>
         <ion-title>{{ translate("Returns") }}</ion-title>
+        <ion-buttons slot="end">
+          <ion-menu-button menu="returns-filter" class="mobile-only">
+            <ion-icon :icon="filterOutline" />
+          </ion-menu-button>
+        </ion-buttons>
       </ion-toolbar>
     </ion-header>
 
@@ -17,7 +33,7 @@
           />
         </section>
 
-        <aside class="filters">
+        <aside class="filters" v-if="!isMobile">
           <ReturnFiltersContent />
         </aside>
 
@@ -87,12 +103,13 @@
 import { computed } from "vue";
 import { translate } from "@common";
 import {
-  IonBadge, IonButton, IonContent, IonFab, IonFabButton, IonHeader, IonIcon,
-  IonInfiniteScroll, IonInfiniteScrollContent, IonItem, IonLabel, IonPage,
-  IonSearchbar, IonSpinner, IonTitle, IonToolbar, onIonViewWillEnter,
+  IonBadge, IonButton, IonButtons, IonContent, IonFab, IonFabButton, IonHeader, IonIcon,
+  IonInfiniteScroll, IonInfiniteScrollContent, IonItem, IonLabel, IonMenu, IonMenuButton,
+  IonPage, IonSearchbar, IonSpinner, IonTitle, IonToolbar, onIonViewWillEnter,
 } from "@ionic/vue";
-import { addOutline, receiptOutline } from "ionicons/icons";
+import { addOutline, receiptOutline, filterOutline } from "ionicons/icons";
 import router from "@/router";
+import { useMobile } from "@/composables/useMobile";
 import ReturnFiltersContent from "@/components/ReturnFiltersContent.vue";
 import { useReturnsStore } from "@/store/returnsStore";
 import { formatStatus } from "@/util/labels";
@@ -100,6 +117,7 @@ import { formatDate } from "@/util/dates";
 import type { ReturnSummary, SyncState } from "@/types/returns";
 
 const store = useReturnsStore();
+const isMobile = useMobile();
 const filteredReturns = computed(() => store.getFilteredReturns);
 const isAnyFilterApplied = computed(() => !!(store.query.searchTerm || store.query.statusId));
 
@@ -169,6 +187,7 @@ onIonViewWillEnter(() => store.fetchReturns(0));
   width: 100%;
 }
 @media (min-width: 991px) {
+  .mobile-only { display: none; }
   .find {
     grid-template-rows: auto 1fr;
   }
