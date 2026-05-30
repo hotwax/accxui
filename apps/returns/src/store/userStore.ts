@@ -5,13 +5,12 @@ export const useUserStore = defineStore('user', {
   state: () => ({
     current: null as any,
     oms: null as any,
+    permissions: [] as string[],
   }),
   getters: {
     getUserProfile: (state) => state.current,
     getOms: (state) => state.oms,
-    // Permission check. Returns defines no permissions yet, so this is permissive;
-    // a later task replaces it with the real permission-list-backed implementation.
-    hasPermission: () => (_permissionId: string): boolean => true,
+    hasPermission: (state) => (permissionId: string): boolean => state.permissions.includes(permissionId),
   },
   actions: {
     setOms(oms: any) { this.oms = oms },
