@@ -22,9 +22,14 @@
       <ion-list>
         <ion-item v-for="r in store.returns" :key="r.returnId" :router-link="`/tabs/returns/${r.returnId}`">
           <ion-label>
-            <h2>#{{ r.returnId }}</h2>
-            <p v-if="r.orderId">{{ translate("Order") }} {{ r.orderId }}</p>
-            <p>{{ r.statusId }} · {{ fmtDate(r.entryDate) }}</p>
+            <h2>
+              <template v-if="orderLabel(r)">{{ translate("Order") }} {{ orderLabel(r) }}</template>
+              <template v-else>{{ translate("Return") }} #{{ r.returnId }}</template>
+            </h2>
+            <p>{{ translate(formatStatus(r.statusId)) }} · {{ translate("Requested") }} {{ formatDate(r.entryDate) }}</p>
+            <p v-if="orderLabel(r)" class="muted">
+              <template v-if="r.orderDate">{{ translate("Ordered") }} {{ formatDate(r.orderDate) }} · </template>{{ translate("Return") }} #{{ r.returnId }}
+            </p>
           </ion-label>
           <ion-badge v-if="r.origin === 'shopify'" slot="end" color="tertiary">{{ translate("From Shopify") }}</ion-badge>
           <ion-badge v-if="r.sync" slot="end" :color="syncColor(r.sync.shopify)">{{ syncLabel(r.sync.shopify) }}</ion-badge>
@@ -36,7 +41,6 @@
 
 <script setup lang="ts">
 import { onMounted } from "vue";
-import { DateTime } from "luxon";
 import { translate } from "@common";
 import {
   IonBadge, IonButton, IonButtons, IonContent, IonHeader, IonIcon, IonItem,
@@ -44,13 +48,15 @@ import {
 } from "@ionic/vue";
 import { addOutline } from "ionicons/icons";
 import { useReturnsStore } from "@/store/returnsStore";
-import type { SyncState } from "@/types/returns";
+import { formatStatus } from "@/util/labels";
+import { formatDate } from "@/util/dates";
+import type { ReturnSummary, SyncState } from "@/types/returns";
 
 const store = useReturnsStore();
 
-function fmtDate(d: string) {
-  const dt = /^\d+$/.test(d) ? DateTime.fromMillis(Number(d)) : DateTime.fromISO(d);
-  return dt.isValid ? dt.toLocaleString(DateTime.DATETIME_MED) : d;
+// Prefer the customer-facing order name; fall back to the internal order id. Empty -> caller shows the return id.
+function orderLabel(r: ReturnSummary) {
+  return r.orderName || r.orderId || "";
 }
 function syncColor(s: SyncState) {
   return { synced: "success", pending: "warning", failed: "danger", not_synced: "medium" }[s];
@@ -65,3 +71,10 @@ async function refresh(ev: CustomEvent) {
 
 onMounted(() => store.fetchReturns());
 </script>
+
+<style scoped>
+.muted {
+  color: var(--ion-color-medium);
+  font-size: 0.8em;
+}
+</style>

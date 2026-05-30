@@ -12,21 +12,24 @@
         <ion-item lines="none">
           <ion-label>
             <p>{{ translate("Order") }}</p>
-            <h2>{{ r.orderId }}</h2>
+            <h2>{{ r.orderName || r.orderId }}</h2>
+            <p v-if="r.orderDate" class="muted">{{ translate("Ordered") }}: {{ formatDate(r.orderDate) }}</p>
           </ion-label>
         </ion-item>
         <ion-item lines="none">
           <ion-label>
             <p>{{ translate("Status") }}</p>
-            <h2>{{ r.statusId }}</h2>
+            <h2>{{ translate(formatStatus(r.statusId)) }}</h2>
+            <p v-if="r.entryDate" class="muted">{{ translate("Requested") }}: {{ formatDate(r.entryDate) }}</p>
           </ion-label>
         </ion-item>
 
         <ion-list>
           <ion-item v-for="it in r.items" :key="it.orderItemSeqId">
             <ion-label>
-              <h2>{{ it.productId }}</h2>
-              <p>{{ translate("Quantity") }}: {{ it.returnQuantity }} · {{ it.returnReasonDesc || it.returnReasonId }}</p>
+              <h2>{{ it.productName || it.productId }}</h2>
+              <p>{{ translate("Quantity") }}: {{ it.returnQuantity }} · {{ translate(formatReason(it.returnReasonId, it.returnReasonDesc)) }}</p>
+              <p v-if="it.productName" class="muted">{{ it.productId }}</p>
             </ion-label>
           </ion-item>
         </ion-list>
@@ -62,6 +65,8 @@ import {
 } from "@ionic/vue";
 import { useReturnsStore } from "@/store/returnsStore";
 import { describeApiError } from "@/util/errorMessage";
+import { formatStatus, formatReason } from "@/util/labels";
+import { formatDate } from "@/util/dates";
 import type { SyncState } from "@/types/returns";
 
 const props = defineProps<{ returnId: string }>();
@@ -102,3 +107,10 @@ onMounted(async () => {
   }
 });
 </script>
+
+<style scoped>
+.muted {
+  color: var(--ion-color-medium);
+  font-size: 0.8em;
+}
+</style>

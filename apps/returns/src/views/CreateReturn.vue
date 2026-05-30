@@ -15,12 +15,19 @@
       <p v-if="error" class="ion-padding-start" style="color: var(--ion-color-danger); white-space: pre-wrap">{{ error }}</p>
 
       <template v-if="order">
+        <ion-item lines="none">
+          <ion-label>
+            <p>{{ translate("Order") }}</p>
+            <h2>{{ order.orderName || order.orderId }}</h2>
+            <p v-if="order.billingEmail">{{ order.billingEmail }}</p>
+          </ion-label>
+        </ion-item>
         <p v-if="!hasReturnable" class="ion-padding-start">{{ translate("Nothing on this order can be returned") }}</p>
         <ion-list>
           <ion-item v-for="line in order.items" :key="line.orderItemSeqId" :disabled="line.returnableQty === 0">
             <ion-label>
-              <h2>{{ line.productId }}</h2>
-              <p>{{ translate("Quantity") }}: {{ line.returnableQty }}</p>
+              <h2>{{ line.productName || line.productId }}</h2>
+              <p>{{ translate("Returnable") }}: {{ line.returnableQty }}</p>
             </ion-label>
             <ion-select
               :placeholder="translate('Quantity')" slot="end" style="min-width: 90px"
@@ -90,7 +97,7 @@ async function submit(): Promise<string | undefined> {
     .filter(([, s]) => s.qty > 0 && s.returnReasonId)
     .map(([orderItemSeqId, s]) => {
       const line = order.value!.items.find((i) => i.orderItemSeqId === orderItemSeqId)!;
-      return { orderItemSeqId, productId: line.productId, returnQuantity: s.qty, returnReasonId: s.returnReasonId! };
+      return { orderItemSeqId, productId: line.productId, productName: line.productName, returnQuantity: s.qty, returnReasonId: s.returnReasonId! };
     });
   if (!items.length) return;
   error.value = "";

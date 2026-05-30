@@ -8,6 +8,7 @@ vi.mock("@/router", () => ({ default: { push: () => {/* noop */} } }));
 
 import CreateReturn from "@/views/CreateReturn.vue";
 import { __resetStub } from "@/adapters/stubAdapter";
+import { getReturnsService } from "@/services/ReturnsService";
 
 describe("CreateReturn.vue", () => {
   beforeEach(() => { setActivePinia(createPinia()); __resetStub(); });
@@ -29,5 +30,17 @@ describe("CreateReturn.vue", () => {
     (wrapper.vm as any).selections["00001"] = { qty: 1, returnReasonId: "RTN_NOT_WANT" };
     const id = await (wrapper.vm as any).submit();
     expect(id).toBeTruthy();
+  });
+
+  it("carries the product name onto the created return for display", async () => {
+    const wrapper = mount(CreateReturn, { global: { stubs: { "ion-page": false } } });
+    (wrapper.vm as any).orderId = "DEMO-1001";
+    await (wrapper.vm as any).lookupOrder();
+    await flushPromises();
+    (wrapper.vm as any).selections["00001"] = { qty: 1, returnReasonId: "RTN_NOT_WANT" };
+    const id = await (wrapper.vm as any).submit();
+
+    const created = await getReturnsService().getReturn(id);
+    expect(created.items[0].productName).toBe("Classic Tee");
   });
 });

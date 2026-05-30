@@ -9,12 +9,12 @@ describe("Returns happy path (stub backend)", () => {
     cy.get("ion-input[label='Order ID'] input").type("DEMO-1001");
     cy.contains("ion-button", "Look up order").click();
 
-    cy.contains("ion-item", "P1").within(() => {
+    cy.contains("ion-item", "Classic Tee").within(() => {
       cy.get("ion-select").first().click();
     });
     cy.get("ion-select-option").contains("1").click();
     // pick a reason on the same line
-    cy.contains("ion-item", "P1").find("ion-select").last().click();
+    cy.contains("ion-item", "Classic Tee").find("ion-select").last().click();
     cy.get("ion-select-option").first().click();
 
     cy.contains("ion-button", "Submit return").click();

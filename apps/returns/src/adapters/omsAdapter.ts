@@ -11,8 +11,13 @@ import {
 // ---- Pure mappers (unit-tested) ----
 
 interface RawReturnDetail {
-  returnDetail: { returnId: string; statusId: string; entryDate: string | number };
-  items?: Array<{ orderId?: string; orderItemSeqId: string; productId?: string; returnQuantity: number | string; returnReasonId: string; itemDescription?: string }>;
+  returnDetail: {
+    returnId: string; statusId: string; entryDate: string | number; returnDate?: string | number;
+    // Order reference now lives on returnDetail. orderName/externalOrderId are the customer-facing name
+    // (OrderHeader.orderName, equal values); orderExternalId is the Shopify GID and is NEVER displayed.
+    orderId?: string; orderName?: string; externalOrderId?: string; orderExternalId?: string; orderDate?: string | number;
+  };
+  items?: Array<{ orderId?: string; externalOrderId?: string; orderItemSeqId: string; productId?: string; productName?: string; returnQuantity: number | string; returnReasonId: string; itemDescription?: string }>;
   statusHistory?: Array<{ statusId: string; statusDatetime: string | number }>;
   identifications?: Identification[];
   shopifySync?: ShopifySync | null;
@@ -27,19 +32,27 @@ export function mapReturnDetail(raw: RawReturnDetail): ReturnDetail {
   const shopifyReturnId = raw.shopifySync?.shopifyReturnId
     ?? idents.find((i) => i.returnIdentificationTypeId === "SHOPIFY_RTN_ID")?.idValue
     ?? null;
+  const rd = raw.returnDetail;
+  // Display name: prefer orderName, then its alias externalOrderId. Never orderExternalId (the GID).
+  const orderName = rd.orderName ?? rd.externalOrderId ?? items[0]?.externalOrderId ?? "";
   return {
-    returnId: raw.returnDetail.returnId,
-    orderId: items[0]?.orderId ?? "",
-    statusId: raw.returnDetail.statusId,
-    entryDate: String(raw.returnDetail.entryDate),
+    returnId: rd.returnId,
+    // Order ref now lives on returnDetail; fall back to the first item only for older payloads.
+    orderId: rd.orderId ?? items[0]?.orderId ?? "",
+    orderName,
+    orderDate: rd.orderDate != null ? String(rd.orderDate) : undefined,
+    statusId: rd.statusId,
+    entryDate: String(rd.entryDate),
     origin,
     sync: { shopify },
     items: items.map((i) => ({
       orderItemSeqId: i.orderItemSeqId,
       productId: i.productId ?? "",
+      // Prefer an explicit productName; fall back to the order item's itemDescription. "" -> view shows productId.
+      productName: i.productName ?? i.itemDescription ?? "",
       returnQuantity: Number(i.returnQuantity),
       returnReasonId: i.returnReasonId,
-      // Backend getReturn does not join ReturnReason.description; view falls back to the id.
+      // Backend getReturn does not join ReturnReason.description; view prettifies the reasonId instead.
     })),
     statuses: (raw.statusHistory ?? []).map((s) => ({ statusId: s.statusId, statusDate: String(s.statusDatetime) })),
     externalIds: { shopify: shopifyReturnId },
@@ -49,13 +62,15 @@ export function mapReturnDetail(raw: RawReturnDetail): ReturnDetail {
 interface RawOrderItem {
   orderItemSeqId: string;
   productId?: string;
+  productName?: string;
   quantity: number | string;
   unitPrice: number | string;
   alreadyReturnedQuantity?: number | string;
   returnableQuantity?: number | string;
 }
 interface RawOrder {
-  orderDetail: { orderId: string; billingEmail?: string; shipGroups?: Array<{ items?: RawOrderItem[] }> };
+  // orderName/externalOrderId are the customer-facing name; orderExternalId is the GID (never displayed).
+  orderDetail: { orderId: string; orderName?: string; externalOrderId?: string; orderExternalId?: string; billingEmail?: string; shipGroups?: Array<{ items?: RawOrderItem[] }> };
 }
 
 /** Map `GET /oms/orders/{id}` into an OrderForReturn, trusting the backend's returnableQuantity. */
@@ -70,13 +85,20 @@ export function mapOrderToReturnable(raw: RawOrder): OrderForReturn {
     return {
       orderItemSeqId: it.orderItemSeqId,
       productId: it.productId ?? "",
+      productName: it.productName ?? "",
       orderedQty,
       alreadyReturnedQty,
       returnableQty,
       unitPrice: Number(it.unitPrice),
     };
   });
-  return { orderId: raw.orderDetail.orderId, billingEmail: raw.orderDetail.billingEmail, items };
+  return {
+    orderId: raw.orderDetail.orderId,
+    // Prefer orderName, then its alias externalOrderId. Never orderExternalId (the GID).
+    orderName: raw.orderDetail.orderName ?? raw.orderDetail.externalOrderId ?? "",
+    billingEmail: raw.orderDetail.billingEmail,
+    items,
+  };
 }
 
 // ---- Adapter ----
@@ -103,8 +125,10 @@ async function omsApi(config: any) {
 }
 
 export const omsAdapter: ReturnsService = {
-  // v2 service endpoint. The list is lightweight: rows carry no orderId or shopifySync, so a list
-  // summary omits origin/sync — the detail endpoint is the source for those.
+  // v2 service endpoint. shopifySync is detail-only, so a list summary omits origin/sync.
+  // The list SHOULD also carry the order identifier so rows are recognizable — we map orderId/
+  // externalOrderId when the row provides them, and degrade to "Return #id" when it doesn't.
+  // (Backend ask: include orderId + externalOrderId on each GET /oms/returns row.)
   async listReturns({ pageIndex = 0, pageSize = 20, statusId }) {
     const resp: any = await omsApi({
       url: "oms/returns", method: "GET",
@@ -114,6 +138,10 @@ export const omsAdapter: ReturnsService = {
     const rows: any[] = resp.data?.returns ?? [];
     const items: ReturnSummary[] = rows.map((r) => ({
       returnId: r.returnId,
+      orderId: r.orderId ?? undefined,
+      // Customer-facing name: orderName, or its alias externalOrderId. Never orderExternalId (the GID).
+      orderName: r.orderName ?? r.externalOrderId ?? undefined,
+      orderDate: r.orderDate != null ? String(r.orderDate) : undefined,
       statusId: r.statusId,
       entryDate: String(r.entryDate),
       returnChannelEnumId: r.returnChannelEnumId,
