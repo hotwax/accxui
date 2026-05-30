@@ -37,5 +37,10 @@
   "Retry": "Retry",
   "Shopify return ID": "Shopify return ID",
   "Loading...": "Loading...",
-  "Click the backdrop to dismiss.": "Click the backdrop to dismiss."
+  "Click the backdrop to dismiss.": "Click the backdrop to dismiss.",
+  "Search returns": "Search returns",
+  "Fetching returns": "Fetching returns",
+  "No returns found for the applied filters.": "No returns found for the applied filters.",
+  "No returns were found. Create a return to get started.": "No returns were found. Create a return to get started.",
+  "Loading": "Loading"
 }
