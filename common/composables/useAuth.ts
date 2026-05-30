@@ -202,8 +202,15 @@ export function useAuth() {
           // OFBiz deployment: OFBiz tells the PWA where its Moqui instance is
           cookieHelper().set("maarg", resp.data.maargInstanceUrl, getDuration())
         } else if (import.meta.env.VITE_OMS_TYPE === 'moqui') {
-          // Moqui-only deployment: the OMS IS the maarg — same subdomain the user entered
-          cookieHelper().set("maarg", cookieHelper().get("oms") as string, getDuration())
+          // Moqui-only deployment: the OMS IS the maarg.
+          // Strip any /rest/s1/... path suffix so getMaargURL() can append /rest/s1/ itself.
+          // e.g. "http://localhost:8080" → maarg="http://localhost:8080" → getMaargURL()="http://localhost:8080/rest/s1/"
+          // e.g. "demo"                  → maarg="demo"                  → getMaargURL()="https://demo.hotwax.io/rest/s1/"
+          const omsVal = cookieHelper().get("oms") as string || ""
+          const maargVal = omsVal.startsWith('http')
+            ? omsVal.replace(/\/rest\/s1.*$/, '')
+            : omsVal
+          cookieHelper().set("maarg", maargVal, getDuration())
         }
       }
     } catch (error) {
