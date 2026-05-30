@@ -46,5 +46,14 @@
   "Submitting return": "Submitting return",
   "Looking up order": "Looking up order",
   "Pushing to Shopify": "Pushing to Shopify",
-  "Filters": "Filters"
+  "Filters": "Filters",
+  "OMS instance": "OMS instance",
+  "This is the name of the OMS you are connected to right now. Make sure that you are connected to the right instance before proceeding.": "This is the name of the OMS you are connected to right now. Make sure that you are connected to the right instance before proceeding.",
+  "Go to OMS": "Go to OMS",
+  "App": "App",
+  "Version: ": "Version: ",
+  "Built: ": "Built: ",
+  "Failed to create return": "Failed to create return",
+  "Push to Shopify failed": "Push to Shopify failed",
+  "Failed to load return": "Failed to load return"
 }

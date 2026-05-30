@@ -44,4 +44,19 @@ describe("returnsStore pagination + query", () => {
     await store.fetchReturns(0);
     expect(listReturns).toHaveBeenCalledWith(expect.objectContaining({ statusId: "RETURN_REQUESTED", pageIndex: 0 }));
   });
+
+  it("getFilteredReturns filters by search term and passes through when empty", async () => {
+    const store = useReturnsStore();
+    listReturns.mockResolvedValueOnce({ items: [
+      { returnId: "ABC-1", orderName: "#1001", statusId: "RETURN_REQUESTED", entryDate: "1" },
+      { returnId: "XYZ-2", orderName: "#2002", statusId: "RETURN_REQUESTED", entryDate: "2" },
+    ], total: 2 });
+    await store.fetchReturns(0);
+    store.query.searchTerm = "abc";
+    expect(store.getFilteredReturns.map((r) => r.returnId)).toEqual(["ABC-1"]);
+    store.query.searchTerm = "#2002";
+    expect(store.getFilteredReturns.map((r) => r.returnId)).toEqual(["XYZ-2"]);
+    store.query.searchTerm = "";
+    expect(store.getFilteredReturns).toHaveLength(2);
+  });
 });

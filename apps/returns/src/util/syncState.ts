@@ -1,3 +1,4 @@
+import { translate } from "@common";
 import type { ReturnOrigin, SyncState } from "@/types/returns";
 
 export interface Identification {
@@ -13,6 +14,16 @@ export function resolveOrigin(identifications: Identification[]): ReturnOrigin {
 export interface ShopifySync {
   shopifyReturnId?: string | null;
   pushStatusId?: string | null; // PUSH_OK | PUSH_PENDING | PUSH_FAILED | null
+}
+
+/** Map a SyncState to an Ionic color token. */
+export function syncColor(s: SyncState): string | undefined {
+  return { synced: "success", pending: "warning", failed: "danger", not_synced: "medium" }[s];
+}
+
+/** Human-readable, translated label for a SyncState. */
+export function syncLabel(s: SyncState): string {
+  return translate({ synced: "Synced", pending: "Pending", failed: "Failed", not_synced: "Not synced" }[s]);
 }
 
 /**

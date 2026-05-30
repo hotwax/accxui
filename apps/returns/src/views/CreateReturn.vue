@@ -83,7 +83,7 @@ async function lookupOrder() {
     order.value = await store.loadOrder(orderId.value.trim());
     reasons.value = await store.loadReasons();
   } catch (e) {
-    error.value = describeApiError(e, "Order not found");
+    error.value = describeApiError(e, translate("Order not found"));
   } finally {
     emitter.emit("dismissLoader");
   }
@@ -110,7 +110,7 @@ async function submit(): Promise<string | undefined> {
     router.push(`/return-detail/${returnId}`);
     return returnId;
   } catch (e) {
-    error.value = describeApiError(e, "Failed to create return");
+    error.value = describeApiError(e, translate("Failed to create return"));
   } finally {
     emitter.emit("dismissLoader");
   }

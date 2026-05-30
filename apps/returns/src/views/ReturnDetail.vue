@@ -57,17 +57,18 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, ref } from "vue";
 import { emitter, translate } from "@common";
 import {
   IonBackButton, IonButton, IonButtons, IonCard, IonCardContent, IonCardHeader, IonCardTitle,
   IonChip, IonContent, IonHeader, IonItem, IonLabel, IonList, IonPage, IonSpinner, IonTitle, IonToolbar,
+  onIonViewWillEnter,
 } from "@ionic/vue";
 import { useReturnsStore } from "@/store/returnsStore";
 import { describeApiError } from "@/util/errorMessage";
 import { formatStatus, formatReason } from "@/util/labels";
 import { formatDate } from "@/util/dates";
-import type { SyncState } from "@/types/returns";
+import { syncColor, syncLabel } from "@/util/syncState";
 
 const props = defineProps<{ returnId: string }>();
 const store = useReturnsStore();
@@ -76,12 +77,6 @@ const error = ref("");
 
 const r = computed(() => store.current);
 
-function syncColor(s: SyncState) {
-  return { synced: "success", pending: "warning", failed: "danger", not_synced: "medium" }[s];
-}
-function syncLabel(s: SyncState) {
-  return translate({ synced: "Synced", pending: "Pending", failed: "Failed", not_synced: "Not synced" }[s]);
-}
 async function push() {
   error.value = "";
   busy.value = true;
@@ -89,14 +84,14 @@ async function push() {
   try {
     await store.pushAndPoll(props.returnId, "shopify");
   } catch (e) {
-    error.value = describeApiError(e, "Push to Shopify failed");
+    error.value = describeApiError(e, translate("Push to Shopify failed"));
   } finally {
     busy.value = false;
     emitter.emit("dismissLoader");
   }
 }
 
-onMounted(async () => {
+onIonViewWillEnter(async () => {
   try {
     await store.fetchReturn(props.returnId);
     // The backend auto-pushes on create, so a freshly-created return loads as "pending" — poll to completion.
@@ -105,7 +100,7 @@ onMounted(async () => {
       try { await store.pollSync(props.returnId, "shopify"); } finally { busy.value = false; }
     }
   } catch (e) {
-    error.value = describeApiError(e, "Failed to load return");
+    error.value = describeApiError(e, translate("Failed to load return"));
   }
 });
 </script>

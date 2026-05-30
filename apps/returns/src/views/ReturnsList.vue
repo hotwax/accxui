@@ -114,7 +114,8 @@ import ReturnFiltersContent from "@/components/ReturnFiltersContent.vue";
 import { useReturnsStore } from "@/store/returnsStore";
 import { formatStatus } from "@/util/labels";
 import { formatDate } from "@/util/dates";
-import type { ReturnSummary, SyncState } from "@/types/returns";
+import { syncColor, syncLabel } from "@/util/syncState";
+import type { ReturnSummary } from "@/types/returns";
 
 const store = useReturnsStore();
 const isMobile = useMobile();
@@ -124,12 +125,6 @@ const isAnyFilterApplied = computed(() => !!(store.query.searchTerm || store.que
 // Prefer the customer-facing order name; fall back to the internal order id. Empty -> caller shows the return id.
 function orderLabel(r: ReturnSummary) {
   return r.orderName || r.orderId || "";
-}
-function syncColor(s: SyncState) {
-  return { synced: "success", pending: "warning", failed: "danger", not_synced: "medium" }[s];
-}
-function syncLabel(s: SyncState) {
-  return translate({ synced: "Synced", pending: "Pending", failed: "Failed", not_synced: "Not synced" }[s]);
 }
 async function loadMore(event: any) {
   const nextPage = Math.ceil(store.returns.length / 20);
