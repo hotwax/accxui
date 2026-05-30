@@ -104,6 +104,9 @@ const isInitializing = ref(true);
 const isConfirmingForActiveSession = ref(false);
 const loader = ref<any>(null);
 const isCheckingOms = ref(false);
+// Separate flag to prevent concurrent initialise() calls.
+// isInitializing starts true (to hide form), so we can't use it as the guard.
+let initInProgress = false;
 const isLoggingIn = ref(false);
 let router: any = ref();
 
@@ -190,8 +193,9 @@ const setOms = async () => {
 };
 
 const initialise = async () => {
-  // Guard against multiple concurrent calls (Ionic fires onIonViewWillEnter on each navigation)
-  if (isInitializing.value) return;
+  // Guard against concurrent calls — onIonViewWillEnter fires on each navigation
+  if (initInProgress) return;
+  initInProgress = true;
   isInitializing.value = true;
   await presentLoader("Processing");
 
@@ -215,6 +219,7 @@ const initialise = async () => {
     await login(route.query)
     dismissLoader();
     isInitializing.value = false;
+    initInProgress = false;
     return;
   }
 
@@ -223,6 +228,7 @@ const initialise = async () => {
     await login(route.query)
     dismissLoader();
     isInitializing.value = false;
+    initInProgress = false;
     return;
   }
 
@@ -241,6 +247,7 @@ const initialise = async () => {
     router.value.push("/");
     dismissLoader();
     isInitializing.value = false;
+    initInProgress = false;
     return;
   }
 
@@ -249,6 +256,7 @@ const initialise = async () => {
     await login({ token: cookieHelper().get("token"), expirationTime: cookieHelper().get("expirationTime") })
     dismissLoader();
     isInitializing.value = false;
+    initInProgress = false;
     return;
   }
 
@@ -264,6 +272,7 @@ const initialise = async () => {
   }
   dismissLoader();
   isInitializing.value = false;
+    initInProgress = false;
 };
 
 const handleSubmit = () => {
