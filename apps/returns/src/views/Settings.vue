@@ -73,7 +73,7 @@ function goToLaunchpad() {
 </script>
 
 <style scoped>
-:is(ion-card) > ion-button {
+ion-card > ion-button {
   margin: var(--spacer-xs);
 }
 section {
