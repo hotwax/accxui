@@ -4,7 +4,7 @@
       <ion-toolbar>
         <ion-title>{{ translate("Returns") }}</ion-title>
         <ion-buttons slot="end">
-          <ion-button router-link="/tabs/returns/create">
+          <ion-button router-link="/create-return">
             <ion-icon slot="icon-only" :icon="addOutline" />
           </ion-button>
         </ion-buttons>
@@ -20,7 +20,7 @@
       </div>
 
       <ion-list>
-        <ion-item v-for="r in store.returns" :key="r.returnId" :router-link="`/tabs/returns/${r.returnId}`">
+        <ion-item v-for="r in store.returns" :key="r.returnId" :router-link="`/return-detail/${r.returnId}`">
           <ion-label>
             <h2>
               <template v-if="orderLabel(r)">{{ translate("Order") }} {{ orderLabel(r) }}</template>

@@ -103,7 +103,7 @@ async function submit(): Promise<string | undefined> {
   error.value = "";
   try {
     const returnId = await store.submitReturn({ orderId: order.value.orderId, items });
-    router.push(`/tabs/returns/${returnId}`);
+    router.push(`/return-detail/${returnId}`);
     return returnId;
   } catch (e) {
     error.value = describeApiError(e, "Failed to create return");
