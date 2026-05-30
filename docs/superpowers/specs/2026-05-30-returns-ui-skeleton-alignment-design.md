@@ -401,6 +401,7 @@ Record gaps here as they're discovered so they're tracked, not silently skipped:
   the `.find` grid may ship with search + sort only; the filters `aside` slot stays in the
   markup for later.
 - **Bulk upload / CSV import** — transfers-specific; not part of returns.
+- **`DxpTimeZoneSwitcher`** — deferred: needs `userStore.getAvailableTimeZones()` / `setUserTimeZone()` and a profile `timeZone`, which returns' user store and backend do not provide yet.
 
 ## Execution order & verification
 

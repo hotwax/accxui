@@ -9,6 +9,9 @@
     <ion-content>
       <div class="user-profile">
         <ion-card>
+          <ion-avatar slot="start" v-if="userProfile?.partyImageUrl">
+            <Image :src="userProfile.partyImageUrl" />
+          </ion-avatar>
           <ion-card-header class="ion-no-padding ion-padding-vertical ion-padding-start">
             <ion-card-subtitle>{{ userProfile?.userId }}</ion-card-subtitle>
             <ion-card-title>{{ userProfile?.userFullName || userProfile?.userId }}</ion-card-title>
@@ -27,21 +30,15 @@
         <h1>{{ translate("OMS") }}</h1>
       </div>
       <section>
-        <!-- DXP: OMS instance navigator — added in a later task -->
-        <ion-item lines="none">
-          <ion-label>
-            <p>{{ translate("Instance") }}</p>
-            <h2>{{ userStore.getOms || "—" }}</h2>
-          </ion-label>
-        </ion-item>
+        <DxpOmsInstanceNavigator />
       </section>
 
       <hr />
 
-      <!-- DXP: app version info — added in a later task -->
+      <DxpAppVersionInfo data-testid="settings-app-version" />
 
       <section>
-        <!-- DXP: product identifier + timezone switcher — added in a later task -->
+        <!-- DXP: timezone switcher + product identifier deferred — need user-store timezone/product-store plumbing returns lacks. See spec deferred list. -->
       </section>
     </ion-content>
   </ion-page>
@@ -49,14 +46,17 @@
 
 <script setup lang="ts">
 import {
-  IonButton, IonCard, IonCardHeader, IonCardSubtitle, IonCardTitle, IonContent,
-  IonHeader, IonIcon, IonItem, IonLabel, IonPage, IonTitle, IonToolbar,
+  IonAvatar, IonButton, IonCard, IonCardHeader, IonCardSubtitle, IonCardTitle, IonContent,
+  IonHeader, IonIcon, IonPage, IonTitle, IonToolbar,
 } from "@ionic/vue";
 import { computed } from "vue";
 import { openOutline } from "ionicons/icons";
 import router from "@/router";
 import { translate, useAuth } from "@common";
 import { useUserStore } from "@/store/userStore";
+import DxpOmsInstanceNavigator from "@/components/DxpOmsInstanceNavigator.vue";
+import DxpAppVersionInfo from "@/components/DxpAppVersionInfo.vue";
+import Image from "@/components/Image.vue";
 
 const userStore = useUserStore();
 const userProfile = computed(() => userStore.getUserProfile);
