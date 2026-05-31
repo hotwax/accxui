@@ -27,6 +27,9 @@ pnpm-debug.log*
 /lib
 .firebase/*
 .history
+.claude/
+.local-dev-servers/
+logs/
 
 # env files except example env
 .env
