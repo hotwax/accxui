@@ -70,6 +70,39 @@
               </ion-select>
             </ion-item>
           </ion-list>
+
+          <ion-card v-if="order && hasReturnable" class="appeasement">
+            <ion-item lines="none">
+              <ion-toggle data-testid="create-appeasement-toggle" :checked="appeasementEnabled"
+                :disabled="!hasKeptItems" @ionChange="appeasementEnabled = $event.detail.checked">
+                {{ translate("Add a goodwill refund (appeasement)") }}
+              </ion-toggle>
+            </ion-item>
+            <ion-card-content v-if="!hasKeptItems">
+              <p class="muted">{{ translate("A full return already refunds this order — appeasements are for orders with kept items.") }}</p>
+            </ion-card-content>
+            <ion-card-content v-else-if="appeasementEnabled">
+              <ion-item>
+                <ion-input data-testid="create-appeasement-amount" type="number" min="0"
+                  :label="translate('Refund amount')" label-placement="stacked"
+                  :value="appeasementAmount" @ionInput="appeasementAmount = Number($event.target.value ?? 0)" />
+              </ion-item>
+              <ion-item>
+                <ion-select data-testid="create-appeasement-reason" :placeholder="translate('Reason')"
+                  :label="translate('Reason')" label-placement="stacked"
+                  :value="appeasementReasonId" @ionChange="appeasementReasonId = $event.detail.value">
+                  <ion-select-option v-for="rsn in reasons" :key="rsn.returnReasonId" :value="rsn.returnReasonId">{{ rsn.description }}</ion-select-option>
+                </ion-select>
+              </ion-item>
+              <ion-item>
+                <ion-textarea data-testid="create-appeasement-note" :label="translate('Note (optional)')"
+                  label-placement="stacked" :value="appeasementNote" @ionInput="appeasementNote = $event.target.value ?? ''" />
+              </ion-item>
+              <p v-if="appeasementAmount !== null && !appeasementValid" class="error" role="alert">
+                {{ translate("Enter an amount between 0 and the kept-item value, and choose a reason.") }}
+              </p>
+            </ion-card-content>
+          </ion-card>
         </main>
       </div>
 
@@ -83,13 +116,13 @@
 </template>
 
 <script setup lang="ts">
-import { computed, reactive, ref } from "vue";
+import { computed, reactive, ref, watch } from "vue";
 import router from "@/router";
 import { emitter, translate } from "@common";
 import {
-  IonBackButton, IonButton, IonCard, IonCardHeader, IonCardTitle, IonContent, IonFab,
+  IonBackButton, IonButton, IonCard, IonCardContent, IonCardHeader, IonCardTitle, IonContent, IonFab,
   IonFabButton, IonHeader, IonIcon, IonInput, IonItem, IonLabel, IonList, IonPage, IonSelect,
-  IonSelectOption, IonTitle, IonToolbar,
+  IonSelectOption, IonTextarea, IonTitle, IonToggle, IonToolbar,
 } from "@ionic/vue";
 import { bagCheckOutline, checkmarkDoneOutline } from "ionicons/icons";
 import { useReturnsStore } from "@/store/returnsStore";
@@ -103,11 +136,36 @@ const order = ref<OrderForReturn | null>(null);
 const reasons = ref<ReturnReason[]>([]);
 const error = ref("");
 const selections = reactive<Record<string, { qty: number; returnReasonId?: string }>>({});
+const appeasementEnabled = ref(false);
+const appeasementAmount = ref<number | null>(null);
+const appeasementReasonId = ref<string>("");
+const appeasementNote = ref<string>("");
 
 const hasReturnable = computed(() => !!order.value?.items.some((i) => i.returnableQty > 0));
-const canSubmit = computed(() =>
+// Merchandise value of returnable units NOT selected for return. > 0 means the customer keeps something.
+const keptValue = computed(() => {
+  if (!order.value) return 0;
+  return order.value.items.reduce((sum, line) => {
+    const selectedQty = selections[line.orderItemSeqId]?.qty ?? 0;
+    return sum + Math.max(0, line.returnableQty - selectedQty) * line.unitPrice;
+  }, 0);
+});
+const hasKeptItems = computed(() => keptValue.value > 0);
+// A partially-filled or out-of-range appeasement is invalid and must block submit.
+const appeasementValid = computed(() => {
+  if (!appeasementEnabled.value) return true;
+  const amt = Number(appeasementAmount.value);
+  return hasKeptItems.value && amt > 0 && amt <= keptValue.value && !!appeasementReasonId.value;
+});
+// When the operator returns everything (nothing kept), the appeasement is no longer eligible —
+// turn it off so the toggle's state matches reality and no stale amount/reason lingers enabled.
+watch(hasKeptItems, (has) => {
+  if (!has) appeasementEnabled.value = false;
+});
+const hasItemsSelected = computed(() =>
   Object.values(selections).some((s) => s.qty > 0 && s.returnReasonId)
 );
+const canSubmit = computed(() => hasItemsSelected.value && appeasementValid.value);
 
 async function lookupOrder() {
   error.value = "";
@@ -140,7 +198,18 @@ async function submit(): Promise<string | undefined> {
   error.value = "";
   emitter.emit("presentLoader", { message: "Submitting return" });
   try {
-    const returnId = await store.submitReturn({ orderId: order.value.orderId, items });
+    const returnId = await store.submitReturn({
+      orderId: order.value.orderId,
+      items,
+      appeasement: appeasementEnabled.value
+        ? {
+            amount: Number(appeasementAmount.value),
+            currencyUomId: order.value.currencyUomId,
+            reasonId: appeasementReasonId.value,
+            ...(appeasementNote.value.trim() ? { note: appeasementNote.value.trim() } : {}),
+          }
+        : undefined,
+    });
     router.push(`/return-detail/${returnId}`);
     return returnId;
   } catch (e) {
@@ -150,7 +219,11 @@ async function submit(): Promise<string | undefined> {
   }
 }
 
-defineExpose({ orderId, order, selections, lookupOrder, submit });
+defineExpose({
+  orderId, order, selections, lookupOrder, submit,
+  appeasementEnabled, appeasementAmount, appeasementReasonId, appeasementNote,
+  keptValue, hasKeptItems, appeasementValid, canSubmit,
+});
 </script>
 
 <style scoped>
@@ -182,6 +255,10 @@ defineExpose({ orderId, order, selections, lookupOrder, submit });
 }
 .muted {
   color: var(--ion-color-medium);
+  font-size: 0.8em;
+}
+.error {
+  color: var(--ion-color-danger);
   font-size: 0.8em;
 }
 @media (min-width: 991px) {
