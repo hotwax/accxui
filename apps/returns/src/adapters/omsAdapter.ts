@@ -2,6 +2,7 @@ import { api, commonUtil } from "@common";
 import { maargApiKey } from "@/util/maargAuth";
 import type { ReturnsService } from "@/services/ReturnsService";
 import type {
+  AppeasementInput, AppeasementItemInput,
   CreateReturnInput, OrderForReturn, PushOutcome, ReturnableLine, ReturnDetail, ReturnReason,
   ReturnSummary, ReturnType, SyncState, SyncTarget,
 } from "@/types/returns";
@@ -156,6 +157,23 @@ async function omsApi(config: any) {
   });
 }
 
+/** Build the POST body for the appeasement create call. Shape is selected by `items`:
+ *  amount-only sends `amount`; lost-in-shipment sends `items` and only sends `amount` when overridden. */
+export function buildAppeasementCreateBody(orderId: string, a: AppeasementInput, relatedReturnId?: string): {
+  orderId: string; reasonId: string; currencyUomId: string;
+  note?: string; relatedReturnId?: string; items?: AppeasementItemInput[]; amount?: number;
+} {
+  return {
+    orderId,
+    reasonId: a.reasonId,
+    currencyUomId: a.currencyUomId,
+    ...(a.note ? { note: a.note } : {}),
+    ...(relatedReturnId ? { relatedReturnId } : {}),
+    ...(a.items?.length ? { items: a.items } : {}),
+    ...(a.amount != null ? { amount: a.amount } : {}),
+  };
+}
+
 export const omsAdapter: ReturnsService = {
   // v2 service endpoint. shopifySync is detail-only, so a list summary omits origin/sync.
   // The list SHOULD also carry the order identifier so rows are recognizable — we map orderId/
@@ -211,17 +229,9 @@ export const omsAdapter: ReturnsService = {
     }
     if (!input.appeasement) return { returnId };
     // Appeasement is a SEPARATE call (confirmed contract: two calls, not one atomic create).
-    const a = input.appeasement;
     const appResp: any = await omsApi({
       url: "oms/returns/appeasementReturn", method: "POST",
-      data: {
-        orderId: input.orderId,
-        amount: a.amount,
-        reasonId: a.reasonId,
-        currencyUomId: a.currencyUomId,
-        ...(a.note ? { note: a.note } : {}),
-        ...(returnId ? { relatedReturnId: returnId } : {}),
-      },
+      data: buildAppeasementCreateBody(input.orderId, input.appeasement, returnId || undefined),
     });
     if (commonUtil.hasError(appResp)) throw new Error("Failed to create appeasement");
     const appeasementReturnId = appResp.data.returnId;

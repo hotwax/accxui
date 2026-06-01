@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { mapReturnDetail, mapOrderToReturnable, mapReturnType, APPEASEMENT_RETURN_TYPE_ID } from "@/adapters/omsAdapter";
+import { mapReturnDetail, mapOrderToReturnable, mapReturnType, APPEASEMENT_RETURN_TYPE_ID, buildAppeasementCreateBody } from "@/adapters/omsAdapter";
 
 describe("mapReturnDetail", () => {
   it("maps a synced shopify-origin return (PUSH_OK + SHOPIFY_RTN_ID)", () => {
@@ -220,8 +220,23 @@ describe("mapOrderToReturnable currency", () => {
   });
 });
 
-describe("createReturn appeasement payload", () => {
-  it("returns both ids and is exercised against the stub in returnsStoreCrud", () => {
-    expect(APPEASEMENT_RETURN_TYPE_ID).toBe("APPEASEMENT");
+describe("buildAppeasementCreateBody", () => {
+  it("amount-only shape: sends amount, no items", () => {
+    const body = buildAppeasementCreateBody("DEMO-1001", { amount: 8.5, currencyUomId: "USD", reasonId: "APPEASE_GOODWILL", note: "hi" }, "M1");
+    expect(body).toEqual({ orderId: "DEMO-1001", reasonId: "APPEASE_GOODWILL", currencyUomId: "USD", note: "hi", relatedReturnId: "M1", amount: 8.5 });
+    expect("items" in body).toBe(false);
+  });
+
+  it("item shape without override: sends items, no amount", () => {
+    const body = buildAppeasementCreateBody("DEMO-1001", { currencyUomId: "USD", reasonId: "APPEASE_GOODWILL", items: [{ orderItemSeqId: "00001", quantity: 1 }] });
+    expect(body.items).toEqual([{ orderItemSeqId: "00001", quantity: 1 }]);
+    expect("amount" in body).toBe(false);
+    expect("relatedReturnId" in body).toBe(false);
+  });
+
+  it("item shape with override: sends both items and amount", () => {
+    const body = buildAppeasementCreateBody("DEMO-1001", { amount: 30, currencyUomId: "USD", reasonId: "APPEASE_GOODWILL", items: [{ orderItemSeqId: "00001", quantity: 1 }] }, "M1");
+    expect(body.items).toEqual([{ orderItemSeqId: "00001", quantity: 1 }]);
+    expect(body.amount).toBe(30);
   });
 });
