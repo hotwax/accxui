@@ -14,6 +14,10 @@ export interface ReturnsService {
   approveReturn(returnId: string): Promise<void>;
   rejectReturn(returnId: string): Promise<void>;
   cancelReturn(returnId: string): Promise<void>;
+  // Complete transitions RETURN_APPROVED/RETURN_RECEIVED -> RETURN_COMPLETED and (server-side) triggers
+  // the async Shopify completion (returnProcess + returnClose). retryComplete re-runs a failed close.
+  completeReturn(returnId: string): Promise<void>;
+  retryComplete(returnId: string): Promise<void>;
   getOrderForReturn(orderId: string): Promise<OrderForReturn>;
   listReturnReasons(): Promise<ReturnReason[]>;
   pushToTarget(returnId: string, target: SyncTarget): Promise<PushOutcome>;

@@ -23,6 +23,6 @@ import { useReturnsStore } from "@/store/returnsStore";
 import { formatStatus } from "@/util/labels";
 
 const store = useReturnsStore();
-// The four known return statuses (matches util/labels STATUS_LABELS).
-const statuses = ["RETURN_REQUESTED", "RETURN_RECEIVED", "RETURN_COMPLETED", "RETURN_CANCELLED"];
+// The known return statuses in lifecycle order (matches util/labels STATUS_LABELS).
+const statuses = ["RETURN_REQUESTED", "RETURN_APPROVED", "RETURN_RECEIVED", "RETURN_COMPLETED", "RETURN_REJECTED", "RETURN_CANCELLED"];
 </script>

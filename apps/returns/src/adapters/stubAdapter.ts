@@ -7,6 +7,8 @@ import type {
 interface StubReturn extends ReturnDetail {
   pushAttempted: boolean;
   pollsUntilSynced: number;
+  closeAttempted: boolean;
+  pollsUntilClosed: number;
 }
 
 const REASONS: ReturnReason[] = [
@@ -48,6 +50,8 @@ function seedShopifyReturn(): StubReturn {
     shopifySync: { synced: true, shopifyReturnId: "gid://shopify/Return/555", pushStatusId: "PUSH_OK", returnStatusId: "OPEN" },
     pushAttempted: false,
     pollsUntilSynced: 0,
+    closeAttempted: false,
+    pollsUntilClosed: 0,
   };
 }
 
@@ -72,7 +76,16 @@ export const stubAdapter: ReturnsService = {
   async getReturn(returnId) {
     const r = store.get(returnId);
     if (!r) throw new Error("Return not found");
-    const { pushAttempted, pollsUntilSynced, ...detail } = r;
+    // The Shopify completion runs async — advance CLOSE_PENDING -> CLOSED across re-fetches (poll source of truth).
+    if (r.closeAttempted && r.shopifySync?.shopifyReturnId && r.shopifySync.returnStatusId !== "CLOSED") {
+      if (r.pollsUntilClosed > 0) {
+        r.pollsUntilClosed -= 1;
+        r.shopifySync = { ...r.shopifySync, closePushStatusId: "CLOSE_PENDING" };
+      } else {
+        r.shopifySync = { ...r.shopifySync, closePushStatusId: "CLOSE_OK", returnStatusId: "CLOSED" };
+      }
+    }
+    const { pushAttempted, pollsUntilSynced, closeAttempted, pollsUntilClosed, ...detail } = r;
     return detail;
   },
   async createReturn({ orderId, items }: CreateReturnInput) {
@@ -93,6 +106,7 @@ export const stubAdapter: ReturnsService = {
       externalIds: { shopify: null },
       shopifySync: null, // no push on create
       pushAttempted: false, pollsUntilSynced: 0,
+      closeAttempted: false, pollsUntilClosed: 0,
     });
     return { returnId };
   },
@@ -123,6 +137,28 @@ export const stubAdapter: ReturnsService = {
     r.statuses = [...r.statuses, { statusId: "RETURN_CANCELLED", statusDate: "2026-05-29T12:05:00Z" }];
     // A return already synced to Shopify stays synced after cancel; the Shopify-side status becomes CANCELED.
     if (r.shopifySync?.synced) r.shopifySync = { ...r.shopifySync, returnStatusId: "CANCELED" };
+  },
+  async completeReturn(returnId) {
+    const r = store.get(returnId);
+    if (!r) throw new Error("Return not found");
+    if (r.statusId === "RETURN_COMPLETED") return; // idempotent: already completed, no double Shopify completion
+    if (!["RETURN_APPROVED", "RETURN_RECEIVED"].includes(r.statusId)) throw new Error("Return cannot be completed");
+    r.statusId = "RETURN_COMPLETED";
+    r.statuses = [...r.statuses, { statusId: "RETURN_COMPLETED", statusDate: "2026-05-29T12:10:00Z" }];
+    // Triggers the async Shopify close only when the return was actually synced; otherwise it no-ops (skipped).
+    if (r.shopifySync?.shopifyReturnId) {
+      r.closeAttempted = true;
+      r.pollsUntilClosed = 1; // one poll shows pending, the next shows CLOSED
+      r.shopifySync = { ...r.shopifySync, closePushStatusId: "CLOSE_PENDING" };
+    }
+  },
+  async retryComplete(returnId) {
+    const r = store.get(returnId);
+    if (!r) throw new Error("Return not found");
+    if (!r.shopifySync?.shopifyReturnId) return; // nothing to close in Shopify
+    r.closeAttempted = true;
+    r.pollsUntilClosed = 1;
+    r.shopifySync = { ...r.shopifySync, closePushStatusId: "CLOSE_PENDING", closePushErrorMessage: null };
   },
   async getOrderForReturn(orderId) {
     return { ...ORDER, orderId };

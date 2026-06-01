@@ -88,4 +88,27 @@ describe("returnsStore CRUD (stub adapter)", () => {
     await store.approveReturn(returnId, { intervalMs: 0, maxAttempts: 5 });
     await expect(store.rejectReturn(returnId)).rejects.toThrow();
   });
+
+  it("completes an approved return -> completed and closes it in Shopify", async () => {
+    const { store, returnId } = await createRequested();
+    await store.approveReturn(returnId, { intervalMs: 0, maxAttempts: 5 });
+    expect(store.current?.sync.shopify).toBe("synced");
+    const state = await store.completeReturn(returnId, { intervalMs: 0, maxAttempts: 5 });
+    expect(store.current?.statusId).toBe("RETURN_COMPLETED");
+    expect(state).toBe("completed");
+    expect(store.current?.shopifySync?.returnStatusId).toBe("CLOSED");
+  });
+
+  it("completing is idempotent on an already-completed return", async () => {
+    const { store, returnId } = await createRequested();
+    await store.approveReturn(returnId, { intervalMs: 0, maxAttempts: 5 });
+    await store.completeReturn(returnId, { intervalMs: 0, maxAttempts: 5 });
+    await expect(store.completeReturn(returnId, { intervalMs: 0, maxAttempts: 5 })).resolves.toBe("completed");
+    expect(store.current?.statusId).toBe("RETURN_COMPLETED");
+  });
+
+  it("completing a non-approved/received return throws (guard)", async () => {
+    const { store, returnId } = await createRequested();
+    await expect(store.completeReturn(returnId, { intervalMs: 0, maxAttempts: 5 })).rejects.toThrow();
+  });
 });

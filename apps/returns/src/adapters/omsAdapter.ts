@@ -186,6 +186,18 @@ export const omsAdapter: ReturnsService = {
     if (commonUtil.hasError(resp)) throw new Error("Failed to cancel return");
   },
 
+  async completeReturn(returnId) {
+    // OMS -> RETURN_COMPLETED immediately; the Shopify completion (returnProcess + returnClose) runs async.
+    const resp: any = await omsApi({ url: `oms/returns/${returnId}/complete`, method: "POST" });
+    if (commonUtil.hasError(resp)) throw new Error("Failed to complete return");
+  },
+
+  async retryComplete(returnId) {
+    // Re-run the Shopify completion after a CLOSE_FAILED (idempotent).
+    const resp: any = await omsApi({ url: `oms/returns/${returnId}/retryComplete`, method: "POST" });
+    if (commonUtil.hasError(resp)) throw new Error("Failed to retry completion");
+  },
+
   async getOrderForReturn(orderId) {
     const resp: any = await omsApi({ url: `oms/orders/${orderId}`, method: "GET" });
     if (commonUtil.hasError(resp)) throw new Error("Order not found");

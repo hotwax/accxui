@@ -1,5 +1,5 @@
 import { translate } from "@common";
-import type { ReturnOrigin, ShopifySync, SyncState } from "@/types/returns";
+import type { CompletionState, ReturnOrigin, ShopifySync, SyncState } from "@/types/returns";
 
 export type { ShopifySync }; // re-export so adapters can keep importing it from here
 
@@ -43,5 +43,37 @@ export function resolveShopifySyncState(shopifySync: ShopifySync | null | undefi
       return "failed";
     default:
       return shopifySync.shopifyReturnId ? "synced" : "not_synced";
+  }
+}
+
+/** Map a CompletionState to an Ionic color token. */
+export function completionColor(s: CompletionState): string | undefined {
+  return { completed: "success", pending: "warning", failed: "danger", skipped: "medium" }[s];
+}
+
+/** Human-readable, translated label for a CompletionState. */
+export function completionLabel(s: CompletionState): string {
+  return translate({ completed: "Closed in Shopify", pending: "Completing", failed: "Failed", skipped: "Not in Shopify" }[s]);
+}
+
+/**
+ * Collapse the backend `shopifySync` completion fields into a CompletionState. Only meaningful once the
+ * OMS return is RETURN_COMPLETED — the caller drives that off statusId.
+ * - no shopifyReturnId  → skipped (never synced; the Shopify completion no-ops — "Completed (not in Shopify)")
+ * - returnStatusId == CLOSED → completed (AUTHORITATIVE) — also CLOSE_OK
+ * - CLOSE_PENDING / unset    → pending (close push in flight, or just triggered)
+ * - CLOSE_FAILED             → failed (surface closePushErrorMessage + Retry)
+ */
+export function resolveShopifyCloseState(shopifySync: ShopifySync | null | undefined): CompletionState {
+  if (!shopifySync || !shopifySync.shopifyReturnId) return "skipped";
+  if (shopifySync.returnStatusId === "CLOSED") return "completed";
+  switch (shopifySync.closePushStatusId) {
+    case "CLOSE_OK":
+      return "completed";
+    case "CLOSE_FAILED":
+      return "failed";
+    case "CLOSE_PENDING":
+    default:
+      return "pending";
   }
 }

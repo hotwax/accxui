@@ -10,15 +10,27 @@ export interface ShopifySync {
   synced?: boolean | null;          // authoritative: true once the OMS↔Shopify return link exists (stays true even after a Shopify-side cancel)
   shopifyReturnId?: string | null;  // gid://shopify/Return/...
   shopifyRefundId?: string | null;
-  returnStatusId?: string | null;   // Shopify-side return status, e.g. "CANCELED" after a cancel
+  returnStatusId?: string | null;   // Shopify-side return status: "OPEN" | "CANCELED" | "CLOSED" (CLOSED is authoritative "completed in Shopify")
   lastSyncedDate?: string | null;
   lastAttemptDate?: string | null;
-  pushStatusId?: string | null;     // PUSH_OK | PUSH_PENDING | PUSH_FAILED | null
+  pushStatusId?: string | null;     // create-push: PUSH_OK | PUSH_PENDING | PUSH_FAILED | null
   pushErrorMessage?: string | null; // present when pushStatusId == PUSH_FAILED
+  closePushStatusId?: string | null;     // completion-push: CLOSE_OK | CLOSE_PENDING | CLOSE_FAILED | null
+  closePushErrorMessage?: string | null; // present when closePushStatusId == CLOSE_FAILED
 }
 
 /** Outcome of an outbound push trigger (the "failed" case is surfaced as a thrown error instead). */
 export type PushOutcome = "pushed" | "already_synced" | "skipped";
+
+/**
+ * Collapsed state of the Shopify completion (returnProcess + returnClose), parallel to SyncState
+ * for the create-push. Only meaningful once the return is RETURN_COMPLETED. See resolveShopifyCloseState.
+ * - pending   : close push in flight (CLOSE_PENDING, or just triggered)
+ * - completed : closed in Shopify (returnStatusId == CLOSED, authoritative — or CLOSE_OK)
+ * - failed    : CLOSE_FAILED — surface closePushErrorMessage + a Retry
+ * - skipped   : never synced to Shopify (no shopifyReturnId) — completion no-ops; "Completed (not in Shopify)"
+ */
+export type CompletionState = "pending" | "completed" | "failed" | "skipped";
 
 export interface ReturnItemInput {
   orderItemSeqId: string;
