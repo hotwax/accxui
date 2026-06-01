@@ -32,6 +32,31 @@ export type PushOutcome = "pushed" | "already_synced" | "skipped";
  */
 export type CompletionState = "pending" | "completed" | "failed" | "skipped";
 
+/** Discriminates a normal customer return from a refund-only appeasement return. */
+export type ReturnType = "standard" | "appeasement";
+
+/**
+ * Appeasement-specific fields, present on a ReturnSummary/ReturnDetail only when type === "appeasement".
+ * The refund mirror itself rides the existing `shopifySync` object (shopifyRefundId) — these are the
+ * appeasement's own descriptive fields.
+ */
+export interface AppeasementFields {
+  amount: number;           // refund amount (to the original payment)
+  currencyUomId: string;    // order currency
+  reasonId: string;         // required reason
+  reasonDesc?: string;      // backend-supplied description, if any
+  note?: string;            // optional free text
+  relatedReturnId?: string; // the standard return created alongside it
+}
+
+/** The optional appeasement block an operator adds on the create-return page. */
+export interface AppeasementInput {
+  amount: number;
+  currencyUomId: string;
+  reasonId: string;
+  note?: string;
+}
+
 export interface ReturnItemInput {
   orderItemSeqId: string;
   productId?: string; // display-only context; not submitted to the create endpoint
@@ -58,6 +83,9 @@ export interface ReturnSummary {
   returnChannelEnumId?: string;
   origin?: ReturnOrigin;
   sync?: Record<SyncTarget, SyncState>;
+  // Return type discriminator. Optional on a summary (the list endpoint may omit it); the adapter
+  // defaults it to "standard". An "appeasement" row renders a type badge.
+  type?: ReturnType;
 }
 
 export interface ReturnItemDetail {
@@ -87,6 +115,10 @@ export interface ReturnDetail extends ReturnSummary {
   items: ReturnItemDetail[];
   statuses: ReturnStatus[];
   externalIds: Record<SyncTarget, string | null>;
+  // The detail endpoint always classifies the return (narrows the optional on ReturnSummary).
+  type: ReturnType;
+  // Present only when type === "appeasement".
+  appeasement?: AppeasementFields;
 }
 
 export interface ReturnableLine {
@@ -104,6 +136,8 @@ export interface OrderForReturn {
   orderId: string;
   // Customer-facing Shopify order name/number (e.g. "#1001"); "" when absent.
   orderName: string;
+  // Order currency (e.g. "USD"); needed to label/submit an appeasement refund. Defaults to "USD".
+  currencyUomId: string;
   items: ReturnableLine[];
   billingEmail?: string;
 }
@@ -116,4 +150,6 @@ export interface ReturnReason {
 export interface CreateReturnInput {
   orderId: string;
   items: ReturnItemInput[];
+  // Present only when the operator added an appeasement; co-creates a linked appeasement return.
+  appeasement?: AppeasementInput;
 }
