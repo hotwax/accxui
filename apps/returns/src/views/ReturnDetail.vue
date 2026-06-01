@@ -50,6 +50,14 @@
                 <ion-card-content>
                   <h2 data-testid="detail-appeasement-amount">{{ commonUtil.formatCurrency(r.appeasement.amount, r.appeasement.currencyUomId) }}</h2>
                   <p>{{ translate("Reason") }}: {{ translate(formatReason(r.appeasement.reasonId, r.appeasement.reasonDesc)) }}</p>
+                  <ion-list v-if="isItemAppeasement" data-testid="detail-appeasement-items">
+                    <ion-item v-for="it in r.items" :key="it.orderItemSeqId" lines="none">
+                      <ion-label>
+                        <h3>{{ it.productName || it.sku || it.productId }}</h3>
+                        <p>{{ translate("Quantity") }}: {{ it.returnQuantity }}</p>
+                      </ion-label>
+                    </ion-item>
+                  </ion-list>
                   <p v-if="r.appeasement.note" class="muted">{{ r.appeasement.note }}</p>
                   <p v-if="r.appeasement.relatedReturnId">
                     {{ translate("Related return") }}:
@@ -180,6 +188,8 @@ const r = computed(() => store.current);
 // True once the loaded return matches this route (store.current may briefly hold a previously-viewed return).
 const loaded = computed(() => r.value?.returnId === props.returnId);
 const isAppeasement = computed(() => r.value?.type === "appeasement");
+// An item-based (lost-in-shipment) appeasement carries real product line(s); an amount-only one does not.
+const isItemAppeasement = computed(() => isAppeasement.value && !!r.value?.items?.[0]?.productId);
 // Requested → Approve + Reject (+ Cancel). Approved → Cancel (+ Complete for normal returns). Received →
 // Complete. Terminal → none. An appeasement is refund-only — the refund fires on approve and there is no
 // Shopify return to close, so it is NOT completable; its lifecycle ends at approved / rejected / cancelled.

@@ -14,6 +14,17 @@ import ReturnDetail from "@/views/ReturnDetail.vue";
 import { useReturnsStore } from "@/store/returnsStore";
 import type { ReturnDetail as ReturnDetailType } from "@/types/returns";
 
+function itemAppeasementDetail(): ReturnDetailType {
+  return {
+    ...appeasementDetail(),
+    appeasement: { amount: 32.5, currencyUomId: "USD", reasonId: "APPEASE_GOODWILL", reasonDesc: "Goodwill", relatedReturnId: "30000" },
+    items: [
+      { orderItemSeqId: "00001", productId: "P1", productName: "Classic Tee", returnQuantity: 1, returnReasonId: "APPEASE_GOODWILL" },
+      { orderItemSeqId: "00002", productId: "P2", productName: "Denim Jacket", returnQuantity: 2, returnReasonId: "APPEASE_GOODWILL" },
+    ],
+  };
+}
+
 function appeasementDetail(): ReturnDetailType {
   return {
     returnId: "30001", type: "appeasement", orderId: "DEMO-1001", orderName: "#1001",
@@ -80,5 +91,25 @@ describe("ReturnDetail.vue (appeasement)", () => {
     expect(wrapper.find('[data-testid="detail-reject-btn"]').exists()).toBe(false);
     expect(wrapper.find('[data-testid="detail-cancel-btn"]').exists()).toBe(false);
     expect(wrapper.find('[data-testid="detail-complete-btn"]').exists()).toBe(false);
+  });
+
+  it("renders the lost product line(s) and summed refund for an item-based appeasement", async () => {
+    const store = useReturnsStore();
+    store.current = itemAppeasementDetail();
+    const wrapper = mount(ReturnDetail, { props: { returnId: "30001" }, global: { stubs: { "ion-page": false } } });
+    await flushPromises();
+    expect(wrapper.find("[data-testid=detail-appeasement-items]").exists()).toBe(true);
+    const text = wrapper.text();
+    expect(text).toContain("Classic Tee");
+    expect(text).toContain("Denim Jacket");
+    expect(wrapper.find("[data-testid=detail-appeasement-amount]").text()).toContain("32.50");
+  });
+
+  it("renders no product-line list for an amount-only appeasement", async () => {
+    const store = useReturnsStore();
+    store.current = appeasementDetail(); // items: []
+    const wrapper = mount(ReturnDetail, { props: { returnId: "30001" }, global: { stubs: { "ion-page": false } } });
+    await flushPromises();
+    expect(wrapper.find("[data-testid=detail-appeasement-items]").exists()).toBe(false);
   });
 });
