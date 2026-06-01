@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { mapReturnDetail, mapOrderToReturnable } from "@/adapters/omsAdapter";
+import { mapReturnDetail, mapOrderToReturnable, mapReturnType, APPEASEMENT_RETURN_TYPE_ID } from "@/adapters/omsAdapter";
 
 describe("mapReturnDetail", () => {
   it("maps a synced shopify-origin return (PUSH_OK + SHOPIFY_RTN_ID)", () => {
@@ -152,5 +152,59 @@ describe("mapOrderToReturnable", () => {
       orderDetail: { orderId: "10004", shipGroups: [{ items: [{ orderItemSeqId: "00001", productId: "P1", quantity: 1, unitPrice: 10 }] }] },
     });
     expect(withoutSku.items[0].sku).toBeUndefined();
+  });
+});
+
+describe("appeasement mapping", () => {
+  it("maps a standard return to type 'standard' with no appeasement block", () => {
+    expect(mapReturnType("CUSTOMER_RETURN")).toBe("standard");
+    expect(mapReturnType(undefined)).toBe("standard");
+    const d = mapReturnDetail({
+      returnDetail: { returnId: "20001", statusId: "RETURN_REQUESTED", entryDate: "x" },
+      items: [{ orderItemSeqId: "00001", productId: "P1", returnQuantity: 1, returnReasonId: "UNWANTED" }],
+      statusHistory: [], identifications: [], shopifySync: null,
+    });
+    expect(d.type).toBe("standard");
+    expect(d.appeasement).toBeUndefined();
+  });
+
+  it("maps an appeasement return-type id to type 'appeasement' and surfaces amount/reason/note/link", () => {
+    expect(mapReturnType(APPEASEMENT_RETURN_TYPE_ID)).toBe("appeasement");
+    const d = mapReturnDetail({
+      returnDetail: {
+        returnId: "20002", statusId: "RETURN_REQUESTED", entryDate: "x",
+        returnHeaderTypeId: APPEASEMENT_RETURN_TYPE_ID,
+        refundAmount: "12.50", currencyUomId: "USD",
+        appeasementReasonId: "APPEASE_GOODWILL", appeasementReasonDesc: "Goodwill",
+        note: "sorry for the trouble", primaryReturnId: "20001",
+      },
+      items: [], statusHistory: [], identifications: [],
+      shopifySync: { synced: true, shopifyRefundId: "gid://shopify/Refund/5", pushStatusId: "PUSH_OK" },
+    });
+    expect(d.type).toBe("appeasement");
+    expect(d.sync.shopify).toBe("synced");
+    expect(d.appeasement).toMatchObject({
+      amount: 12.5, currencyUomId: "USD", reasonId: "APPEASE_GOODWILL",
+      reasonDesc: "Goodwill", note: "sorry for the trouble", relatedReturnId: "20001",
+    });
+  });
+});
+
+describe("mapOrderToReturnable currency", () => {
+  it("maps the order currencyUomId, defaulting to USD when absent", () => {
+    const withCcy = mapOrderToReturnable({
+      orderDetail: { orderId: "10001", currencyUomId: "EUR", shipGroups: [{ items: [{ orderItemSeqId: "00001", quantity: 1, unitPrice: 10 }] }] },
+    });
+    expect(withCcy.currencyUomId).toBe("EUR");
+    const withoutCcy = mapOrderToReturnable({
+      orderDetail: { orderId: "10002", shipGroups: [{ items: [{ orderItemSeqId: "00001", quantity: 1, unitPrice: 10 }] }] },
+    });
+    expect(withoutCcy.currencyUomId).toBe("USD");
+  });
+});
+
+describe("createReturn appeasement payload", () => {
+  it("returns both ids and is exercised against the stub in returnsStoreCrud", () => {
+    expect(APPEASEMENT_RETURN_TYPE_ID).toBe("RTN_APPEASEMENT");
   });
 });

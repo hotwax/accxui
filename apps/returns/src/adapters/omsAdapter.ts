@@ -3,11 +3,20 @@ import { maargApiKey } from "@/util/maargAuth";
 import type { ReturnsService } from "@/services/ReturnsService";
 import type {
   CreateReturnInput, OrderForReturn, PushOutcome, ReturnableLine, ReturnDetail, ReturnReason,
-  ReturnSummary, SyncState, SyncTarget,
+  ReturnSummary, ReturnType, SyncState, SyncTarget,
 } from "@/types/returns";
 import {
   resolveOrigin, resolveShopifySyncState, type Identification, type ShopifySync,
 } from "@/util/syncState";
+
+// Open Q1: the exact return-type id that marks a return as an appeasement (header-level returnHeaderTypeId
+// is the working assumption). Centralised here so confirming it is a one-line change.
+export const APPEASEMENT_RETURN_TYPE_ID = "RTN_APPEASEMENT";
+
+/** Map a raw returnHeaderTypeId to the UI return-type discriminator. */
+export function mapReturnType(returnHeaderTypeId?: string | null): ReturnType {
+  return returnHeaderTypeId === APPEASEMENT_RETURN_TYPE_ID ? "appeasement" : "standard";
+}
 
 // ---- Pure mappers (unit-tested) ----
 
@@ -17,6 +26,9 @@ interface RawReturnDetail {
     // Order reference now lives on returnDetail. orderName/externalOrderId are the customer-facing name
     // (OrderHeader.orderName, equal values); orderExternalId is the Shopify GID and is NEVER displayed.
     orderId?: string; orderName?: string; externalOrderId?: string; orderExternalId?: string; orderDate?: string | number;
+    // Appeasement fields (present only on an appeasement return). Field names are Open Q1/Q2/Q5.
+    returnHeaderTypeId?: string; refundAmount?: number | string; currencyUomId?: string;
+    appeasementReasonId?: string; appeasementReasonDesc?: string; note?: string; primaryReturnId?: string;
   };
   items?: Array<{ orderId?: string; externalOrderId?: string; orderItemSeqId: string; productId?: string; productName?: string; sku?: string; returnQuantity: number | string; returnReasonId: string; itemDescription?: string }>;
   statusHistory?: Array<{ statusId: string; statusDatetime: string | number }>;
@@ -34,10 +46,24 @@ export function mapReturnDetail(raw: RawReturnDetail): ReturnDetail {
     ?? idents.find((i) => i.returnIdentificationTypeId === "SHOPIFY_RTN_ID")?.idValue
     ?? null;
   const rd = raw.returnDetail;
+  const type = mapReturnType(rd.returnHeaderTypeId);
+  // Open Q2: refund amount field; Open Q5: linkage field. Read defensively from the detail.
+  const appeasement = type === "appeasement"
+    ? {
+        amount: Number(rd.refundAmount ?? 0),
+        currencyUomId: rd.currencyUomId ?? "USD",
+        reasonId: rd.appeasementReasonId ?? "",
+        reasonDesc: rd.appeasementReasonDesc || undefined,
+        note: rd.note || undefined,
+        relatedReturnId: rd.primaryReturnId || undefined,
+      }
+    : undefined;
   // Display name: prefer orderName, then its alias externalOrderId. Never orderExternalId (the GID).
   const orderName = rd.orderName ?? rd.externalOrderId ?? items[0]?.externalOrderId ?? "";
   return {
     returnId: rd.returnId,
+    type,
+    appeasement,
     // Order ref now lives on returnDetail; fall back to the first item only for older payloads.
     orderId: rd.orderId ?? items[0]?.orderId ?? "",
     orderName,
@@ -75,7 +101,7 @@ interface RawOrderItem {
 }
 interface RawOrder {
   // orderName/externalOrderId are the customer-facing name; orderExternalId is the GID (never displayed).
-  orderDetail: { orderId: string; orderName?: string; externalOrderId?: string; orderExternalId?: string; billingEmail?: string; shipGroups?: Array<{ items?: RawOrderItem[] }> };
+  orderDetail: { orderId: string; orderName?: string; externalOrderId?: string; orderExternalId?: string; billingEmail?: string; currencyUomId?: string; shipGroups?: Array<{ items?: RawOrderItem[] }> };
 }
 
 /** Map `GET /oms/orders/{id}` into an OrderForReturn, trusting the backend's returnableQuantity. */
@@ -102,6 +128,7 @@ export function mapOrderToReturnable(raw: RawOrder): OrderForReturn {
     orderId: raw.orderDetail.orderId,
     // Prefer orderName, then its alias externalOrderId. Never orderExternalId (the GID).
     orderName: raw.orderDetail.orderName ?? raw.orderDetail.externalOrderId ?? "",
+    currencyUomId: raw.orderDetail.currencyUomId ?? "USD",
     billingEmail: raw.orderDetail.billingEmail,
     items,
   };
@@ -131,11 +158,13 @@ export const omsAdapter: ReturnsService = {
     const resp: any = await omsApi({
       url: "oms/returns", method: "GET",
       params: { pageIndex, pageSize, returnHeaderTypeId: "CUSTOMER_RETURN", ...(statusId ? { statusId } : {}) },
+      // Open Q1: if appeasements use a distinct returnHeaderTypeId, broaden this filter so they list too.
     });
     if (commonUtil.hasError(resp)) throw new Error("Failed to list returns");
     const rows: any[] = resp.data?.returns ?? [];
     const items: ReturnSummary[] = rows.map((r) => ({
       returnId: r.returnId,
+      type: mapReturnType(r.returnHeaderTypeId),
       orderId: r.orderId ?? undefined,
       // Customer-facing name: orderName, or its alias externalOrderId. Never orderExternalId (the GID).
       orderName: r.orderName ?? r.externalOrderId ?? undefined,
@@ -158,7 +187,7 @@ export const omsAdapter: ReturnsService = {
   },
 
   async createReturn(input: CreateReturnInput) {
-    const body = {
+    const body: any = {
       orderId: input.orderId,
       items: input.items.map((i) => ({
         orderItemSeqId: i.orderItemSeqId,
@@ -166,9 +195,18 @@ export const omsAdapter: ReturnsService = {
         returnReasonId: i.returnReasonId,
       })),
     };
+    // Open Q3: single atomic create carrying the optional appeasement block.
+    if (input.appeasement) {
+      body.appeasement = {
+        amount: input.appeasement.amount,
+        currencyUomId: input.appeasement.currencyUomId,
+        reasonId: input.appeasement.reasonId,
+        ...(input.appeasement.note ? { note: input.appeasement.note } : {}),
+      };
+    }
     const resp: any = await omsApi({ url: "oms/returns/customerReturn", method: "POST", data: body });
     if (commonUtil.hasError(resp)) throw new Error("Failed to create return");
-    return { returnId: resp.data.returnId };
+    return { returnId: resp.data.returnId, appeasementReturnId: resp.data.appeasementReturnId ?? undefined };
   },
 
   async approveReturn(returnId) {
