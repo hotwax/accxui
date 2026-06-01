@@ -47,6 +47,7 @@
   "Approve this return to sync it to Shopify, or reject it.": "Approve this return to sync it to Shopify, or reject it.",
   "Syncs to Shopify once approved.": "Syncs to Shopify once approved.",
   "Cancelled in OMS — still synced to Shopify": "Cancelled in OMS — still synced to Shopify",
+  "Shopify push didn't complete — it may already be pending. The OMS may need to clear a stuck push.": "Shopify push didn't complete — it may already be pending. The OMS may need to clear a stuck push.",
   "Reject this return?": "Reject this return?",
   "Cancel this return?": "Cancel this return?",
   "Approving return": "Approving return",

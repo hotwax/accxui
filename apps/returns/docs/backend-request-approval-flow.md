@@ -77,16 +77,39 @@ Please confirm the exact `statusId` strings you create for approved/rejected (th
 6. Invalid transitions return a clear `4xx`.
 7. Reply with the exact `statusId` strings used for approved/rejected.
 
-> NOTE: this is blocked in practice by the existing returns-service `ClassCastException`
-> (see `backend-request-list-bug-and-identifiers.md`) — list and real-return detail currently 400.
-> That P0 bug must be fixed for any of this to be testable end-to-end.
+> UPDATE 2026-06-01: the `ClassCastException` is FIXED — list and detail now return 200, and
+> approve/reject/cancel transitions work (status changes correctly). One open bug remains, below.
 
-## Frontend status (already wired — nothing else needed from us)
-The PWA already implements the full approval UX against this contract:
-- `ReturnsService.approveReturn / rejectReturn / cancelReturn` → these three endpoints.
-- Approve auto-polls `sync.shopify` to completion; a Retry re-runs the push on `failed`.
-- Return detail shows **Approve + Reject** for `RETURN_REQUESTED` and **Cancel** for
-  `RETURN_APPROVED`; terminal statuses show no actions.
-- It no longer assumes a push on create.
+## OPEN BUG: approve sets RETURN_APPROVED but the Shopify push stays stuck in PUSH_PENDING
 
-So the moment these endpoints exist (and the cast bug is fixed), the flow works with no frontend change.
+Observed on a real return (`M100053`, order `782`, which **is** a Shopify order — `orderExternalId`
+`4685330546732`):
+- Approve worked: `statusHistory` shows `RETURN_REQUESTED → RETURN_APPROVED`.
+- But `shopifySync` never resolves:
+  ```json
+  { "synced": false, "shopifyReturnId": null, "pushStatusId": "PUSH_PENDING",
+    "pushErrorMessage": null, "lastAttemptDate": 1780069659724 }
+  ```
+- `lastAttemptDate` (1780069659724) ≈ the return's **creation** time (~2.6 days ago), NOT the approve
+  time — so **approve did not trigger a fresh push**; the push has been `PUSH_PENDING` since create.
+- `POST /oms/returns/M100053/pushToShopify` returns **`{"status":"skipped"}`** (a no-op) and does not
+  advance `lastAttemptDate` — re-push is declined, presumably because a `PUSH_PENDING` already exists.
+
+**Net effect:** the return is wedged — it can never sync, because the original push never resolves to
+`PUSH_OK`/`PUSH_FAILED` and a manual re-push is skipped due to the stale pending state.
+
+**Asks:**
+1. Approve must (re)trigger the OMS→Shopify push and advance `lastAttemptDate`.
+2. The push worker must resolve `PUSH_PENDING` → `PUSH_OK` (set `synced:true` + `shopifyReturnId`) or
+   `PUSH_FAILED` (set `pushErrorMessage`); it must not hang in `PUSH_PENDING` indefinitely.
+3. `pushToShopify` should be able to recover a stale/stuck `PUSH_PENDING` (re-enqueue) rather than
+   silently returning `skipped`; if it does skip, the response should say *why* (e.g.
+   `{ status: "skipped", reason: "already_pending" }`) so the UI can explain it.
+
+## Frontend status
+- Transitions (approve/reject/cancel) + the `shopifySync` object mapping are wired and live.
+- Approve auto-polls `shopifySync` to completion; the detail page now offers a manual
+  **Push to Shopify** when a return is approved-but-unsynced (covers a stuck `PUSH_PENDING`, not just
+  `PUSH_FAILED`), and surfaces a "didn't complete / may be pending" message when a push is skipped.
+- Nothing more needed from the PWA for the wedged-return case — it's resolved once the push worker /
+  re-push behavior above is fixed.

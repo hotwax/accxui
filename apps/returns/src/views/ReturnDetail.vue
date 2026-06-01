@@ -78,12 +78,11 @@
                   </p>
                   <p v-else-if="canApprove" class="muted">{{ translate("Syncs to Shopify once approved.") }}</p>
 
-                  <template v-if="r.sync.shopify === 'failed'">
-                    <p v-if="r.shopifySync?.pushErrorMessage" style="color: var(--ion-color-danger); white-space: pre-wrap">{{ r.shopifySync.pushErrorMessage }}</p>
-                    <ion-button expand="block" color="danger" :disabled="busy" @click="push" data-testid="detail-retry-btn">
-                      {{ translate("Retry") }}
-                    </ion-button>
-                  </template>
+                  <p v-if="r.sync.shopify === 'failed' && r.shopifySync?.pushErrorMessage" style="color: var(--ion-color-danger); white-space: pre-wrap">{{ r.shopifySync.pushErrorMessage }}</p>
+                  <!-- Approved but not synced (failed OR stuck pending) → let staff re-kick the push. -->
+                  <ion-button v-if="canManualPush" expand="block" :color="r.sync.shopify === 'failed' ? 'danger' : 'primary'" :disabled="busy" @click="push" :data-testid="r.sync.shopify === 'failed' ? 'detail-retry-btn' : 'detail-push-btn'">
+                    {{ r.sync.shopify === "failed" ? translate("Retry") : translate("Push to Shopify") }}
+                  </ion-button>
                 </ion-card-content>
               </ion-card>
             </div>
@@ -108,7 +107,7 @@
 
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import { emitter, translate } from "@common";
+import { commonUtil, emitter, translate } from "@common";
 import {
   IonBackButton, IonButton, IonCard, IonCardContent, IonCardHeader, IonCardTitle, IonChip,
   IonContent, IonHeader, IonIcon, IonItem, IonLabel, IonList, IonPage, IonSpinner, IonTitle, IonToolbar,
@@ -135,6 +134,8 @@ const canApprove = computed(() => r.value?.statusId === "RETURN_REQUESTED");
 const canCancel = computed(() => r.value?.statusId === "RETURN_REQUESTED" || r.value?.statusId === "RETURN_APPROVED");
 // A return cancelled in the OMS but still linked in Shopify (synced stays true; Shopify status → CANCELED).
 const cancelledInShopify = computed(() => r.value?.statusId === "RETURN_CANCELLED" && r.value?.sync.shopify === "synced");
+// Approved but not yet synced (failed or stuck pending) → allow a manual re-push from the UI.
+const canManualPush = computed(() => r.value?.statusId === "RETURN_APPROVED" && r.value?.sync.shopify !== "synced");
 
 // Run a lifecycle action with the global loader + error handling.
 async function runAction(message: string, action: () => Promise<unknown>, failMessage: string) {
@@ -176,9 +177,16 @@ async function cancel() {
   return runAction("Cancelling return", () => store.cancelReturn(props.returnId), "Failed to cancel return");
 }
 
-// Retry a failed Shopify push (approval already happened).
+// Re-kick the Shopify push (approval already happened) — for a failed or stuck-pending sync.
 function push() {
-  return runAction("Pushing to Shopify", () => store.pushAndPoll(props.returnId, "shopify"), "Push to Shopify failed");
+  return runAction("Pushing to Shopify", async () => {
+    await store.pushAndPoll(props.returnId, "shopify");
+    // The push can be a no-op ("skipped" — e.g. a stale push already pending) or not finish in time;
+    // surface that instead of silently leaving the spinner, so staff know it didn't sync.
+    if (store.current?.sync.shopify !== "synced") {
+      commonUtil.showToast(translate("Shopify push didn't complete — it may already be pending. The OMS may need to clear a stuck push."));
+    }
+  }, "Push to Shopify failed");
 }
 
 onIonViewWillEnter(async () => {
