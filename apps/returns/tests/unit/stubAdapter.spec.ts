@@ -35,4 +35,56 @@ describe("stubAdapter", () => {
     expect((await stubAdapter.getSyncStatus(returnId)).shopify).toBe("pending");
     expect((await stubAdapter.getSyncStatus(returnId)).shopify).toBe("synced");
   });
+
+  it("co-creates a linked appeasement return alongside the standard return", async () => {
+    const { returnId, appeasementReturnId } = await stubAdapter.createReturn({
+      orderId: "DEMO-1001",
+      items: [{ orderItemSeqId: "00001", productId: "P1", returnQuantity: 1, returnReasonId: "RTN_NOT_WANT" }],
+      appeasement: { amount: 10, currencyUomId: "USD", reasonId: "APPEASE_GOODWILL", note: "sorry" },
+    });
+    expect(appeasementReturnId).toBeTruthy();
+    const standard = await stubAdapter.getReturn(returnId);
+    expect(standard.type).toBe("standard");
+    const appeasement = await stubAdapter.getReturn(appeasementReturnId!);
+    expect(appeasement.type).toBe("appeasement");
+    expect(appeasement.items).toHaveLength(0);
+    expect(appeasement.appeasement).toMatchObject({
+      amount: 10, currencyUomId: "USD", reasonId: "APPEASE_GOODWILL", note: "sorry", relatedReturnId: returnId,
+    });
+    expect(appeasement.sync.shopify).toBe("not_synced");
+  });
+
+  it("rejects an appeasement amount above the kept-merchandise cap", async () => {
+    // DEMO-1001 kept value when returning 1x00001 (unit 19.99): 1x19.99 + 1x49 = 68.99.
+    await expect(stubAdapter.createReturn({
+      orderId: "DEMO-1001",
+      items: [{ orderItemSeqId: "00001", productId: "P1", returnQuantity: 1, returnReasonId: "RTN_NOT_WANT" }],
+      appeasement: { amount: 9999, currencyUomId: "USD", reasonId: "APPEASE_GOODWILL" },
+    })).rejects.toThrow();
+  });
+
+  it("rejects an appeasement when every returnable unit is being returned (nothing kept)", async () => {
+    await expect(stubAdapter.createReturn({
+      orderId: "DEMO-1001",
+      items: [
+        { orderItemSeqId: "00001", productId: "P1", returnQuantity: 2, returnReasonId: "RTN_NOT_WANT" },
+        { orderItemSeqId: "00002", productId: "P2", returnQuantity: 1, returnReasonId: "RTN_NOT_WANT" },
+      ],
+      appeasement: { amount: 5, currencyUomId: "USD", reasonId: "APPEASE_GOODWILL" },
+    })).rejects.toThrow();
+  });
+
+  it("settles an approved appeasement to synced with a shopifyRefundId (not a return id)", async () => {
+    const { appeasementReturnId } = await stubAdapter.createReturn({
+      orderId: "DEMO-1001",
+      items: [{ orderItemSeqId: "00001", productId: "P1", returnQuantity: 1, returnReasonId: "RTN_NOT_WANT" }],
+      appeasement: { amount: 10, currencyUomId: "USD", reasonId: "APPEASE_GOODWILL" },
+    });
+    await stubAdapter.approveReturn(appeasementReturnId!);
+    expect((await stubAdapter.getSyncStatus(appeasementReturnId!)).shopify).toBe("pending");
+    expect((await stubAdapter.getSyncStatus(appeasementReturnId!)).shopify).toBe("synced");
+    const settled = await stubAdapter.getReturn(appeasementReturnId!);
+    expect(settled.shopifySync?.shopifyRefundId).toBeTruthy();
+    expect(settled.shopifySync?.shopifyReturnId ?? null).toBeNull();
+  });
 });

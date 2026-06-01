@@ -20,6 +20,7 @@ const REASONS: ReturnReason[] = [
 const ORDER: OrderForReturn = {
   orderId: "DEMO-1001",
   orderName: "#1001",
+  currencyUomId: "USD",
   billingEmail: "demo@example.com",
   items: [
     { orderItemSeqId: "00001", productId: "P1", productName: "Classic Tee", orderedQty: 2, alreadyReturnedQty: 0, returnableQty: 2, unitPrice: 19.99 },
@@ -33,6 +34,7 @@ let seq: number;
 function seedShopifyReturn(): StubReturn {
   return {
     returnId: "10000",
+    type: "standard",
     orderId: "DEMO-2002",
     orderName: "#2002",
     orderDate: "2026-05-20T08:00:00Z",
@@ -64,7 +66,7 @@ export function __resetStub() {
 __resetStub();
 
 function toSummary(r: StubReturn): ReturnSummary {
-  return { returnId: r.returnId, orderId: r.orderId, orderName: r.orderName, orderDate: r.orderDate, statusId: r.statusId, entryDate: r.entryDate, origin: r.origin, sync: r.sync };
+  return { returnId: r.returnId, type: r.type, orderId: r.orderId, orderName: r.orderName, orderDate: r.orderDate, statusId: r.statusId, entryDate: r.entryDate, origin: r.origin, sync: r.sync };
 }
 
 export const stubAdapter: ReturnsService = {
@@ -88,27 +90,59 @@ export const stubAdapter: ReturnsService = {
     const { pushAttempted, pollsUntilSynced, closeAttempted, pollsUntilClosed, ...detail } = r;
     return detail;
   },
-  async createReturn({ orderId, items }: CreateReturnInput) {
-    const returnId = String(seq++);
+  async createReturn({ orderId, items, appeasement }: CreateReturnInput) {
     const now = "2026-05-29T12:00:00Z";
-    store.set(returnId, {
-      returnId, orderId, orderName: ORDER.orderName, orderDate: "2026-05-22T08:00:00Z", statusId: "RETURN_REQUESTED", entryDate: now, origin: "pwa",
+    const makeStandard = (id: string) => {
+      store.set(id, {
+        returnId: id, type: "standard", orderId, orderName: ORDER.orderName, orderDate: "2026-05-22T08:00:00Z",
+        statusId: "RETURN_REQUESTED", entryDate: now, origin: "pwa",
+        sync: { shopify: "not_synced" },
+        items: items.map((i) => ({
+          orderItemSeqId: i.orderItemSeqId,
+          productId: i.productId ?? "",
+          productName: i.productName ?? "",
+          returnQuantity: i.returnQuantity,
+          returnReasonId: i.returnReasonId,
+          returnReasonDesc: REASONS.find((x) => x.returnReasonId === i.returnReasonId)?.description,
+        })),
+        statuses: [{ statusId: "RETURN_REQUESTED", statusDate: now }],
+        externalIds: { shopify: null },
+        shopifySync: null, // no push on create
+        pushAttempted: false, pollsUntilSynced: 0,
+        closeAttempted: false, pollsUntilClosed: 0,
+      });
+    };
+    const returnId = String(seq++);
+    makeStandard(returnId);
+    if (!appeasement) return { returnId };
+
+    // Eligibility + amount cap (kept-merchandise value). Mirrors the server-side guard (Open Q6).
+    const returnedQty: Record<string, number> = {};
+    for (const i of items) returnedQty[i.orderItemSeqId] = (returnedQty[i.orderItemSeqId] ?? 0) + i.returnQuantity;
+    const keptValue = ORDER.items.reduce(
+      (sum, l) => sum + Math.max(0, l.returnableQty - (returnedQty[l.orderItemSeqId] ?? 0)) * l.unitPrice, 0);
+    if (keptValue <= 0) throw new Error("Appeasement requires at least one kept item");
+    if (appeasement.amount <= 0 || appeasement.amount > keptValue) throw new Error("Appeasement amount out of range");
+
+    const appeasementReturnId = String(seq++);
+    store.set(appeasementReturnId, {
+      returnId: appeasementReturnId, type: "appeasement", orderId, orderName: ORDER.orderName,
+      orderDate: "2026-05-22T08:00:00Z", statusId: "RETURN_REQUESTED", entryDate: now, origin: "pwa",
       sync: { shopify: "not_synced" },
-      items: items.map((i) => ({
-        orderItemSeqId: i.orderItemSeqId,
-        productId: i.productId ?? "",
-        productName: i.productName ?? "",
-        returnQuantity: i.returnQuantity,
-        returnReasonId: i.returnReasonId,
-        returnReasonDesc: REASONS.find((x) => x.returnReasonId === i.returnReasonId)?.description,
-      })),
+      items: [],
+      appeasement: {
+        amount: appeasement.amount, currencyUomId: appeasement.currencyUomId,
+        reasonId: appeasement.reasonId,
+        reasonDesc: REASONS.find((x) => x.returnReasonId === appeasement.reasonId)?.description,
+        note: appeasement.note, relatedReturnId: returnId,
+      },
       statuses: [{ statusId: "RETURN_REQUESTED", statusDate: now }],
       externalIds: { shopify: null },
-      shopifySync: null, // no push on create
+      shopifySync: null,
       pushAttempted: false, pollsUntilSynced: 0,
       closeAttempted: false, pollsUntilClosed: 0,
     });
-    return { returnId };
+    return { returnId, appeasementReturnId };
   },
   async approveReturn(returnId) {
     const r = store.get(returnId);
@@ -185,8 +219,13 @@ export const stubAdapter: ReturnsService = {
         r.shopifySync = { synced: false, pushStatusId: "PUSH_PENDING" };
       } else {
         r.sync = { shopify: "synced" };
-        r.externalIds = { shopify: "gid://shopify/Return/999" };
-        r.shopifySync = { synced: true, shopifyReturnId: "gid://shopify/Return/999", pushStatusId: "PUSH_OK", returnStatusId: "OPEN" };
+        if (r.type === "appeasement") {
+          r.externalIds = { shopify: null };
+          r.shopifySync = { synced: true, shopifyRefundId: "gid://shopify/Refund/999", pushStatusId: "PUSH_OK" };
+        } else {
+          r.externalIds = { shopify: "gid://shopify/Return/999" };
+          r.shopifySync = { synced: true, shopifyReturnId: "gid://shopify/Return/999", pushStatusId: "PUSH_OK", returnStatusId: "OPEN" };
+        }
       }
     }
     return r.sync;
