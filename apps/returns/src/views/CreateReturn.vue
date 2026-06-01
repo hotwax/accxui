@@ -83,7 +83,7 @@
             </ion-card-content>
             <ion-card-content v-else-if="appeasementEnabled">
               <ion-segment data-testid="create-appeasement-mode" :value="appeasementMode"
-                @ionChange="setAppeasementMode($event.detail.value)">
+                @ionChange="setAppeasementMode($event.detail.value as 'amount' | 'items')">
                 <ion-segment-button value="amount" data-testid="create-appeasement-mode-amount">
                   <ion-label>{{ translate("Refund an amount") }}</ion-label>
                 </ion-segment-button>
