@@ -9,9 +9,9 @@ import {
   resolveOrigin, resolveShopifySyncState, type Identification, type ShopifySync,
 } from "@/util/syncState";
 
-// Open Q1: the exact return-type id that marks a return as an appeasement (header-level returnHeaderTypeId
-// is the working assumption). Centralised here so confirming it is a one-line change.
-export const APPEASEMENT_RETURN_TYPE_ID = "RTN_APPEASEMENT";
+// Open Q1 (CONFIRMED): the return-type id that marks a return as an appeasement is the header-level
+// returnHeaderTypeId === "APPEASEMENT". Centralised here so a future change is still a one-line edit.
+export const APPEASEMENT_RETURN_TYPE_ID = "APPEASEMENT";
 
 /** Map a raw returnHeaderTypeId to the UI return-type discriminator. */
 export function mapReturnType(returnHeaderTypeId?: string | null): ReturnType {
@@ -26,11 +26,11 @@ interface RawReturnDetail {
     // Order reference now lives on returnDetail. orderName/externalOrderId are the customer-facing name
     // (OrderHeader.orderName, equal values); orderExternalId is the Shopify GID and is NEVER displayed.
     orderId?: string; orderName?: string; externalOrderId?: string; orderExternalId?: string; orderDate?: string | number;
-    // Appeasement fields (present only on an appeasement return). Field names are Open Q1/Q2/Q5.
-    returnHeaderTypeId?: string; refundAmount?: number | string; currencyUomId?: string;
-    appeasementReasonId?: string; appeasementReasonDesc?: string; note?: string; primaryReturnId?: string;
+    // Appeasement (confirmed contract): header carries the type + currency; the refund amount/reason/note
+    // ride the single monetary item line and the linkage is a RELATED_RETURN_ID identification.
+    returnHeaderTypeId?: string; currencyUomId?: string;
   };
-  items?: Array<{ orderId?: string; externalOrderId?: string; orderItemSeqId: string; productId?: string; productName?: string; sku?: string; returnQuantity: number | string; returnReasonId: string; itemDescription?: string }>;
+  items?: Array<{ orderId?: string; externalOrderId?: string; orderItemSeqId: string; productId?: string; productName?: string; sku?: string; returnQuantity: number | string; returnReasonId: string; itemDescription?: string; returnPrice?: number | string; reasonDescription?: string; description?: string }>;
   statusHistory?: Array<{ statusId: string; statusDatetime: string | number }>;
   identifications?: Identification[];
   shopifySync?: ShopifySync | null;
@@ -47,15 +47,22 @@ export function mapReturnDetail(raw: RawReturnDetail): ReturnDetail {
     ?? null;
   const rd = raw.returnDetail;
   const type = mapReturnType(rd.returnHeaderTypeId);
-  // Open Q2: refund amount field; Open Q5: linkage field. Read defensively from the detail.
+  // Appeasement detail: shape is detected by whether the lines carry a productId.
+  // - amount-only / legacy: a single synthetic monetary line (no productId) — amount = its returnPrice.
+  // - lost-in-shipment: real product line(s) — amount = Σ(returnPrice × returnQuantity).
+  // The linked standard return is a RELATED_RETURN_ID identification.
+  const appLines = type === "appeasement" ? items : [];
+  const isItemAppeasement = appLines.length > 0 && !!appLines[0].productId;
   const appeasement = type === "appeasement"
     ? {
-        amount: Number(rd.refundAmount ?? 0),
+        amount: isItemAppeasement
+          ? appLines.reduce((s, it) => s + Number(it.returnPrice ?? 0) * Number(it.returnQuantity), 0)
+          : Number(appLines[0]?.returnPrice ?? 0),
         currencyUomId: rd.currencyUomId ?? "USD",
-        reasonId: rd.appeasementReasonId ?? "",
-        reasonDesc: rd.appeasementReasonDesc || undefined,
-        note: rd.note || undefined,
-        relatedReturnId: rd.primaryReturnId || undefined,
+        reasonId: appLines[0]?.returnReasonId ?? "",
+        reasonDesc: appLines[0]?.reasonDescription || undefined,
+        note: isItemAppeasement ? undefined : appLines[0]?.description || undefined,
+        relatedReturnId: idents.find((i) => i.returnIdentificationTypeId === "RELATED_RETURN_ID")?.idValue || undefined,
       }
     : undefined;
   // Display name: prefer orderName, then its alias externalOrderId. Never orderExternalId (the GID).
@@ -187,26 +194,39 @@ export const omsAdapter: ReturnsService = {
   },
 
   async createReturn(input: CreateReturnInput) {
-    const body: any = {
-      orderId: input.orderId,
-      items: input.items.map((i) => ({
-        orderItemSeqId: i.orderItemSeqId,
-        returnQuantity: i.returnQuantity,
-        returnReasonId: i.returnReasonId,
-      })),
-    };
-    // Open Q3: single atomic create carrying the optional appeasement block.
-    if (input.appeasement) {
-      body.appeasement = {
-        amount: input.appeasement.amount,
-        currencyUomId: input.appeasement.currencyUomId,
-        reasonId: input.appeasement.reasonId,
-        ...(input.appeasement.note ? { note: input.appeasement.note } : {}),
+    // Standard return for the kept-item return (when there are items to return).
+    let returnId = "";
+    if (input.items.length) {
+      const body = {
+        orderId: input.orderId,
+        items: input.items.map((i) => ({
+          orderItemSeqId: i.orderItemSeqId,
+          returnQuantity: i.returnQuantity,
+          returnReasonId: i.returnReasonId,
+        })),
       };
+      const resp: any = await omsApi({ url: "oms/returns/customerReturn", method: "POST", data: body });
+      if (commonUtil.hasError(resp)) throw new Error("Failed to create return");
+      returnId = resp.data.returnId;
     }
-    const resp: any = await omsApi({ url: "oms/returns/customerReturn", method: "POST", data: body });
-    if (commonUtil.hasError(resp)) throw new Error("Failed to create return");
-    return { returnId: resp.data.returnId, appeasementReturnId: resp.data.appeasementReturnId ?? undefined };
+    if (!input.appeasement) return { returnId };
+    // Appeasement is a SEPARATE call (confirmed contract: two calls, not one atomic create).
+    const a = input.appeasement;
+    const appResp: any = await omsApi({
+      url: "oms/returns/appeasementReturn", method: "POST",
+      data: {
+        orderId: input.orderId,
+        amount: a.amount,
+        reasonId: a.reasonId,
+        currencyUomId: a.currencyUomId,
+        ...(a.note ? { note: a.note } : {}),
+        ...(returnId ? { relatedReturnId: returnId } : {}),
+      },
+    });
+    if (commonUtil.hasError(appResp)) throw new Error("Failed to create appeasement");
+    const appeasementReturnId = appResp.data.returnId;
+    // Navigate to the standard return when there is one, else to the stand-alone appeasement.
+    return { returnId: returnId || appeasementReturnId, appeasementReturnId };
   },
 
   async approveReturn(returnId) {
@@ -246,6 +266,15 @@ export const omsAdapter: ReturnsService = {
     const resp: any = await omsApi({ url: "oms/returnReasons", method: "GET" });
     if (commonUtil.hasError(resp)) throw new Error("Failed to load reasons");
     return (resp.data?.reasons ?? []).map((r: any) => ({ returnReasonId: r.returnReasonId, description: r.description }));
+  },
+
+  async listAppeasementReasons(): Promise<ReturnReason[]> {
+    const resp: any = await omsApi({ url: "oms/appeasementReasons", method: "GET" });
+    if (commonUtil.hasError(resp)) throw new Error("Failed to load appeasement reasons");
+    return (resp.data?.reasons ?? [])
+      .slice()
+      .sort((x: any, y: any) => String(x.sequenceId ?? "").localeCompare(String(y.sequenceId ?? "")))
+      .map((r: any) => ({ returnReasonId: r.returnReasonId, description: r.description }));
   },
 
   async pushToTarget(returnId, _target: SyncTarget): Promise<PushOutcome> {

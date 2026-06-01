@@ -173,12 +173,10 @@ describe("appeasement mapping", () => {
     const d = mapReturnDetail({
       returnDetail: {
         returnId: "20002", statusId: "RETURN_REQUESTED", entryDate: "x",
-        returnHeaderTypeId: APPEASEMENT_RETURN_TYPE_ID,
-        refundAmount: "12.50", currencyUomId: "USD",
-        appeasementReasonId: "APPEASE_GOODWILL", appeasementReasonDesc: "Goodwill",
-        note: "sorry for the trouble", primaryReturnId: "20001",
+        returnHeaderTypeId: APPEASEMENT_RETURN_TYPE_ID, currencyUomId: "USD",
       },
-      items: [], statusHistory: [], identifications: [],
+      items: [{ orderItemSeqId: "00001", returnPrice: "12.50", returnReasonId: "APPEASE_GOODWILL", reasonDescription: "Goodwill", description: "sorry for the trouble", returnQuantity: 1 }],
+      statusHistory: [], identifications: [{ returnIdentificationTypeId: "RELATED_RETURN_ID", idValue: "20001" }],
       shopifySync: { synced: true, shopifyRefundId: "gid://shopify/Refund/5", pushStatusId: "PUSH_OK" },
     });
     expect(d.type).toBe("appeasement");
@@ -187,6 +185,25 @@ describe("appeasement mapping", () => {
       amount: 12.5, currencyUomId: "USD", reasonId: "APPEASE_GOODWILL",
       reasonDesc: "Goodwill", note: "sorry for the trouble", relatedReturnId: "20001",
     });
+  });
+
+  it("sums per-line refund for an item-based (lost-in-shipment) appeasement", () => {
+    const d = mapReturnDetail({
+      returnDetail: { returnId: "M2", returnHeaderTypeId: "APPEASEMENT", statusId: "RETURN_REQUESTED", entryDate: "2026-06-01", currencyUomId: "USD" },
+      items: [
+        { orderItemSeqId: "00001", productId: "P1", productName: "Classic Tee", returnPrice: "12.50", returnReasonId: "APPEASE_GOODWILL", reasonDescription: "Goodwill", returnQuantity: 1 },
+        { orderItemSeqId: "00002", productId: "P2", productName: "Denim Jacket", returnPrice: "10.00", returnReasonId: "APPEASE_GOODWILL", returnQuantity: 2 },
+      ],
+      identifications: [{ returnIdentificationTypeId: "RELATED_RETURN_ID", idValue: "M1" }],
+    });
+    expect(d.type).toBe("appeasement");
+    // 12.50*1 + 10.00*2 = 32.50
+    expect(d.appeasement?.amount).toBe(32.5);
+    expect(d.appeasement?.reasonId).toBe("APPEASE_GOODWILL");
+    expect(d.appeasement?.relatedReturnId).toBe("M1");
+    // The product lines are preserved for rendering.
+    expect(d.items).toHaveLength(2);
+    expect(d.items[0].productId).toBe("P1");
   });
 });
 
@@ -205,6 +222,6 @@ describe("mapOrderToReturnable currency", () => {
 
 describe("createReturn appeasement payload", () => {
   it("returns both ids and is exercised against the stub in returnsStoreCrud", () => {
-    expect(APPEASEMENT_RETURN_TYPE_ID).toBe("RTN_APPEASEMENT");
+    expect(APPEASEMENT_RETURN_TYPE_ID).toBe("APPEASEMENT");
   });
 });
