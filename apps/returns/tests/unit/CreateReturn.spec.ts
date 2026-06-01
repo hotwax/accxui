@@ -125,4 +125,55 @@ describe("CreateReturn.vue", () => {
     const { items } = await getReturnsService().listReturns({ pageSize: 50 });
     expect(items.some((r) => r.type === "appeasement")).toBe(true);
   });
+
+  it("items mode: picking a lost item auto-fills the amount and submits an item-based appeasement", async () => {
+    const wrapper = mount(CreateReturn, { global: { stubs: { "ion-page": false } } });
+    (wrapper.vm as any).orderId = "DEMO-1001";
+    await (wrapper.vm as any).lookupOrder();
+    await flushPromises();
+    // Keep everything (no standard-return selections) so the appeasement is eligible.
+    (wrapper.vm as any).appeasementEnabled = true;
+    (wrapper.vm as any).setAppeasementMode("items");
+    (wrapper.vm as any).setAppeasementQty("00001", 1); // Classic Tee @ 19.99
+    (wrapper.vm as any).appeasementReasonId = "APPEASE_GOODWILL";
+    await flushPromises();
+    // Amount auto-fills to the picked-line total and the form is valid.
+    expect((wrapper.vm as any).appeasementAmount).toBeCloseTo(19.99, 2);
+    expect((wrapper.vm as any).appeasementValid).toBe(true);
+
+    const id = await (wrapper.vm as any).submit();
+    const detail = await getReturnsService().getReturn(id);
+    expect(detail.type).toBe("appeasement");
+    expect(detail.items[0].productId).toBe("P1");
+    expect(detail.appeasement?.amount).toBeCloseTo(19.99, 2);
+  });
+
+  it("items mode: an over-cap override is invalid and hints the cap", async () => {
+    const wrapper = mount(CreateReturn, { global: { stubs: { "ion-page": false } } });
+    (wrapper.vm as any).orderId = "DEMO-1001";
+    await (wrapper.vm as any).lookupOrder();
+    await flushPromises();
+    (wrapper.vm as any).appeasementEnabled = true;
+    (wrapper.vm as any).setAppeasementMode("items");
+    (wrapper.vm as any).setAppeasementQty("00001", 1);
+    (wrapper.vm as any).appeasementReasonId = "APPEASE_GOODWILL";
+    // keptValue for the full order = 2*19.99 + 1*49 = 88.98; an override above that is invalid.
+    (wrapper.vm as any).onAppeasementAmountInput(9999);
+    await flushPromises();
+    expect((wrapper.vm as any).appeasementValid).toBe(false);
+    expect((wrapper.vm as any).appeasementHint).toContain("kept-item value");
+  });
+
+  it("items mode: no picked line blocks submit with a 'pick' hint", async () => {
+    const wrapper = mount(CreateReturn, { global: { stubs: { "ion-page": false } } });
+    (wrapper.vm as any).orderId = "DEMO-1001";
+    await (wrapper.vm as any).lookupOrder();
+    await flushPromises();
+    (wrapper.vm as any).appeasementEnabled = true;
+    (wrapper.vm as any).setAppeasementMode("items");
+    (wrapper.vm as any).appeasementReasonId = "APPEASE_GOODWILL";
+    await flushPromises();
+    expect((wrapper.vm as any).appeasementValid).toBe(false);
+    expect((wrapper.vm as any).appeasementHint).toContain("Pick at least one lost item");
+  });
 });

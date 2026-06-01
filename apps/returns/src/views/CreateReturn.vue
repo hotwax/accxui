@@ -82,10 +82,35 @@
               <p class="muted">{{ translate("A full return already refunds this order — appeasements are for orders with kept items.") }}</p>
             </ion-card-content>
             <ion-card-content v-else-if="appeasementEnabled">
+              <ion-segment data-testid="create-appeasement-mode" :value="appeasementMode"
+                @ionChange="setAppeasementMode($event.detail.value)">
+                <ion-segment-button value="amount" data-testid="create-appeasement-mode-amount">
+                  <ion-label>{{ translate("Refund an amount") }}</ion-label>
+                </ion-segment-button>
+                <ion-segment-button value="items" data-testid="create-appeasement-mode-items">
+                  <ion-label>{{ translate("Refund specific items") }}</ion-label>
+                </ion-segment-button>
+              </ion-segment>
+
+              <ion-list v-if="appeasementMode === 'items'" data-testid="create-appeasement-items">
+                <ion-item v-for="line in order.items" :key="line.orderItemSeqId" :disabled="line.returnableQty === 0">
+                  <ion-label>
+                    <h2>{{ line.productName || line.sku || line.productId }}</h2>
+                    <p>{{ translate("Returnable") }}: {{ line.returnableQty }}</p>
+                  </ion-label>
+                  <ion-select :placeholder="translate('Quantity')" slot="end" style="min-width: 90px"
+                    :value="appeasementSelections[line.orderItemSeqId]?.qty ?? 0"
+                    @ionChange="setAppeasementQty(line.orderItemSeqId, $event.detail.value)">
+                    <ion-select-option v-for="n in line.returnableQty + 1" :key="n - 1" :value="n - 1">{{ n - 1 }}</ion-select-option>
+                  </ion-select>
+                </ion-item>
+              </ion-list>
+
               <ion-item>
                 <ion-input data-testid="create-appeasement-amount" type="number" min="0"
-                  :label="translate('Refund amount')" label-placement="stacked"
-                  :value="appeasementAmount" @ionInput="appeasementAmount = Number($event.target.value ?? 0)" />
+                  :label="appeasementMode === 'items' ? translate('Refund amount (override)') : translate('Refund amount')"
+                  label-placement="stacked"
+                  :value="appeasementAmount" @ionInput="onAppeasementAmountInput(Number($event.target.value ?? 0))" />
               </ion-item>
               <ion-item>
                 <ion-select data-testid="create-appeasement-reason" :placeholder="translate('Reason')"
@@ -119,8 +144,8 @@ import router from "@/router";
 import { commonUtil, emitter, translate } from "@common";
 import {
   IonBackButton, IonButton, IonCard, IonCardContent, IonCardHeader, IonCardTitle, IonContent, IonFab,
-  IonFabButton, IonHeader, IonIcon, IonInput, IonItem, IonLabel, IonList, IonPage, IonSelect,
-  IonSelectOption, IonTextarea, IonTitle, IonToggle, IonToolbar,
+  IonFabButton, IonHeader, IonIcon, IonInput, IonItem, IonLabel, IonList, IonPage, IonSegment,
+  IonSegmentButton, IonSelect, IonSelectOption, IonTextarea, IonTitle, IonToggle, IonToolbar,
 } from "@ionic/vue";
 import { bagCheckOutline, checkmarkDoneOutline } from "ionicons/icons";
 import { useReturnsStore } from "@/store/returnsStore";
@@ -139,6 +164,10 @@ const appeasementEnabled = ref(false);
 const appeasementAmount = ref<number | null>(null);
 const appeasementReasonId = ref<string>("");
 const appeasementNote = ref<string>("");
+const appeasementMode = ref<"amount" | "items">("amount");
+const appeasementSelections = reactive<Record<string, { qty: number }>>({});
+// Did the operator type an explicit override? While false, the amount field mirrors the picked-line total.
+const appeasementAmountTouched = ref(false);
 
 const hasReturnable = computed(() => !!order.value?.items.some((i) => i.returnableQty > 0));
 // Merchandise value of returnable units NOT selected for return. > 0 means the customer keeps something.
@@ -150,20 +179,50 @@ const keptValue = computed(() => {
   }, 0);
 });
 const hasKeptItems = computed(() => keptValue.value > 0);
+const appeasementItemsTotal = computed(() =>
+  Object.entries(appeasementSelections).reduce((sum, [seqId, s]) => {
+    const line = order.value?.items.find((i) => i.orderItemSeqId === seqId);
+    return sum + (line ? line.unitPrice * s.qty : 0);
+  }, 0));
+const pickedAppeasementItems = computed(() =>
+  Object.entries(appeasementSelections)
+    .filter(([, s]) => s.qty > 0)
+    .map(([orderItemSeqId, s]) => ({ orderItemSeqId, quantity: s.qty })));
+// The refund total in effect: the override (once touched) else the auto picked-line total.
+const appeasementEffectiveTotal = computed(() =>
+  appeasementMode.value === "items" && !appeasementAmountTouched.value
+    ? appeasementItemsTotal.value
+    : Number(appeasementAmount.value));
 // A partially-filled or out-of-range appeasement is invalid and must block submit.
 const appeasementValid = computed(() => {
   if (!appeasementEnabled.value) return true;
+  if (!hasKeptItems.value || !appeasementReasonId.value) return false;
+  if (appeasementMode.value === "items") {
+    const total = appeasementEffectiveTotal.value;
+    return pickedAppeasementItems.value.length > 0 && total > 0 && total <= keptValue.value;
+  }
   const amt = Number(appeasementAmount.value);
-  return hasKeptItems.value && amt > 0 && amt <= keptValue.value && !!appeasementReasonId.value;
+  return amt > 0 && amt <= keptValue.value;
 });
 // The single, specific reason the appeasement can't be submitted yet (drives the inline message).
 // Empty string = nothing to flag. Only one cause is surfaced at a time so a valid amount never reads
 // as an amount error when the real gap is a missing reason.
 const appeasementHint = computed(() => {
-  if (!appeasementEnabled.value || appeasementAmount.value === null || appeasementValid.value) return "";
+  if (!appeasementEnabled.value || appeasementValid.value) return "";
+  const cap = `${order.value?.currencyUomId ?? ""} ${keptValue.value.toFixed(2)}`.trim();
+  if (appeasementMode.value === "items") {
+    if (!pickedAppeasementItems.value.length) return translate("Pick at least one lost item.");
+    if (appeasementEffectiveTotal.value > keptValue.value) {
+      return `${translate("Refund can't exceed the kept-item value of")} ${cap}.`;
+    }
+    if (!appeasementReasons.value.length) {
+      return translate("Appeasement reasons couldn't be loaded — reload the order and try again.");
+    }
+    return translate("Choose a reason for the appeasement.");
+  }
+  if (appeasementAmount.value === null) return "";
   const amt = Number(appeasementAmount.value);
   if (!(amt > 0 && amt <= keptValue.value)) {
-    const cap = `${order.value?.currencyUomId ?? ""} ${keptValue.value.toFixed(2)}`.trim();
     return `${translate("Enter a refund amount between 0 and")} ${cap}.`;
   }
   if (!appeasementReasons.value.length) {
@@ -176,6 +235,22 @@ const appeasementHint = computed(() => {
 watch(hasKeptItems, (has) => {
   if (!has) appeasementEnabled.value = false;
 });
+// Mirror the amount field to the auto picked-line total while the operator hasn't overridden it.
+watch([appeasementItemsTotal, appeasementMode], ([total, mode]) => {
+  if (mode === "items" && !appeasementAmountTouched.value) appeasementAmount.value = total as number;
+});
+function setAppeasementMode(mode: "amount" | "items") {
+  appeasementMode.value = mode;
+  appeasementAmountTouched.value = false;
+  appeasementAmount.value = mode === "items" ? appeasementItemsTotal.value : null;
+}
+function setAppeasementQty(seqId: string, qty: number) {
+  appeasementSelections[seqId] = { qty };
+}
+function onAppeasementAmountInput(v: number) {
+  appeasementAmount.value = v;
+  if (appeasementMode.value === "items") appeasementAmountTouched.value = true;
+}
 const hasItemsSelected = computed(() =>
   Object.values(selections).some((s) => s.qty > 0 && s.returnReasonId)
 );
@@ -220,10 +295,15 @@ async function submit(): Promise<string | undefined> {
     });
   const appeasement = appeasementEnabled.value && appeasementValid.value
     ? {
-        amount: Number(appeasementAmount.value),
         currencyUomId: order.value.currencyUomId,
         reasonId: appeasementReasonId.value,
         ...(appeasementNote.value.trim() ? { note: appeasementNote.value.trim() } : {}),
+        ...(appeasementMode.value === "items"
+          ? {
+              items: pickedAppeasementItems.value,
+              ...(appeasementAmountTouched.value ? { amount: Number(appeasementAmount.value) } : {}),
+            }
+          : { amount: Number(appeasementAmount.value) }),
       }
     : undefined;
   // Nothing to submit: no returned items and no valid appeasement.
@@ -250,6 +330,9 @@ defineExpose({
   orderId, order, selections, lookupOrder, submit,
   appeasementEnabled, appeasementAmount, appeasementReasonId, appeasementNote, appeasementReasons,
   keptValue, hasKeptItems, appeasementValid, appeasementHint, canSubmit,
+  appeasementMode, appeasementSelections, appeasementAmountTouched,
+  setAppeasementMode, setAppeasementQty, onAppeasementAmountInput,
+  appeasementItemsTotal, pickedAppeasementItems, appeasementEffectiveTotal,
 });
 </script>
 
