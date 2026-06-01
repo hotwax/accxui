@@ -1,5 +1,7 @@
 import { translate } from "@common";
-import type { ReturnOrigin, SyncState } from "@/types/returns";
+import type { ReturnOrigin, ShopifySync, SyncState } from "@/types/returns";
+
+export type { ShopifySync }; // re-export so adapters can keep importing it from here
 
 export interface Identification {
   returnIdentificationTypeId: string;
@@ -8,12 +10,6 @@ export interface Identification {
 
 export function resolveOrigin(identifications: Identification[]): ReturnOrigin {
   return identifications.some((i) => i.returnIdentificationTypeId === "SHOPIFY_RTN_ID") ? "shopify" : "pwa";
-}
-
-/** The backend `shopifySync` map on a return detail (null when there is no Shopify state). */
-export interface ShopifySync {
-  shopifyReturnId?: string | null;
-  pushStatusId?: string | null; // PUSH_OK | PUSH_PENDING | PUSH_FAILED | null
 }
 
 /** Map a SyncState to an Ionic color token. */
@@ -27,15 +23,17 @@ export function syncLabel(s: SyncState): string {
 }
 
 /**
- * Collapse the backend `shopifySync` map into the PWA's SyncState.
- * - PUSH_OK            → synced
- * - PUSH_PENDING       → pending (outbound push in flight)
- * - PUSH_FAILED        → failed
- * - no push status but a Shopify return id present (inbound-origin) → synced
- * - null / no id       → not_synced (OMS-only return awaiting a push)
+ * Collapse the backend `shopifySync` object into the PWA's SyncState.
+ * - null                → not_synced (never pushed; also the state on create)
+ * - synced === true     → synced (AUTHORITATIVE — stays synced even after a Shopify-side cancel)
+ * - PUSH_PENDING        → pending (outbound push in flight)
+ * - PUSH_FAILED         → failed
+ * - PUSH_OK             → synced
+ * - else, has a Shopify return id → synced; otherwise not_synced
  */
 export function resolveShopifySyncState(shopifySync: ShopifySync | null | undefined): SyncState {
   if (!shopifySync) return "not_synced";
+  if (shopifySync.synced === true) return "synced";
   switch (shopifySync.pushStatusId) {
     case "PUSH_OK":
       return "synced";

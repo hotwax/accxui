@@ -68,8 +68,19 @@ describe("returnsStore CRUD (stub adapter)", () => {
   it("cancel transitions an approved return -> cancelled", async () => {
     const { store, returnId } = await createRequested();
     await store.approveReturn(returnId, { intervalMs: 0, maxAttempts: 5 });
-    await store.cancelReturn(returnId);
+    await store.cancelReturn(returnId, { intervalMs: 0, maxAttempts: 5 });
     expect(store.current?.statusId).toBe("RETURN_CANCELLED");
+  });
+
+  it("cancelling a synced return stays synced with Shopify status CANCELED", async () => {
+    const { store, returnId } = await createRequested();
+    await store.approveReturn(returnId, { intervalMs: 0, maxAttempts: 5 });
+    expect(store.current?.sync.shopify).toBe("synced");
+    await store.cancelReturn(returnId, { intervalMs: 0, maxAttempts: 5 });
+    expect(store.current?.statusId).toBe("RETURN_CANCELLED");
+    // synced is authoritative — the return still exists in Shopify, just cancelled there.
+    expect(store.current?.sync.shopify).toBe("synced");
+    expect(store.current?.shopifySync?.returnStatusId).toBe("CANCELED");
   });
 
   it("rejecting a non-requested return throws (guard)", async () => {

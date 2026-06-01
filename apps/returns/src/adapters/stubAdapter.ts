@@ -45,6 +45,7 @@ function seedShopifyReturn(): StubReturn {
       { statusId: "RETURN_APPROVED", statusDate: "2026-05-28T10:05:00Z" },
     ],
     externalIds: { shopify: "gid://shopify/Return/555" },
+    shopifySync: { synced: true, shopifyReturnId: "gid://shopify/Return/555", pushStatusId: "PUSH_OK", returnStatusId: "OPEN" },
     pushAttempted: false,
     pollsUntilSynced: 0,
   };
@@ -90,6 +91,7 @@ export const stubAdapter: ReturnsService = {
       })),
       statuses: [{ statusId: "RETURN_REQUESTED", statusDate: now }],
       externalIds: { shopify: null },
+      shopifySync: null, // no push on create
       pushAttempted: false, pollsUntilSynced: 0,
     });
     return { returnId };
@@ -104,6 +106,7 @@ export const stubAdapter: ReturnsService = {
     r.pushAttempted = true;
     r.pollsUntilSynced = 1;
     r.sync = { shopify: "pending" };
+    r.shopifySync = { synced: false, pushStatusId: "PUSH_PENDING" };
   },
   async rejectReturn(returnId) {
     const r = store.get(returnId);
@@ -118,6 +121,8 @@ export const stubAdapter: ReturnsService = {
     if (!["RETURN_REQUESTED", "RETURN_APPROVED"].includes(r.statusId)) throw new Error("Return cannot be cancelled");
     r.statusId = "RETURN_CANCELLED";
     r.statuses = [...r.statuses, { statusId: "RETURN_CANCELLED", statusDate: "2026-05-29T12:05:00Z" }];
+    // A return already synced to Shopify stays synced after cancel; the Shopify-side status becomes CANCELED.
+    if (r.shopifySync?.synced) r.shopifySync = { ...r.shopifySync, returnStatusId: "CANCELED" };
   },
   async getOrderForReturn(orderId) {
     return { ...ORDER, orderId };
@@ -131,6 +136,7 @@ export const stubAdapter: ReturnsService = {
     r.pushAttempted = true;
     r.pollsUntilSynced = 1; // one poll shows "pending", the next shows "synced"
     r.sync = { shopify: "pending" };
+    r.shopifySync = { synced: false, pushStatusId: "PUSH_PENDING" };
     return "pushed";
   },
   async getSyncStatus(returnId): Promise<Record<SyncTarget, SyncState>> {
@@ -140,9 +146,11 @@ export const stubAdapter: ReturnsService = {
       if (r.pollsUntilSynced > 0) {
         r.pollsUntilSynced -= 1;
         r.sync = { shopify: "pending" };
+        r.shopifySync = { synced: false, pushStatusId: "PUSH_PENDING" };
       } else {
         r.sync = { shopify: "synced" };
         r.externalIds = { shopify: "gid://shopify/Return/999" };
+        r.shopifySync = { synced: true, shopifyReturnId: "gid://shopify/Return/999", pushStatusId: "PUSH_OK", returnStatusId: "OPEN" };
       }
     }
     return r.sync;

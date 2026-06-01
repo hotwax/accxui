@@ -42,7 +42,7 @@
                 </ion-item>
               </ion-card>
 
-              <ion-card v-if="canApprove || canCancel">
+              <ion-card v-if="canCancel">
                 <ion-card-header>
                   <ion-card-title>{{ translate("Approval") }}</ion-card-title>
                 </ion-card-header>
@@ -56,7 +56,7 @@
                       {{ translate("Reject") }}
                     </ion-button>
                   </template>
-                  <ion-button v-else-if="canCancel" expand="block" color="medium" fill="outline" :disabled="busy" @click="cancel" data-testid="detail-cancel-btn">
+                  <ion-button expand="block" color="medium" fill="outline" :disabled="busy" @click="cancel" data-testid="detail-cancel-btn">
                     {{ translate("Cancel return") }}
                   </ion-button>
                 </ion-card-content>
@@ -72,11 +72,18 @@
                     <ion-label>{{ syncLabel(r.sync.shopify) }}</ion-label>
                   </ion-chip>
                   <p v-if="r.externalIds.shopify">{{ translate("Shopify return ID") }}: {{ r.externalIds.shopify }}</p>
-                  <p v-if="canApprove" class="muted">{{ translate("Syncs to Shopify once approved.") }}</p>
 
-                  <ion-button v-if="r.sync.shopify === 'failed'" expand="block" color="danger" :disabled="busy" @click="push" data-testid="detail-retry-btn">
-                    {{ translate("Retry") }}
-                  </ion-button>
+                  <p v-if="cancelledInShopify" class="muted">
+                    {{ translate("Cancelled in OMS — still synced to Shopify") }}<template v-if="r.shopifySync?.returnStatusId"> · {{ r.shopifySync.returnStatusId }}</template>
+                  </p>
+                  <p v-else-if="canApprove" class="muted">{{ translate("Syncs to Shopify once approved.") }}</p>
+
+                  <template v-if="r.sync.shopify === 'failed'">
+                    <p v-if="r.shopifySync?.pushErrorMessage" style="color: var(--ion-color-danger); white-space: pre-wrap">{{ r.shopifySync.pushErrorMessage }}</p>
+                    <ion-button expand="block" color="danger" :disabled="busy" @click="push" data-testid="detail-retry-btn">
+                      {{ translate("Retry") }}
+                    </ion-button>
+                  </template>
                 </ion-card-content>
               </ion-card>
             </div>
@@ -123,8 +130,11 @@ const loading = ref(false);
 const r = computed(() => store.current);
 // True once the loaded return matches this route (store.current may briefly hold a previously-viewed return).
 const loaded = computed(() => r.value?.returnId === props.returnId);
+// Requested → Approve + Reject (+ Cancel). Approved → Cancel only. Terminal statuses → no actions.
 const canApprove = computed(() => r.value?.statusId === "RETURN_REQUESTED");
-const canCancel = computed(() => r.value?.statusId === "RETURN_APPROVED");
+const canCancel = computed(() => r.value?.statusId === "RETURN_REQUESTED" || r.value?.statusId === "RETURN_APPROVED");
+// A return cancelled in the OMS but still linked in Shopify (synced stays true; Shopify status → CANCELED).
+const cancelledInShopify = computed(() => r.value?.statusId === "RETURN_CANCELLED" && r.value?.sync.shopify === "synced");
 
 // Run a lifecycle action with the global loader + error handling.
 async function runAction(message: string, action: () => Promise<unknown>, failMessage: string) {

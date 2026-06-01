@@ -65,9 +65,19 @@ export const useReturnsStore = defineStore("returns", {
       await getReturnsService().rejectReturn(returnId);
       await this.fetchReturn(returnId);
     },
-    async cancelReturn(returnId: string) {
+    async cancelReturn(returnId: string, opts: { intervalMs?: number; maxAttempts?: number } = {}) {
       await getReturnsService().cancelReturn(returnId);
       await this.fetchReturn(returnId);
+      // A synced return is also cancelled in Shopify asynchronously — poll briefly for returnStatusId.
+      if (this.current?.shopifySync?.synced && this.current.shopifySync.returnStatusId !== "CANCELED") {
+        const intervalMs = opts.intervalMs ?? 3000;
+        const maxAttempts = opts.maxAttempts ?? 5;
+        for (let attempt = 0; attempt < maxAttempts; attempt++) {
+          await sleep(intervalMs);
+          await this.fetchReturn(returnId);
+          if (this.current?.shopifySync?.returnStatusId === "CANCELED") break;
+        }
+      }
     },
     async loadOrder(orderId: string) {
       return getReturnsService().getOrderForReturn(orderId);

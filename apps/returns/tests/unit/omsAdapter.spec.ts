@@ -28,6 +28,30 @@ describe("mapReturnDetail", () => {
     expect(d).toMatchObject({ origin: "pwa", sync: { shopify: "failed" }, externalIds: { shopify: null } });
   });
 
+  it("treats shopifySync.synced === true as authoritative (synced even without PUSH_OK)", () => {
+    const d = mapReturnDetail({
+      returnDetail: { returnId: "10048", statusId: "RETURN_CANCELLED", entryDate: "x" },
+      items: [{ orderItemSeqId: "00001", productId: "P1", returnQuantity: 1, returnReasonId: "UNWANTED" }],
+      statusHistory: [], identifications: [],
+      // Cancelled in OMS but still linked in Shopify: synced stays true, Shopify status CANCELED.
+      shopifySync: { synced: true, shopifyReturnId: "gid://shopify/Return/77", returnStatusId: "CANCELED" },
+    });
+    expect(d.sync.shopify).toBe("synced");
+    expect(d.shopifySync?.returnStatusId).toBe("CANCELED");
+    expect(d.externalIds.shopify).toBe("gid://shopify/Return/77");
+  });
+
+  it("carries shopifySync.pushErrorMessage through for the failed-state UI", () => {
+    const d = mapReturnDetail({
+      returnDetail: { returnId: "10049", statusId: "RETURN_APPROVED", entryDate: "x" },
+      items: [{ orderItemSeqId: "00001", productId: "P1", returnQuantity: 1, returnReasonId: "UNWANTED" }],
+      statusHistory: [], identifications: [],
+      shopifySync: { synced: false, pushStatusId: "PUSH_FAILED", pushErrorMessage: "Shopify rejected: order archived" },
+    });
+    expect(d.sync.shopify).toBe("failed");
+    expect(d.shopifySync?.pushErrorMessage).toBe("Shopify rejected: order archived");
+  });
+
   it("maps a null shopifySync (Phase A / OMS-only) to not_synced", () => {
     const d = mapReturnDetail({
       returnDetail: { returnId: "10044", statusId: "RETURN_REQUESTED", entryDate: "x" },

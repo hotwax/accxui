@@ -46,6 +46,8 @@ export function mapReturnDetail(raw: RawReturnDetail): ReturnDetail {
     entryDate: String(rd.entryDate),
     origin,
     sync: { shopify },
+    // Carry the raw object so the view can surface pushErrorMessage + Shopify-side returnStatusId.
+    shopifySync: raw.shopifySync ?? null,
     items: items.map((i) => ({
       orderItemSeqId: i.orderItemSeqId,
       productId: i.productId ?? "",
