@@ -49,29 +49,27 @@
             <p>{{ translate("Nothing on this order can be returned") }}</p>
           </div>
 
-          <template v-else>
-            <div class="list-item" v-for="line in order.items" :key="line.orderItemSeqId">
-              <ion-item lines="none" :disabled="line.returnableQty === 0">
-                <ion-label>
-                  <h2>{{ line.productName || line.sku || line.productId }}</h2>
-                  <p v-if="line.sku" style="color: var(--ion-color-medium)">{{ translate("SKU") }}: {{ line.sku }}</p>
-                  <p>{{ translate("Returnable") }}: {{ line.returnableQty }}</p>
-                </ion-label>
-                <ion-select
-                  :placeholder="translate('Quantity')" slot="end" style="min-width: 90px"
-                  :value="selections[line.orderItemSeqId]?.qty ?? 0"
-                  @ionChange="setQty(line.orderItemSeqId, $event.detail.value)">
-                  <ion-select-option v-for="n in line.returnableQty + 1" :key="n - 1" :value="n - 1">{{ n - 1 }}</ion-select-option>
-                </ion-select>
-                <ion-select
-                  :placeholder="translate('Reason')" slot="end" style="min-width: 140px"
-                  :value="selections[line.orderItemSeqId]?.returnReasonId"
-                  @ionChange="setReason(line.orderItemSeqId, $event.detail.value)">
-                  <ion-select-option v-for="r in reasons" :key="r.returnReasonId" :value="r.returnReasonId">{{ r.description }}</ion-select-option>
-                </ion-select>
-              </ion-item>
-            </div>
-          </template>
+          <ion-list v-else>
+            <ion-item v-for="line in order.items" :key="line.orderItemSeqId" :disabled="line.returnableQty === 0">
+              <ion-label>
+                <h2>{{ line.productName || line.sku || line.productId }}</h2>
+                <p v-if="line.sku" class="muted">{{ translate("SKU") }}: {{ line.sku }}</p>
+                <p>{{ translate("Returnable") }}: {{ line.returnableQty }}</p>
+              </ion-label>
+              <ion-select
+                :placeholder="translate('Quantity')" slot="end" style="min-width: 90px"
+                :value="selections[line.orderItemSeqId]?.qty ?? 0"
+                @ionChange="setQty(line.orderItemSeqId, $event.detail.value)">
+                <ion-select-option v-for="n in line.returnableQty + 1" :key="n - 1" :value="n - 1">{{ n - 1 }}</ion-select-option>
+              </ion-select>
+              <ion-select
+                :placeholder="translate('Reason')" slot="end" style="min-width: 140px"
+                :value="selections[line.orderItemSeqId]?.returnReasonId"
+                @ionChange="setReason(line.orderItemSeqId, $event.detail.value)">
+                <ion-select-option v-for="r in reasons" :key="r.returnReasonId" :value="r.returnReasonId">{{ r.description }}</ion-select-option>
+              </ion-select>
+            </ion-item>
+          </ion-list>
         </main>
       </div>
 
@@ -90,7 +88,7 @@ import router from "@/router";
 import { emitter, translate } from "@common";
 import {
   IonBackButton, IonButton, IonCard, IonCardHeader, IonCardTitle, IonContent, IonFab,
-  IonFabButton, IonHeader, IonIcon, IonInput, IonItem, IonLabel, IonPage, IonSelect,
+  IonFabButton, IonHeader, IonIcon, IonInput, IonItem, IonLabel, IonList, IonPage, IonSelect,
   IonSelectOption, IonTitle, IonToolbar,
 } from "@ionic/vue";
 import { bagCheckOutline, checkmarkDoneOutline } from "ionicons/icons";
@@ -182,11 +180,9 @@ defineExpose({ orderId, order, selections, lookupOrder, submit });
   display: grid;
   grid-template-rows: auto auto 1fr;
 }
-.list-item {
-  border-bottom: var(--border-medium);
-}
-.list-item > ion-item {
-  width: 100%;
+.muted {
+  color: var(--ion-color-medium);
+  font-size: 0.8em;
 }
 @media (min-width: 991px) {
   .find {

@@ -66,17 +66,15 @@
 
           <hr />
 
-          <section>
-            <div class="list-item" v-for="it in r.items" :key="it.orderItemSeqId">
-              <ion-item lines="none">
-                <ion-label>
-                  <h2>{{ it.productName || it.sku || it.productId }}</h2>
-                  <p>{{ translate("Quantity") }}: {{ it.returnQuantity }} · {{ translate(formatReason(it.returnReasonId, it.returnReasonDesc)) }}</p>
-                  <p v-if="it.sku" class="muted">{{ translate("SKU") }}: {{ it.sku }}</p>
-                </ion-label>
-              </ion-item>
-            </div>
-          </section>
+          <ion-list>
+            <ion-item v-for="it in r.items" :key="it.orderItemSeqId" lines="full">
+              <ion-label>
+                <h2>{{ it.productName || it.sku || it.productId }}</h2>
+                <p>{{ translate("Quantity") }}: {{ it.returnQuantity }} · {{ translate(formatReason(it.returnReasonId, it.returnReasonDesc)) }}</p>
+                <p v-if="it.sku" class="muted">{{ translate("SKU") }}: {{ it.sku }}</p>
+              </ion-label>
+            </ion-item>
+          </ion-list>
         </template>
       </main>
     </ion-content>
@@ -88,7 +86,7 @@ import { computed, ref } from "vue";
 import { emitter, translate } from "@common";
 import {
   IonBackButton, IonButton, IonCard, IonCardContent, IonCardHeader, IonCardTitle, IonChip,
-  IonContent, IonHeader, IonIcon, IonItem, IonLabel, IonPage, IonSpinner, IonTitle, IonToolbar,
+  IonContent, IonHeader, IonIcon, IonItem, IonLabel, IonList, IonPage, IonSpinner, IonTitle, IonToolbar,
   onIonViewWillEnter,
 } from "@ionic/vue";
 import { receiptOutline } from "ionicons/icons";
@@ -154,12 +152,6 @@ onIonViewWillEnter(async () => {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
   align-items: start;
-}
-.list-item {
-  border-bottom: var(--border-medium);
-}
-.list-item > ion-item {
-  width: 100%;
 }
 hr {
   border-top: 1px solid var(--border-medium);
