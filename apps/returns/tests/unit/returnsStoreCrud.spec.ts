@@ -4,6 +4,7 @@ import { setActivePinia, createPinia } from "pinia";
 vi.stubEnv("VITE_RETURNS_BACKEND", "stub");
 
 import { useReturnsStore } from "@/store/returnsStore";
+import { getReturnsService } from "@/services/ReturnsService";
 import { __resetStub } from "@/adapters/stubAdapter";
 
 describe("returnsStore CRUD (stub adapter)", () => {
@@ -110,5 +111,50 @@ describe("returnsStore CRUD (stub adapter)", () => {
   it("completing a non-approved/received return throws (guard)", async () => {
     const { store, returnId } = await createRequested();
     await expect(store.completeReturn(returnId, { intervalMs: 0, maxAttempts: 5 })).rejects.toThrow();
+  });
+
+  it("submitting with an appeasement co-creates a linked appeasement return", async () => {
+    const store = useReturnsStore();
+    const returnId = await store.submitReturn({
+      orderId: "DEMO-1001",
+      items: [{ orderItemSeqId: "00001", productId: "P1", returnQuantity: 1, returnReasonId: "RTN_NOT_WANT" }],
+      appeasement: { amount: 10, currencyUomId: "USD", reasonId: "APPEASE_GOODWILL", note: "sorry" },
+    });
+    expect(returnId).toBeTruthy();
+    await store.fetchReturns(0, 50);
+    const appeasementRow = store.returns.find((r) => r.type === "appeasement");
+    expect(appeasementRow).toBeTruthy();
+    // The widened service contract exposes the linked appeasement id directly.
+    const direct = await getReturnsService().createReturn({
+      orderId: "DEMO-1001",
+      items: [{ orderItemSeqId: "00001", productId: "P1", returnQuantity: 1, returnReasonId: "RTN_NOT_WANT" }],
+      appeasement: { amount: 10, currencyUomId: "USD", reasonId: "APPEASE_GOODWILL" },
+    });
+    expect(direct.appeasementReturnId).toBeTruthy();
+  });
+
+  it("blocks an appeasement above the kept-merchandise cap", async () => {
+    const store = useReturnsStore();
+    await expect(store.submitReturn({
+      orderId: "DEMO-1001",
+      items: [{ orderItemSeqId: "00001", productId: "P1", returnQuantity: 1, returnReasonId: "RTN_NOT_WANT" }],
+      // 9999 >> kept-merchandise value (~$49 after returning 1 unit), so the cap guard rejects it.
+      appeasement: { amount: 9999, currencyUomId: "USD", reasonId: "APPEASE_GOODWILL" },
+    })).rejects.toThrow();
+  });
+
+  it("approves an appeasement to synced via a Shopify refund", async () => {
+    const store = useReturnsStore();
+    await store.submitReturn({
+      orderId: "DEMO-1001",
+      items: [{ orderItemSeqId: "00001", productId: "P1", returnQuantity: 1, returnReasonId: "RTN_NOT_WANT" }],
+      appeasement: { amount: 10, currencyUomId: "USD", reasonId: "APPEASE_GOODWILL" },
+    });
+    await store.fetchReturns(0, 50);
+    const appeasementId = store.returns.find((r) => r.type === "appeasement")!.returnId;
+    await store.approveReturn(appeasementId, { intervalMs: 0, maxAttempts: 5 });
+    expect(store.current?.statusId).toBe("RETURN_APPROVED");
+    expect(store.current?.sync.shopify).toBe("synced");
+    expect(store.current?.shopifySync?.shopifyRefundId).toBeTruthy();
   });
 });
