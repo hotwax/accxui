@@ -23,6 +23,7 @@
                 <ion-icon slot="start" :icon="receiptOutline" />
                 <ion-label>
                   <p class="overline">{{ translate(formatStatus(r.statusId)) }}</p>
+                  <ion-badge v-if="isAppeasement" color="tertiary" data-testid="detail-appeasement-badge">{{ translate("Appeasement") }}</ion-badge>
                   <h1>{{ r.orderName || r.orderId || `#${returnId}` }}</h1>
                   <p>{{ translate("Requested") }}: {{ formatDate(r.entryDate) }}</p>
                 </ion-label>
@@ -40,6 +41,21 @@
                     <p v-if="r.orderDate" class="muted">{{ translate("Ordered") }}: {{ formatDate(r.orderDate) }}</p>
                   </ion-label>
                 </ion-item>
+              </ion-card>
+
+              <ion-card v-if="isAppeasement && r.appeasement">
+                <ion-card-header>
+                  <ion-card-title>{{ translate("Appeasement refund") }}</ion-card-title>
+                </ion-card-header>
+                <ion-card-content>
+                  <h2 data-testid="detail-appeasement-amount">{{ commonUtil.formatCurrency(r.appeasement.amount, r.appeasement.currencyUomId) }}</h2>
+                  <p>{{ translate("Reason") }}: {{ translate(formatReason(r.appeasement.reasonId, r.appeasement.reasonDesc)) }}</p>
+                  <p v-if="r.appeasement.note" class="muted">{{ r.appeasement.note }}</p>
+                  <p v-if="r.appeasement.relatedReturnId">
+                    {{ translate("Related return") }}:
+                    <a @click.prevent="goToReturn(r.appeasement.relatedReturnId)" href="#" data-testid="detail-related-return">#{{ r.appeasement.relatedReturnId }}</a>
+                  </p>
+                </ion-card-content>
               </ion-card>
 
               <ion-card v-if="canApprove || canComplete || canCancel">
@@ -115,12 +131,20 @@
 
           <hr />
 
-          <ion-list>
+          <ion-list v-if="!isAppeasement">
             <ion-item v-for="it in r.items" :key="it.orderItemSeqId" lines="full">
               <ion-label>
                 <h2>{{ it.productName || it.sku || it.productId }}</h2>
                 <p>{{ translate("Quantity") }}: {{ it.returnQuantity }} · {{ translate(formatReason(it.returnReasonId, it.returnReasonDesc)) }}</p>
                 <p v-if="it.sku" class="muted">{{ translate("SKU") }}: {{ it.sku }}</p>
+              </ion-label>
+            </ion-item>
+          </ion-list>
+          <ion-list v-else>
+            <ion-item lines="full">
+              <ion-label>
+                <h2>{{ translate("Goodwill refund") }}</h2>
+                <p v-if="r.appeasement">{{ commonUtil.formatCurrency(r.appeasement.amount, r.appeasement.currencyUomId) }} · {{ translate(formatReason(r.appeasement.reasonId, r.appeasement.reasonDesc)) }}</p>
               </ion-label>
             </ion-item>
           </ion-list>
@@ -134,11 +158,12 @@
 import { computed, ref } from "vue";
 import { commonUtil, emitter, translate } from "@common";
 import {
-  IonBackButton, IonButton, IonCard, IonCardContent, IonCardHeader, IonCardTitle, IonChip,
+  IonBackButton, IonBadge, IonButton, IonCard, IonCardContent, IonCardHeader, IonCardTitle, IonChip,
   IonContent, IonHeader, IonIcon, IonItem, IonLabel, IonList, IonPage, IonSpinner, IonTitle, IonToolbar,
   alertController, onIonViewWillEnter,
 } from "@ionic/vue";
 import { receiptOutline } from "ionicons/icons";
+import router from "@/router";
 import { useReturnsStore } from "@/store/returnsStore";
 import { describeApiError } from "@/util/errorMessage";
 import { formatStatus, formatReason } from "@/util/labels";
@@ -163,6 +188,10 @@ const isCompleted = computed(() => r.value?.statusId === "RETURN_COMPLETED");
 const closeState = computed(() => (isCompleted.value ? resolveShopifyCloseState(r.value?.shopifySync) : null));
 // A return cancelled in the OMS but still linked in Shopify (synced stays true; Shopify status → CANCELED).
 const cancelledInShopify = computed(() => r.value?.statusId === "RETURN_CANCELLED" && r.value?.sync.shopify === "synced");
+const isAppeasement = computed(() => r.value?.type === "appeasement");
+// Open question: an approved appeasement still shows the generic Complete action + a "Completion"
+// card that reads "never synced to Shopify" (a refund has no shopifyReturnId). Per the spec, lifecycle
+// actions are intentionally left unchanged; revisit if the backend says appeasements aren't completable.
 
 // Run a lifecycle action with the global loader + error handling.
 async function runAction(message: string, action: () => Promise<unknown>, failMessage: string) {
@@ -216,6 +245,11 @@ async function complete() {
 // Re-run a failed Shopify completion (the OMS is already RETURN_COMPLETED).
 function retryComplete() {
   return runAction("Completing in Shopify", () => store.retryComplete(props.returnId), "Failed to retry completion");
+}
+
+// An appeasement links back to the standard return created alongside it.
+function goToReturn(id: string) {
+  router.push(`/return-detail/${id}`);
 }
 
 // Re-kick a failed Shopify push (approval already happened); the chip reflects the resulting state.
