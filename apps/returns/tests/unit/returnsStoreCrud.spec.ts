@@ -175,4 +175,20 @@ describe("returnsStore CRUD (stub adapter)", () => {
     expect(store.current?.shopifySync?.shopifyReturnId ?? null).toBeNull();
     expect(store.current?.shopifySync?.returnStatusId ?? null).toBeNull();
   });
+
+  it("submits a lost-in-shipment appeasement and reads back product lines", async () => {
+    const store = useReturnsStore();
+    const returnId = await store.submitReturn({
+      orderId: "DEMO-1001",
+      items: [],
+      appeasement: {
+        currencyUomId: "USD", reasonId: "APPEASE_GOODWILL",
+        items: [{ orderItemSeqId: "00001", quantity: 1 }],
+      },
+    });
+    const detail = await getReturnsService().getReturn(returnId);
+    expect(detail.type).toBe("appeasement");
+    expect(detail.items[0].productName).toBe("Classic Tee");
+    expect(detail.appeasement?.amount).toBeCloseTo(19.99, 2);
+  });
 });
