@@ -3,6 +3,7 @@ import { setActivePinia, createPinia } from "pinia";
 import { mount, flushPromises } from "@vue/test-utils";
 
 vi.stubEnv("VITE_RETURNS_BACKEND", "stub");
+vi.mock("@/router", () => ({ default: { push: () => {/* noop */} } }));
 vi.mock("@common", () => ({
   translate: (s: string) => s,
   emitter: { emit: () => {/* noop */} },
@@ -36,5 +37,48 @@ describe("ReturnDetail.vue (appeasement)", () => {
     expect(text).toContain("Appeasement");
     expect(text).toContain("USD 12.50");
     expect(text).toContain("Goodwill");
+    expect(text).toContain("sorry");        // note renders
+    expect(text).toContain("#30000");       // related-return link renders
+    expect(text).not.toContain("Quantity:"); // the returned-items list is absent for an appeasement
+  });
+
+  it("does not offer Complete for an approved appeasement (refund-only, nothing to close)", async () => {
+    const store = useReturnsStore();
+    store.current = {
+      ...appeasementDetail(), statusId: "RETURN_APPROVED",
+      sync: { shopify: "synced" },
+      shopifySync: { synced: true, shopifyRefundId: "gid://shopify/Refund/1", pushStatusId: "PUSH_OK" },
+    };
+    const wrapper = mount(ReturnDetail, { props: { returnId: "30001" }, global: { stubs: { "ion-page": false } } });
+    await flushPromises();
+    expect(wrapper.find('[data-testid="detail-complete-btn"]').exists()).toBe(false);
+  });
+
+  it("shows no misleading 'never synced' completion card for a completed appeasement", async () => {
+    const store = useReturnsStore();
+    store.current = {
+      ...appeasementDetail(), statusId: "RETURN_COMPLETED",
+      sync: { shopify: "synced" },
+      shopifySync: { synced: true, shopifyRefundId: "gid://shopify/Refund/1", pushStatusId: "PUSH_OK" },
+    };
+    const wrapper = mount(ReturnDetail, { props: { returnId: "30001" }, global: { stubs: { "ion-page": false } } });
+    await flushPromises();
+    expect(wrapper.find('[data-testid="detail-completion-chip"]').exists()).toBe(false);
+    expect(wrapper.text()).not.toContain("never synced to Shopify");
+  });
+
+  it("offers no approve / reject / cancel / complete actions on a completed appeasement", async () => {
+    const store = useReturnsStore();
+    store.current = {
+      ...appeasementDetail(), statusId: "RETURN_COMPLETED",
+      sync: { shopify: "synced" },
+      shopifySync: { synced: true, shopifyRefundId: "gid://shopify/Refund/1", pushStatusId: "PUSH_OK" },
+    };
+    const wrapper = mount(ReturnDetail, { props: { returnId: "30001" }, global: { stubs: { "ion-page": false } } });
+    await flushPromises();
+    expect(wrapper.find('[data-testid="detail-approve-btn"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="detail-reject-btn"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="detail-cancel-btn"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="detail-complete-btn"]').exists()).toBe(false);
   });
 });

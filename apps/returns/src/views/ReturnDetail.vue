@@ -53,7 +53,7 @@
                   <p v-if="r.appeasement.note" class="muted">{{ r.appeasement.note }}</p>
                   <p v-if="r.appeasement.relatedReturnId">
                     {{ translate("Related return") }}:
-                    <a @click.prevent="goToReturn(r.appeasement.relatedReturnId)" href="#" data-testid="detail-related-return">#{{ r.appeasement.relatedReturnId }}</a>
+                    <ion-button fill="clear" size="small" data-testid="detail-related-return" @click="goToReturn(r.appeasement.relatedReturnId)">#{{ r.appeasement.relatedReturnId }}</ion-button>
                   </p>
                 </ion-card-content>
               </ion-card>
@@ -179,19 +179,19 @@ const loading = ref(false);
 const r = computed(() => store.current);
 // True once the loaded return matches this route (store.current may briefly hold a previously-viewed return).
 const loaded = computed(() => r.value?.returnId === props.returnId);
-// Requested → Approve + Reject (+ Cancel). Approved → Complete + Cancel. Received → Complete. Terminal → none.
+const isAppeasement = computed(() => r.value?.type === "appeasement");
+// Requested → Approve + Reject (+ Cancel). Approved → Cancel (+ Complete for normal returns). Received →
+// Complete. Terminal → none. An appeasement is refund-only — the refund fires on approve and there is no
+// Shopify return to close, so it is NOT completable; its lifecycle ends at approved / rejected / cancelled.
 const canApprove = computed(() => r.value?.statusId === "RETURN_REQUESTED");
 const canCancel = computed(() => r.value?.statusId === "RETURN_REQUESTED" || r.value?.statusId === "RETURN_APPROVED");
-const canComplete = computed(() => r.value?.statusId === "RETURN_APPROVED" || r.value?.statusId === "RETURN_RECEIVED");
+const canComplete = computed(() => !isAppeasement.value && (r.value?.statusId === "RETURN_APPROVED" || r.value?.statusId === "RETURN_RECEIVED"));
 const isCompleted = computed(() => r.value?.statusId === "RETURN_COMPLETED");
-// Collapsed Shopify completion state — only meaningful once the OMS return is RETURN_COMPLETED.
-const closeState = computed(() => (isCompleted.value ? resolveShopifyCloseState(r.value?.shopifySync) : null));
+// Collapsed Shopify completion state — only meaningful for a normal return once it's RETURN_COMPLETED.
+// An appeasement has no Shopify return to close, so it has no completion state (the refund sync chip stands).
+const closeState = computed(() => (isCompleted.value && !isAppeasement.value ? resolveShopifyCloseState(r.value?.shopifySync) : null));
 // A return cancelled in the OMS but still linked in Shopify (synced stays true; Shopify status → CANCELED).
 const cancelledInShopify = computed(() => r.value?.statusId === "RETURN_CANCELLED" && r.value?.sync.shopify === "synced");
-const isAppeasement = computed(() => r.value?.type === "appeasement");
-// Open question: an approved appeasement still shows the generic Complete action + a "Completion"
-// card that reads "never synced to Shopify" (a refund has no shopifyReturnId). Per the spec, lifecycle
-// actions are intentionally left unchanged; revisit if the backend says appeasements aren't completable.
 
 // Run a lifecycle action with the global loader + error handling.
 async function runAction(message: string, action: () => Promise<unknown>, failMessage: string) {

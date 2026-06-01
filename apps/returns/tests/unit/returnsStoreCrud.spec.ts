@@ -143,7 +143,7 @@ describe("returnsStore CRUD (stub adapter)", () => {
     })).rejects.toThrow();
   });
 
-  it("approves an appeasement to synced via a Shopify refund", async () => {
+  it("approving an appeasement refunds and auto-completes it (approval IS completion)", async () => {
     const store = useReturnsStore();
     await store.submitReturn({
       orderId: "DEMO-1001",
@@ -153,8 +153,26 @@ describe("returnsStore CRUD (stub adapter)", () => {
     await store.fetchReturns(0, 50);
     const appeasementId = store.returns.find((r) => r.type === "appeasement")!.returnId;
     await store.approveReturn(appeasementId, { intervalMs: 0, maxAttempts: 5 });
-    expect(store.current?.statusId).toBe("RETURN_APPROVED");
     expect(store.current?.sync.shopify).toBe("synced");
     expect(store.current?.shopifySync?.shopifyRefundId).toBeTruthy();
+    // For an appeasement, approval is completion — it finalizes straight to RETURN_COMPLETED.
+    expect(store.current?.statusId).toBe("RETURN_COMPLETED");
+  });
+
+  it("cancels a still-requested appeasement without polling for a Shopify return status", async () => {
+    const store = useReturnsStore();
+    await store.submitReturn({
+      orderId: "DEMO-1001",
+      items: [{ orderItemSeqId: "00001", productId: "P1", returnQuantity: 1, returnReasonId: "RTN_NOT_WANT" }],
+      appeasement: { amount: 10, currencyUomId: "USD", reasonId: "APPEASE_GOODWILL" },
+    });
+    await store.fetchReturns(0, 50);
+    const appeasementId = store.returns.find((r) => r.type === "appeasement")!.returnId;
+    // Cancel before approval (an appeasement auto-completes on approve, so a synced appeasement is no
+    // longer cancellable). A requested appeasement is not synced, so no Shopify-return poll runs.
+    await store.cancelReturn(appeasementId, { intervalMs: 0, maxAttempts: 5 });
+    expect(store.current?.statusId).toBe("RETURN_CANCELLED");
+    expect(store.current?.shopifySync?.shopifyReturnId ?? null).toBeNull();
+    expect(store.current?.shopifySync?.returnStatusId ?? null).toBeNull();
   });
 });

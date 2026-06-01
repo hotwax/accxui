@@ -54,6 +54,21 @@ describe("stubAdapter", () => {
     expect(appeasement.sync.shopify).toBe("not_synced");
   });
 
+  it("creates a stand-alone appeasement (no standard return) when no items are returned", async () => {
+    const { returnId, appeasementReturnId } = await stubAdapter.createReturn({
+      orderId: "DEMO-1001",
+      items: [],
+      appeasement: { amount: 10, currencyUomId: "USD", reasonId: "APPEASE_GOODWILL" },
+    });
+    expect(appeasementReturnId).toBeTruthy();
+    // With no item return, navigation lands on the appeasement itself.
+    expect(returnId).toBe(appeasementReturnId);
+    const appeasement = await stubAdapter.getReturn(appeasementReturnId!);
+    expect(appeasement.type).toBe("appeasement");
+    // No linked standard return for a stand-alone appeasement.
+    expect(appeasement.appeasement?.relatedReturnId ?? null).toBeNull();
+  });
+
   it("rejects an appeasement amount above the kept-merchandise cap", async () => {
     // DEMO-1001 kept value when returning 1x00001 (unit 19.99): 1x19.99 + 1x49 = 68.99.
     await expect(stubAdapter.createReturn({
@@ -72,6 +87,12 @@ describe("stubAdapter", () => {
       ],
       appeasement: { amount: 5, currencyUomId: "USD", reasonId: "APPEASE_GOODWILL" },
     })).rejects.toThrow();
+  });
+
+  it("lists dedicated appeasement reasons (APPEASE_* codes)", async () => {
+    const reasons = await stubAdapter.listAppeasementReasons();
+    expect(reasons.length).toBeGreaterThan(0);
+    expect(reasons.every((r) => r.returnReasonId.startsWith("APPEASE_"))).toBe(true);
   });
 
   it("settles an approved appeasement to synced with a shopifyRefundId (not a return id)", async () => {

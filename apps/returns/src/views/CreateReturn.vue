@@ -91,16 +91,14 @@
                 <ion-select data-testid="create-appeasement-reason" :placeholder="translate('Reason')"
                   :label="translate('Reason')" label-placement="stacked"
                   :value="appeasementReasonId" @ionChange="appeasementReasonId = $event.detail.value">
-                  <ion-select-option v-for="rsn in reasons" :key="rsn.returnReasonId" :value="rsn.returnReasonId">{{ rsn.description }}</ion-select-option>
+                  <ion-select-option v-for="rsn in appeasementReasons" :key="rsn.returnReasonId" :value="rsn.returnReasonId">{{ rsn.description }}</ion-select-option>
                 </ion-select>
               </ion-item>
               <ion-item>
                 <ion-textarea data-testid="create-appeasement-note" :label="translate('Note (optional)')"
                   label-placement="stacked" :value="appeasementNote" @ionInput="appeasementNote = $event.target.value ?? ''" />
               </ion-item>
-              <p v-if="appeasementAmount !== null && !appeasementValid" class="error" role="alert">
-                {{ translate("Enter an amount between 0 and the kept-item value, and choose a reason.") }}
-              </p>
+              <p v-if="appeasementHint" class="error" role="alert">{{ appeasementHint }}</p>
             </ion-card-content>
           </ion-card>
         </main>
@@ -118,7 +116,7 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from "vue";
 import router from "@/router";
-import { emitter, translate } from "@common";
+import { commonUtil, emitter, translate } from "@common";
 import {
   IonBackButton, IonButton, IonCard, IonCardContent, IonCardHeader, IonCardTitle, IonContent, IonFab,
   IonFabButton, IonHeader, IonIcon, IonInput, IonItem, IonLabel, IonList, IonPage, IonSelect,
@@ -134,6 +132,7 @@ const store = useReturnsStore();
 const orderId = ref("");
 const order = ref<OrderForReturn | null>(null);
 const reasons = ref<ReturnReason[]>([]);
+const appeasementReasons = ref<ReturnReason[]>([]);
 const error = ref("");
 const selections = reactive<Record<string, { qty: number; returnReasonId?: string }>>({});
 const appeasementEnabled = ref(false);
@@ -157,6 +156,21 @@ const appeasementValid = computed(() => {
   const amt = Number(appeasementAmount.value);
   return hasKeptItems.value && amt > 0 && amt <= keptValue.value && !!appeasementReasonId.value;
 });
+// The single, specific reason the appeasement can't be submitted yet (drives the inline message).
+// Empty string = nothing to flag. Only one cause is surfaced at a time so a valid amount never reads
+// as an amount error when the real gap is a missing reason.
+const appeasementHint = computed(() => {
+  if (!appeasementEnabled.value || appeasementAmount.value === null || appeasementValid.value) return "";
+  const amt = Number(appeasementAmount.value);
+  if (!(amt > 0 && amt <= keptValue.value)) {
+    const cap = `${order.value?.currencyUomId ?? ""} ${keptValue.value.toFixed(2)}`.trim();
+    return `${translate("Enter a refund amount between 0 and")} ${cap}.`;
+  }
+  if (!appeasementReasons.value.length) {
+    return translate("Appeasement reasons couldn't be loaded — reload the order and try again.");
+  }
+  return translate("Choose a reason for the appeasement.");
+});
 // When the operator returns everything (nothing kept), the appeasement is no longer eligible —
 // turn it off so the toggle's state matches reality and no stale amount/reason lingers enabled.
 watch(hasKeptItems, (has) => {
@@ -165,7 +179,10 @@ watch(hasKeptItems, (has) => {
 const hasItemsSelected = computed(() =>
   Object.values(selections).some((s) => s.qty > 0 && s.returnReasonId)
 );
-const canSubmit = computed(() => hasItemsSelected.value && appeasementValid.value);
+// Submit needs at least one of: a standard return (selected items) OR an appeasement. A stand-alone
+// goodwill refund (customer keeps everything) is valid — the backend accepts an appeasement with no
+// accompanying item return.
+const canSubmit = computed(() => (hasItemsSelected.value || appeasementEnabled.value) && appeasementValid.value);
 
 async function lookupOrder() {
   error.value = "";
@@ -174,6 +191,13 @@ async function lookupOrder() {
   try {
     order.value = await store.loadOrder(orderId.value.trim());
     reasons.value = await store.loadReasons();
+    // Appeasement reasons are optional context — a failure (e.g. the endpoint isn't live yet) must not
+    // fail the whole lookup or block the standard return flow. The appeasement hint surfaces the gap.
+    try {
+      appeasementReasons.value = await store.loadAppeasementReasons();
+    } catch {
+      appeasementReasons.value = [];
+    }
   } catch (e) {
     error.value = describeApiError(e, translate("Order not found"));
   } finally {
@@ -194,35 +218,38 @@ async function submit(): Promise<string | undefined> {
       const line = order.value!.items.find((i) => i.orderItemSeqId === orderItemSeqId)!;
       return { orderItemSeqId, productId: line.productId, productName: line.productName, returnQuantity: s.qty, returnReasonId: s.returnReasonId! };
     });
-  if (!items.length) return;
+  const appeasement = appeasementEnabled.value && appeasementValid.value
+    ? {
+        amount: Number(appeasementAmount.value),
+        currencyUomId: order.value.currencyUomId,
+        reasonId: appeasementReasonId.value,
+        ...(appeasementNote.value.trim() ? { note: appeasementNote.value.trim() } : {}),
+      }
+    : undefined;
+  // Nothing to submit: no returned items and no valid appeasement.
+  if (!items.length && !appeasement) return;
   error.value = "";
   emitter.emit("presentLoader", { message: "Submitting return" });
+  let returnId: string | undefined;
   try {
-    const returnId = await store.submitReturn({
-      orderId: order.value.orderId,
-      items,
-      appeasement: appeasementEnabled.value
-        ? {
-            amount: Number(appeasementAmount.value),
-            currencyUomId: order.value.currencyUomId,
-            reasonId: appeasementReasonId.value,
-            ...(appeasementNote.value.trim() ? { note: appeasementNote.value.trim() } : {}),
-          }
-        : undefined,
-    });
-    router.push(`/return-detail/${returnId}`);
-    return returnId;
+    returnId = await store.submitReturn({ orderId: order.value.orderId, items, appeasement });
   } catch (e) {
     error.value = describeApiError(e, translate("Failed to create return"));
+    // Surface the failure regardless of scroll position — the inline error sits at the top of the page.
+    commonUtil.showToast(error.value);
   } finally {
     emitter.emit("dismissLoader");
   }
+  // Navigate only after the loader is dismissed — an active overlay swallows the Ionic route
+  // transition, leaving the URL changed but the page un-transitioned until a manual refresh.
+  if (returnId) router.push(`/return-detail/${returnId}`);
+  return returnId;
 }
 
 defineExpose({
   orderId, order, selections, lookupOrder, submit,
-  appeasementEnabled, appeasementAmount, appeasementReasonId, appeasementNote,
-  keptValue, hasKeptItems, appeasementValid, canSubmit,
+  appeasementEnabled, appeasementAmount, appeasementReasonId, appeasementNote, appeasementReasons,
+  keptValue, hasKeptItems, appeasementValid, appeasementHint, canSubmit,
 });
 </script>
 

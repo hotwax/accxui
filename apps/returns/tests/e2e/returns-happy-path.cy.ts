@@ -25,6 +25,30 @@ describe("Returns happy path (stub backend)", () => {
     cy.contains("Synced", { timeout: 15000 });
   });
 
+  it("creates a return with a goodwill appeasement", () => {
+    cy.visit("/create-return");
+    cy.get("ion-input[label='Order ID'] input").type("DEMO-1001");
+    cy.contains("ion-button", "Look up order").click();
+
+    // Return just one unit of the first line so the rest stays kept (enables the appeasement).
+    cy.contains("ion-item", "Classic Tee").within(() => {
+      cy.get("ion-select").first().click();
+    });
+    cy.get("ion-select-option").contains("1").click();
+    cy.contains("ion-item", "Classic Tee").find("ion-select").last().click();
+    cy.get("ion-select-option").first().click();
+
+    // Turn on the goodwill refund, set an amount, and pick a reason.
+    cy.get("[data-testid=create-appeasement-toggle]").click();
+    cy.get("[data-testid=create-appeasement-amount] input").type("10");
+    cy.get("[data-testid=create-appeasement-reason]").click();
+    cy.get("ion-select-option").first().click();
+
+    cy.get("[data-testid=create-submit-btn]").click();
+
+    cy.url().should("include", "/return-detail/");
+  });
+
   it("shows a Shopify-origin return in the list", () => {
     cy.visit("/tabs/returns");
     cy.contains("ion-badge", "From Shopify");

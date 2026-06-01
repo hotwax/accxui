@@ -62,13 +62,26 @@ export const useReturnsStore = defineStore("returns", {
     async approveReturn(returnId: string, opts: { intervalMs?: number; maxAttempts?: number } = {}) {
       await getReturnsService().approveReturn(returnId);
       await this.fetchReturn(returnId);
-      const sync = this.current?.sync.shopify;
-      if (sync === "synced") return;
-      // Not pending means the backend didn't start a push (still not_synced, or a prior attempt failed) → kick it.
-      if (sync === "not_synced" || sync === "failed") {
-        await getReturnsService().pushToTarget(returnId, "shopify");
+      const isAppeasement = this.current?.type === "appeasement";
+      let sync = this.current?.sync.shopify;
+      if (sync !== "synced") {
+        // Not pending means the backend didn't start a push (still not_synced, or a prior attempt failed) → kick it.
+        if (sync === "not_synced" || sync === "failed") {
+          await getReturnsService().pushToTarget(returnId, "shopify");
+        }
+        sync = await this.pollSync(returnId, "shopify", opts);
       }
-      return this.pollSync(returnId, "shopify", opts);
+      // For an appeasement, approval *is* completion: the refund is the terminal action, so once it has
+      // synced, finalize the OMS return to RETURN_COMPLETED. The refund already succeeded, so a failure
+      // to finalize must not surface as an approval error.
+      if (isAppeasement && sync === "synced") {
+        try {
+          await this.completeReturn(returnId, opts);
+        } catch (e) {
+          logger.error("auto-complete of approved appeasement failed", e);
+        }
+      }
+      return sync;
     },
     async rejectReturn(returnId: string) {
       await getReturnsService().rejectReturn(returnId);
@@ -77,8 +90,10 @@ export const useReturnsStore = defineStore("returns", {
     async cancelReturn(returnId: string, opts: { intervalMs?: number; maxAttempts?: number } = {}) {
       await getReturnsService().cancelReturn(returnId);
       await this.fetchReturn(returnId);
-      // A synced return is also cancelled in Shopify asynchronously — poll briefly for returnStatusId.
-      if (this.current?.shopifySync?.synced && this.current.shopifySync.returnStatusId !== "CANCELED") {
+      // A synced Shopify *return* is also cancelled in Shopify asynchronously — poll briefly for
+      // returnStatusId. A refund-only appeasement (shopifyRefundId, no shopifyReturnId) has no Shopify
+      // return to cancel, so skip the poll — its returnStatusId never arrives.
+      if (this.current?.shopifySync?.synced && this.current.shopifySync.shopifyReturnId && this.current.shopifySync.returnStatusId !== "CANCELED") {
         const intervalMs = opts.intervalMs ?? 3000;
         const maxAttempts = opts.maxAttempts ?? 5;
         for (let attempt = 0; attempt < maxAttempts; attempt++) {
@@ -118,6 +133,9 @@ export const useReturnsStore = defineStore("returns", {
     },
     async loadReasons() {
       return getReturnsService().listReturnReasons();
+    },
+    async loadAppeasementReasons() {
+      return getReturnsService().listAppeasementReasons();
     },
     /** Poll sync status until synced/failed or attempts exhausted (no push triggered). */
     async pollSync(returnId: string, target: SyncTarget, opts: { intervalMs?: number; maxAttempts?: number } = {}) {

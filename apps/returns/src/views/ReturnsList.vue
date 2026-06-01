@@ -80,6 +80,7 @@
                 </ion-label>
               </ion-item>
               <div class="metadata">
+                <ion-badge v-if="r.type === 'appeasement'" color="warning" data-testid="returns-appeasement-badge">{{ translate("Appeasement") }}</ion-badge>
                 <ion-badge v-if="r.origin === 'shopify'" color="tertiary">{{ translate("From Shopify") }}</ion-badge>
                 <ion-badge v-if="r.sync" :color="syncColor(r.sync.shopify)">{{ syncLabel(r.sync.shopify) }}</ion-badge>
               </div>

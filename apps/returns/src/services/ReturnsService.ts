@@ -20,6 +20,7 @@ export interface ReturnsService {
   retryComplete(returnId: string): Promise<void>;
   getOrderForReturn(orderId: string): Promise<OrderForReturn>;
   listReturnReasons(): Promise<ReturnReason[]>;
+  listAppeasementReasons(): Promise<ReturnReason[]>;
   pushToTarget(returnId: string, target: SyncTarget): Promise<PushOutcome>;
   getSyncStatus(returnId: string): Promise<Record<SyncTarget, SyncState>>;
 }

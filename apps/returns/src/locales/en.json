@@ -79,5 +79,16 @@
   "Built: ": "Built: ",
   "Failed to create return": "Failed to create return",
   "Push to Shopify failed": "Push to Shopify failed",
-  "Failed to load return": "Failed to load return"
+  "Failed to load return": "Failed to load return",
+  "Appeasement": "Appeasement",
+  "Add a goodwill refund (appeasement)": "Add a goodwill refund (appeasement)",
+  "A full return already refunds this order — appeasements are for orders with kept items.": "A full return already refunds this order — appeasements are for orders with kept items.",
+  "Refund amount": "Refund amount",
+  "Note (optional)": "Note (optional)",
+  "Enter a refund amount between 0 and": "Enter a refund amount between 0 and",
+  "Choose a reason for the appeasement.": "Choose a reason for the appeasement.",
+  "Appeasement reasons couldn't be loaded — reload the order and try again.": "Appeasement reasons couldn't be loaded — reload the order and try again.",
+  "Appeasement refund": "Appeasement refund",
+  "Goodwill refund": "Goodwill refund",
+  "Related return": "Related return"
 }

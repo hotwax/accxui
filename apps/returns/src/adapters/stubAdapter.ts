@@ -17,6 +17,14 @@ const REASONS: ReturnReason[] = [
   { returnReasonId: "RTN_SIZE_EXCHANGE", description: "Wrong size" },
 ];
 
+const APPEASEMENT_REASONS: ReturnReason[] = [
+  { returnReasonId: "APPEASE_DAMAGED", description: "Goodwill refund — item arrived damaged" },
+  { returnReasonId: "APPEASE_LATE", description: "Goodwill refund — late delivery" },
+  { returnReasonId: "APPEASE_GOODWILL", description: "Goodwill / customer retention" },
+  { returnReasonId: "APPEASE_PRICE_MATCH", description: "Goodwill refund — price match" },
+  { returnReasonId: "APPEASE_OTHER", description: "Goodwill refund — other (see note)" },
+];
+
 const ORDER: OrderForReturn = {
   orderId: "DEMO-1001",
   orderName: "#1001",
@@ -112,8 +120,9 @@ export const stubAdapter: ReturnsService = {
         closeAttempted: false, pollsUntilClosed: 0,
       });
     };
-    const returnId = String(seq++);
-    makeStandard(returnId);
+    // A stand-alone appeasement (no items returned) creates no standard return.
+    const returnId = items.length ? String(seq++) : "";
+    if (returnId) makeStandard(returnId);
     if (!appeasement) return { returnId };
 
     // Eligibility + amount cap (kept-merchandise value). Mirrors the server-side guard (Open Q6).
@@ -133,8 +142,8 @@ export const stubAdapter: ReturnsService = {
       appeasement: {
         amount: appeasement.amount, currencyUomId: appeasement.currencyUomId,
         reasonId: appeasement.reasonId,
-        reasonDesc: REASONS.find((x) => x.returnReasonId === appeasement.reasonId)?.description,
-        note: appeasement.note, relatedReturnId: returnId,
+        reasonDesc: APPEASEMENT_REASONS.find((x) => x.returnReasonId === appeasement.reasonId)?.description,
+        note: appeasement.note, relatedReturnId: returnId || undefined,
       },
       statuses: [{ statusId: "RETURN_REQUESTED", statusDate: now }],
       externalIds: { shopify: null },
@@ -142,7 +151,8 @@ export const stubAdapter: ReturnsService = {
       pushAttempted: false, pollsUntilSynced: 0,
       closeAttempted: false, pollsUntilClosed: 0,
     });
-    return { returnId, appeasementReturnId };
+    // Navigate to the standard return when there is one, else to the stand-alone appeasement.
+    return { returnId: returnId || appeasementReturnId, appeasementReturnId };
   },
   async approveReturn(returnId) {
     const r = store.get(returnId);
@@ -169,8 +179,10 @@ export const stubAdapter: ReturnsService = {
     if (!["RETURN_REQUESTED", "RETURN_APPROVED"].includes(r.statusId)) throw new Error("Return cannot be cancelled");
     r.statusId = "RETURN_CANCELLED";
     r.statuses = [...r.statuses, { statusId: "RETURN_CANCELLED", statusDate: "2026-05-29T12:05:00Z" }];
-    // A return already synced to Shopify stays synced after cancel; the Shopify-side status becomes CANCELED.
-    if (r.shopifySync?.synced) r.shopifySync = { ...r.shopifySync, returnStatusId: "CANCELED" };
+    // A synced Shopify *return* stays synced after cancel; its Shopify-side status becomes CANCELED.
+    // A refund-only appeasement has no Shopify return (only a shopifyRefundId), so there is nothing to
+    // mark CANCELED there — leave returnStatusId unset, matching the live backend.
+    if (r.shopifySync?.synced && r.shopifySync.shopifyReturnId) r.shopifySync = { ...r.shopifySync, returnStatusId: "CANCELED" };
   },
   async completeReturn(returnId) {
     const r = store.get(returnId);
@@ -199,6 +211,9 @@ export const stubAdapter: ReturnsService = {
   },
   async listReturnReasons() {
     return REASONS;
+  },
+  async listAppeasementReasons() {
+    return APPEASEMENT_REASONS;
   },
   async pushToTarget(returnId, _target: SyncTarget) {
     const r = store.get(returnId);
