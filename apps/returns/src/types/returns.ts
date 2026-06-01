@@ -49,12 +49,19 @@ export interface AppeasementFields {
   relatedReturnId?: string; // the standard return created alongside it
 }
 
+/** A single lost order line picked for a lost-in-shipment appeasement. */
+export interface AppeasementItemInput {
+  orderItemSeqId: string;
+  quantity: number;
+}
+
 /** The optional appeasement block an operator adds on the create-return page. */
 export interface AppeasementInput {
-  amount: number;
+  amount?: number;                 // required for the amount-only shape; OPTIONAL override when items present
   currencyUomId: string;
   reasonId: string;
   note?: string;
+  items?: AppeasementItemInput[];  // present → lost-in-shipment shape; absent → shipping-refund shape
 }
 
 export interface ReturnItemInput {
