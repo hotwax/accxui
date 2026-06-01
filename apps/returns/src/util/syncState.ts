@@ -29,7 +29,7 @@ export function syncLabel(s: SyncState): string {
  * - PUSH_PENDING        → pending (outbound push in flight)
  * - PUSH_FAILED         → failed
  * - PUSH_OK             → synced
- * - else, has a Shopify return id → synced; otherwise not_synced
+ * - else, has a Shopify return id OR refund id → synced; otherwise not_synced
  */
 export function resolveShopifySyncState(shopifySync: ShopifySync | null | undefined): SyncState {
   if (!shopifySync) return "not_synced";
@@ -42,7 +42,7 @@ export function resolveShopifySyncState(shopifySync: ShopifySync | null | undefi
     case "PUSH_FAILED":
       return "failed";
     default:
-      return shopifySync.shopifyReturnId ? "synced" : "not_synced";
+      return shopifySync.shopifyReturnId || shopifySync.shopifyRefundId ? "synced" : "not_synced";
   }
 }
 

@@ -29,6 +29,12 @@ describe("resolveShopifySyncState", () => {
   it("is not_synced when present but empty (no push status, no id)", () => {
     expect(resolveShopifySyncState({ pushStatusId: null, shopifyReturnId: null })).toBe("not_synced");
   });
+  it("is synced for an appeasement refund (PUSH_OK + shopifyRefundId)", () => {
+    expect(resolveShopifySyncState({ pushStatusId: "PUSH_OK", shopifyRefundId: "gid://shopify/Refund/9" })).toBe("synced");
+  });
+  it("is synced for a refund mirror with an id but no push status", () => {
+    expect(resolveShopifySyncState({ pushStatusId: null, shopifyRefundId: "gid://shopify/Refund/9" })).toBe("synced");
+  });
 });
 
 describe("resolveShopifyCloseState", () => {
