@@ -1,24 +1,27 @@
-# Backend requests: returns-list 500/400 bug + Shopify order id (search) + product SKU
+# Backend requests: returns list+detail 400 bug + Shopify order id (search) + product SKU
 
 Three asks surfaced while dogfooding the Returns PWA against the OMS build at `localhost:8081`.
-Ask **#1 is a bug** (P0 — the returns list is completely unusable); **#2** and **#3** are
+Ask **#1 is a bug** (P0 — the returns list *and* return-detail are completely unusable); **#2** and **#3** are
 additive, backward-compatible field requests. See also the companion doc
 [`backend-request-list-order-id.md`](./backend-request-list-order-id.md) (the order *name* on list rows).
 
 ---
 
-## #1 — BUG: `GET /oms/returns` throws a 400 for every request (P0, blocks the whole list)
+## #1 — BUG: the returns service throws a 400 `ClassCastException` whenever it processes a real return (P0, blocks list AND detail)
 
-The returns list endpoint returns **HTTP 400** with a Java `ClassCastException` for **every** call —
-including with no query parameters at all. Because of this the list screen shows zero returns
-(now rendered as a "Couldn't load returns" error after a frontend fix).
+Both `GET /oms/returns` (list) and `GET /oms/returns/{id}` (detail of an **existing** return) return
+**HTTP 400** with a Java `ClassCastException`. This blocks the entire app: the list shows zero returns,
+and opening any real return fails (now rendered as a visible error after a frontend fix).
 
 ### Reproduction
 ```bash
+# List — fails for every param combination, including none:
 curl -s "http://localhost:8081/rest/s1/oms/returns" -H "api_key: <UserLoginKey>"
 curl -s "http://localhost:8081/rest/s1/oms/returns?pageIndex=0&pageSize=20&returnHeaderTypeId=CUSTOMER_RETURN" -H "api_key: <UserLoginKey>"
+# Detail of a REAL return — also fails:
+curl -s "http://localhost:8081/rest/s1/oms/returns/M100052" -H "api_key: <UserLoginKey>"
 ```
-### Actual response (both, and every param combination tried)
+### Actual response (all of the above)
 ```json
 {
   "errorCode": 400,
@@ -26,28 +29,32 @@ curl -s "http://localhost:8081/rest/s1/oms/returns?pageIndex=0&pageSize=20&retur
 }
 ```
 
-### Evidence it is server-side, not the request
-With the **same `api_key`** on the same build, these all succeed:
+### Evidence + narrowing (it is server-side, in per-return processing)
+With the **same `api_key`** on the same build:
 - `GET /oms/returnReasons` → **200**
-- `GET /oms/orders/{id}` → **200**
-- `GET /oms/returns/{id}` → **200** (or `400 "ReturnHeader [..] not found"` for a bad id — i.e. the path resolves)
+- `GET /oms/orders/{id}` → **200** (real orders load fine — e.g. `GORTEST19510`)
 - `GET /admin/user/profile` → **200**
+- `GET /oms/returns/{id}` for a **non-existent** id → **400 `"ReturnHeader [..] not found"`** (the path resolves and runs; no cast error)
+- `GET /oms/returns/{id}` for a **real** id (`M100052`) → **400 `ClassCastException`**
+- `GET /oms/returns` (list) → **400 `ClassCastException`** (even with no params)
 
-Only the **list** (`GET /oms/returns`) throws, and it throws *before* any of our params can matter
-(no-params also 400s). This points to a `String`→`Boolean` coercion **inside the list service / its
-REST mapping** — most likely a parameter or flag declared `Boolean` that receives a `String` default
-(e.g. a `pageNoLimit`-style flag, or a Boolean in-parameter with a `default-value=""`).
+The cast does **not** fire on the not-found path but **does** fire whenever the service touches an
+actual `ReturnHeader` (one record for detail, many for the list). So the offending `String`→`Boolean`
+coercion is in the **per-return processing / response mapping of a real return record** — most likely a
+field on `ReturnHeader`/`ReturnItem` (or a related entity) declared/cast as `Boolean` but holding a
+`String` value, or a Boolean service in/out parameter populated from a String. It is **not** caused by
+the request params (no-params list also throws; orders endpoint with the same plumbing works).
 
 ### Ask
-Fix the `GET /oms/returns` service so it returns the list (paged via `pageIndex`/`pageSize`,
-filtered by `returnHeaderTypeId=CUSTOMER_RETURN` and optional `statusId`) without the cast error.
-Please confirm the offending parameter/field once fixed.
+Fix the returns service so it can serialize a real return without the cast error, for both list and
+detail. Please confirm the offending field/parameter once found (that will also tell us if any response
+field we map needs handling).
 
 ### Acceptance criteria
-1. `GET /oms/returns?returnHeaderTypeId=CUSTOMER_RETURN&pageIndex=0&pageSize=20` returns `200` with a
-   `returns[]` array and `returnsCount`.
-2. `statusId` (e.g. `RETURN_REQUESTED`) filters the list without error.
-3. No `ClassCastException` for any valid combination of `pageIndex` / `pageSize` / `returnHeaderTypeId` / `statusId`.
+1. `GET /oms/returns?returnHeaderTypeId=CUSTOMER_RETURN&pageIndex=0&pageSize=20` returns `200` with a `returns[]` array and `returnsCount`.
+2. `GET /oms/returns/{id}` returns `200` for an existing return (e.g. `M100052`).
+3. `statusId` (e.g. `RETURN_REQUESTED`) filters the list without error.
+4. No `ClassCastException` for any real return in list or detail.
 
 ---
 
@@ -121,8 +128,9 @@ no `productName` is present. Merchants expect the **SKU**. Please include the SK
 ## Frontend status (already wired — nothing else needed from us once the backend lands these)
 
 The PWA consumes all three defensively and degrades gracefully until they arrive:
-- **#1:** `omsAdapter.listReturns()` already calls the endpoint correctly; the list view now shows the
-  real error instead of a misleading empty state, and will populate the moment the 400 is fixed.
+- **#1:** `omsAdapter.listReturns()` and `getReturn()` already call the endpoints correctly; the list
+  and detail views now show the real error instead of failing silently, and will populate the moment
+  the 400 is fixed. No frontend change needed.
 - **#2:** `omsAdapter.listReturns()` maps `row.orderExternalId` onto `ReturnSummary.orderExternalId`, and
   `returnsStore.getFilteredReturns` indexes it — so a Shopify order id/GID will match in search
   immediately once rows carry it. (Search is currently client-side over the loaded page; full
