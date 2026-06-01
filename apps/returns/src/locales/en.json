@@ -90,5 +90,10 @@
   "Appeasement reasons couldn't be loaded — reload the order and try again.": "Appeasement reasons couldn't be loaded — reload the order and try again.",
   "Appeasement refund": "Appeasement refund",
   "Goodwill refund": "Goodwill refund",
-  "Related return": "Related return"
+  "Related return": "Related return",
+  "Refund an amount": "Refund an amount",
+  "Refund specific items": "Refund specific items",
+  "Refund amount (override)": "Refund amount (override)",
+  "Pick at least one lost item.": "Pick at least one lost item.",
+  "Refund can't exceed the kept-item value of": "Refund can't exceed the kept-item value of"
 }
