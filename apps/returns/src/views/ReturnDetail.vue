@@ -14,7 +14,7 @@
       </main>
 
       <main v-else>
-        <p v-if="error" class="ion-padding-start" style="color: var(--ion-color-danger); white-space: pre-wrap">{{ error }}</p>
+        <p v-if="error" class="error ion-padding-start">{{ error }}</p>
 
         <template v-if="r">
           <section class="header">
@@ -42,9 +42,9 @@
                 </ion-item>
               </ion-card>
 
-              <ion-card v-if="canCancel">
+              <ion-card v-if="canApprove || canComplete || canCancel">
                 <ion-card-header>
-                  <ion-card-title>{{ translate("Approval") }}</ion-card-title>
+                  <ion-card-title>{{ translate("Actions") }}</ion-card-title>
                 </ion-card-header>
                 <ion-card-content>
                   <template v-if="canApprove">
@@ -56,7 +56,10 @@
                       {{ translate("Reject") }}
                     </ion-button>
                   </template>
-                  <ion-button expand="block" color="medium" fill="outline" :disabled="busy" @click="cancel" data-testid="detail-cancel-btn">
+                  <ion-button v-if="canComplete" expand="block" :disabled="busy" @click="complete" data-testid="detail-complete-btn">
+                    {{ translate("Complete") }}
+                  </ion-button>
+                  <ion-button v-if="canCancel" expand="block" color="medium" fill="outline" :disabled="busy" @click="cancel" data-testid="detail-cancel-btn">
                     {{ translate("Cancel return") }}
                   </ion-button>
                 </ion-card-content>
@@ -76,12 +79,34 @@
                   <p v-if="cancelledInShopify" class="muted">
                     {{ translate("Cancelled in OMS — still synced to Shopify") }}<template v-if="r.shopifySync?.returnStatusId"> · {{ r.shopifySync.returnStatusId }}</template>
                   </p>
-                  <p v-else-if="canApprove" class="muted">{{ translate("Syncs to Shopify once approved.") }}</p>
+                  <p v-else-if="canApprove" class="muted">{{ translate("Syncs to Shopify automatically when approved.") }}</p>
 
-                  <p v-if="r.sync.shopify === 'failed' && r.shopifySync?.pushErrorMessage" style="color: var(--ion-color-danger); white-space: pre-wrap">{{ r.shopifySync.pushErrorMessage }}</p>
-                  <!-- Approved but not synced (failed OR stuck pending) → let staff re-kick the push. -->
-                  <ion-button v-if="canManualPush" expand="block" :color="r.sync.shopify === 'failed' ? 'danger' : 'primary'" :disabled="busy" @click="push" :data-testid="r.sync.shopify === 'failed' ? 'detail-retry-btn' : 'detail-push-btn'">
-                    {{ r.sync.shopify === "failed" ? translate("Retry") : translate("Push to Shopify") }}
+                  <!-- Approval drives the push; a failed push is recoverable, so let staff re-kick it. -->
+                  <template v-if="r.sync.shopify === 'failed'">
+                    <p v-if="r.shopifySync?.pushErrorMessage" class="error">{{ r.shopifySync.pushErrorMessage }}</p>
+                    <ion-button expand="block" color="danger" :disabled="busy" @click="retryPush" data-testid="detail-retry-btn">
+                      {{ translate("Retry") }}
+                    </ion-button>
+                  </template>
+                </ion-card-content>
+              </ion-card>
+
+              <ion-card v-if="isCompleted && closeState">
+                <ion-card-header>
+                  <ion-card-title>{{ translate("Completion") }}</ion-card-title>
+                </ion-card-header>
+                <ion-card-content>
+                  <ion-chip :color="completionColor(closeState)" data-testid="detail-completion-chip">
+                    <ion-spinner v-if="closeState === 'pending'" name="dots" />
+                    <ion-label>{{ completionLabel(closeState) }}</ion-label>
+                  </ion-chip>
+
+                  <p v-if="closeState === 'skipped'" class="muted">{{ translate("Completed in OMS — this return was never synced to Shopify.") }}</p>
+                  <p v-else-if="closeState === 'pending'" class="muted">{{ translate("Closing the return in Shopify…") }}</p>
+
+                  <p v-if="closeState === 'failed' && r.shopifySync?.closePushErrorMessage" class="error">{{ r.shopifySync.closePushErrorMessage }}</p>
+                  <ion-button v-if="closeState === 'failed'" expand="block" color="danger" :disabled="busy" @click="retryComplete" data-testid="detail-retry-complete-btn">
+                    {{ translate("Retry") }}
                   </ion-button>
                 </ion-card-content>
               </ion-card>
@@ -118,7 +143,7 @@ import { useReturnsStore } from "@/store/returnsStore";
 import { describeApiError } from "@/util/errorMessage";
 import { formatStatus, formatReason } from "@/util/labels";
 import { formatDate } from "@/util/dates";
-import { syncColor, syncLabel } from "@/util/syncState";
+import { completionColor, completionLabel, resolveShopifyCloseState, syncColor, syncLabel } from "@/util/syncState";
 
 const props = defineProps<{ returnId: string }>();
 const store = useReturnsStore();
@@ -129,13 +154,15 @@ const loading = ref(false);
 const r = computed(() => store.current);
 // True once the loaded return matches this route (store.current may briefly hold a previously-viewed return).
 const loaded = computed(() => r.value?.returnId === props.returnId);
-// Requested → Approve + Reject (+ Cancel). Approved → Cancel only. Terminal statuses → no actions.
+// Requested → Approve + Reject (+ Cancel). Approved → Complete + Cancel. Received → Complete. Terminal → none.
 const canApprove = computed(() => r.value?.statusId === "RETURN_REQUESTED");
 const canCancel = computed(() => r.value?.statusId === "RETURN_REQUESTED" || r.value?.statusId === "RETURN_APPROVED");
+const canComplete = computed(() => r.value?.statusId === "RETURN_APPROVED" || r.value?.statusId === "RETURN_RECEIVED");
+const isCompleted = computed(() => r.value?.statusId === "RETURN_COMPLETED");
+// Collapsed Shopify completion state — only meaningful once the OMS return is RETURN_COMPLETED.
+const closeState = computed(() => (isCompleted.value ? resolveShopifyCloseState(r.value?.shopifySync) : null));
 // A return cancelled in the OMS but still linked in Shopify (synced stays true; Shopify status → CANCELED).
 const cancelledInShopify = computed(() => r.value?.statusId === "RETURN_CANCELLED" && r.value?.sync.shopify === "synced");
-// Approved but not yet synced (failed or stuck pending) → allow a manual re-push from the UI.
-const canManualPush = computed(() => r.value?.statusId === "RETURN_APPROVED" && r.value?.sync.shopify !== "synced");
 
 // Run a lifecycle action with the global loader + error handling.
 async function runAction(message: string, action: () => Promise<unknown>, failMessage: string) {
@@ -176,17 +203,24 @@ async function cancel() {
   if (!(await confirmAction("Cancel this return?", "Cancel return"))) return;
   return runAction("Cancelling return", () => store.cancelReturn(props.returnId), "Failed to cancel return");
 }
-
-// Re-kick the Shopify push (approval already happened) — for a failed or stuck-pending sync.
-function push() {
-  return runAction("Pushing to Shopify", async () => {
-    await store.pushAndPoll(props.returnId, "shopify");
-    // The push can be a no-op ("skipped" — e.g. a stale push already pending) or not finish in time;
-    // surface that instead of silently leaving the spinner, so staff know it didn't sync.
-    if (store.current?.sync.shopify !== "synced") {
-      commonUtil.showToast(translate("Shopify push didn't complete — it may already be pending. The OMS may need to clear a stuck push."));
+async function complete() {
+  if (!(await confirmAction("Complete this return?", "Complete"))) return;
+  return runAction("Completing return", async () => {
+    await store.completeReturn(props.returnId);
+    // The OMS is RETURN_COMPLETED regardless; if the Shopify close didn't settle, surface it (it's retryable).
+    if (closeState.value === "failed") {
+      commonUtil.showToast(translate("Completed in OMS, but closing in Shopify failed — you can retry below."));
     }
-  }, "Push to Shopify failed");
+  }, "Failed to complete return");
+}
+// Re-run a failed Shopify completion (the OMS is already RETURN_COMPLETED).
+function retryComplete() {
+  return runAction("Completing in Shopify", () => store.retryComplete(props.returnId), "Failed to retry completion");
+}
+
+// Re-kick a failed Shopify push (approval already happened); the chip reflects the resulting state.
+function retryPush() {
+  return runAction("Pushing to Shopify", () => store.pushAndPoll(props.returnId, "shopify"), "Push to Shopify failed");
 }
 
 onIonViewWillEnter(async () => {
@@ -194,10 +228,15 @@ onIonViewWillEnter(async () => {
   loading.value = true;
   try {
     await store.fetchReturn(props.returnId);
-    // A freshly-approved return loads as "pending" — poll to completion.
+    // A freshly-approved return loads as "pending" — poll the create-push to completion.
     if (store.current?.sync.shopify === "pending") {
       busy.value = true;
       try { await store.pollSync(props.returnId, "shopify"); } finally { busy.value = false; }
+    }
+    // A freshly-completed return whose Shopify close is still in flight — poll it to settle.
+    if (isCompleted.value && closeState.value === "pending") {
+      busy.value = true;
+      try { await store.pollCompletion(props.returnId); } finally { busy.value = false; }
     }
   } catch (e) {
     error.value = describeApiError(e, translate("Failed to load return"));
@@ -229,5 +268,9 @@ hr {
 .muted {
   color: var(--ion-color-medium);
   font-size: 0.8em;
+}
+.error {
+  color: var(--ion-color-danger);
+  white-space: pre-wrap;
 }
 </style>

@@ -1,7 +1,8 @@
 import { defineStore } from "pinia";
 import { logger } from "@common";
 import { getReturnsService } from "@/services/ReturnsService";
-import type { CreateReturnInput, ReturnDetail, ReturnSummary, SyncState, SyncTarget } from "@/types/returns";
+import { resolveShopifyCloseState } from "@/util/syncState";
+import type { CompletionState, CreateReturnInput, ReturnDetail, ReturnSummary, SyncState, SyncTarget } from "@/types/returns";
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
@@ -53,13 +54,21 @@ export const useReturnsStore = defineStore("returns", {
       const { returnId } = await getReturnsService().createReturn(input);
       return returnId;
     },
-    /** Approve a requested return; approval triggers the Shopify push, so poll it to completion. */
+    /**
+     * Approve a requested return. Approval is meant to trigger the OMS→Shopify push server-side, but that
+     * push can wedge, so if it didn't fire we kick it from the client — approval always drives the sync,
+     * with no separate manual step — then poll the in-flight push to completion.
+     */
     async approveReturn(returnId: string, opts: { intervalMs?: number; maxAttempts?: number } = {}) {
       await getReturnsService().approveReturn(returnId);
       await this.fetchReturn(returnId);
-      if (this.current?.sync.shopify === "pending") {
-        return this.pollSync(returnId, "shopify", opts);
+      const sync = this.current?.sync.shopify;
+      if (sync === "synced") return;
+      // Not pending means the backend didn't start a push (still not_synced, or a prior attempt failed) → kick it.
+      if (sync === "not_synced" || sync === "failed") {
+        await getReturnsService().pushToTarget(returnId, "shopify");
       }
+      return this.pollSync(returnId, "shopify", opts);
     },
     async rejectReturn(returnId: string) {
       await getReturnsService().rejectReturn(returnId);
@@ -78,6 +87,31 @@ export const useReturnsStore = defineStore("returns", {
           if (this.current?.shopifySync?.returnStatusId === "CANCELED") break;
         }
       }
+    },
+    /**
+     * Complete an approved/received return. The OMS transition is immediate; the Shopify completion
+     * (close) runs async, so poll it to completion just like approve polls the create-push.
+     */
+    async completeReturn(returnId: string, opts: { intervalMs?: number; maxAttempts?: number } = {}) {
+      await getReturnsService().completeReturn(returnId);
+      return this.pollCompletion(returnId, opts);
+    },
+    /** Re-run a failed Shopify completion (CLOSE_FAILED), then poll until it settles. */
+    async retryComplete(returnId: string, opts: { intervalMs?: number; maxAttempts?: number } = {}) {
+      await getReturnsService().retryComplete(returnId);
+      return this.pollCompletion(returnId, opts);
+    },
+    /** Re-fetch the return until the Shopify close settles (completed/failed/skipped) or attempts run out. */
+    async pollCompletion(returnId: string, opts: { intervalMs?: number; maxAttempts?: number } = {}): Promise<CompletionState> {
+      const intervalMs = opts.intervalMs ?? 3000;
+      const maxAttempts = opts.maxAttempts ?? 30;
+      for (let attempt = 0; attempt < maxAttempts; attempt++) {
+        await this.fetchReturn(returnId);
+        const state = resolveShopifyCloseState(this.current?.shopifySync);
+        if (state !== "pending") return state; // completed | failed | skipped
+        await sleep(intervalMs);
+      }
+      return "pending";
     },
     async loadOrder(orderId: string) {
       return getReturnsService().getOrderForReturn(orderId);
