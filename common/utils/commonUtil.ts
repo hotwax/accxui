@@ -6,7 +6,7 @@ import { translate } from "../core/i18n";
 import { saveAs } from 'file-saver';
 import Papa from 'papaparse';
 import Encoding from 'encoding-japanese';
-import cronParser from "cron-parser";
+import { CronExpressionParser as cronParser } from "cron-parser";
 import cronstrue from "cronstrue"
 import { useEmbeddedAppStore } from "../store/embeddedApp";
 
@@ -380,9 +380,22 @@ const getMaargBaseURL = () => {
 
 const getOmsURL = () => {
   const oms = getEmbeddedAppStoreSafe().oms || cookieHelper().get("oms")
+  // VITE_OMS_TYPE=moqui → use Moqui REST paths (/rest/s1/)
+  // VITE_OMS_TYPE unset  → use OFBiz paths (/api/)  [default, backward-compatible]
   let omsURL = ""
   if (oms) {
-    omsURL = oms.startsWith('http') ? oms.includes('/api') ? oms : `${oms}/api/` : `https://${oms}.hotwax.io/api/`
+    if (oms.startsWith('http')) {
+      // Full URL provided — use as-is if it already has a known path suffix
+      omsURL = (oms.includes('/api') || oms.includes('/rest/'))
+        ? oms
+        : commonUtil.isMoqui() ? `${oms}/rest/s1/` : `${oms}/api/`
+    } else {
+      // Plain subdomain — build full URL for the configured backend type
+      omsURL = commonUtil.isMoqui()
+        ? `https://${oms}.hotwax.io/rest/s1/`
+        : `https://${oms}.hotwax.io/api/`
+    }
+    if (omsURL && !omsURL.endsWith('/')) omsURL += '/'
   }
   return omsURL;
 }
@@ -855,8 +868,13 @@ const getFacilityChipLabel = (selectedFacilityIds: string[], facilities: any[]):
   }
 };
 
+const isMoqui = () => {
+  return import.meta.env.VITE_OMS_TYPE === "MOQUI"
+}
+
 export const commonUtil = {
   isAppEmbedded,
+  isMoqui,
   copyToClipboard,
   downloadCsv,
   formatCurrency,

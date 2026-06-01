@@ -82,14 +82,18 @@ export function useAuth() {
     try {
       if(!omsToken && username && password) {
         const resp = await api({
-          url: "login",
+          url: commonUtil.isMoqui() ? "admin/login" : "login",
           method: "post",
-          data: {
+          data: commonUtil.isMoqui() ? {
+            "username": username,
+            "password": password
+          } : {
             "USERNAME": username,
             "PASSWORD": password
           },
           baseURL: commonUtil.getOmsURL()
         });
+
         if(commonUtil.hasError(resp)) {
           commonUtil.showToast(translate("Sorry, your username or password is incorrect. Please try again."));
           logger.error("error", resp.data._ERROR_MESSAGE_);
@@ -143,8 +147,8 @@ export function useAuth() {
 
       try {
         let resp = await api({
-          url: "logout",
-          method: "GET",
+          url: commonUtil.isMoqui() ? "admin/logout" : "logout",
+          method: commonUtil.isMoqui() ? "POST" : "GET",
           baseURL: commonUtil.getOmsURL()
         }) as any;
         resp = JSON.parse(resp.data.startsWith("//") ? resp.data.replace("//", "") : resp.data);
@@ -192,13 +196,26 @@ export function useAuth() {
     loginOption.value = {}
     try {
       const resp = await api({
-        url: "checkLoginOptions",
+        url: commonUtil.isMoqui() ? "admin/checkLoginOptions" : "checkLoginOptions",
         method: "GET",
         baseURL: commonUtil.getOmsURL()
       });
       if(!commonUtil.hasError(resp)) {
         loginOption.value = resp.data
-        cookieHelper().set("maarg", resp.data.maargInstanceUrl, getDuration())
+        if (resp.data.maargInstanceUrl) {
+          // OFBiz deployment: OFBiz tells the PWA where its Moqui instance is
+          cookieHelper().set("maarg", resp.data.maargInstanceUrl, getDuration())
+        } else if (commonUtil.isMoqui()) {
+          // Moqui-only deployment: the OMS IS the maarg.
+          // Strip any /rest/s1/... path suffix so getMaargURL() can append /rest/s1/ itself.
+          // e.g. "http://localhost:8080" → maarg="http://localhost:8080" → getMaargURL()="http://localhost:8080/rest/s1/"
+          // e.g. "demo"                  → maarg="demo"                  → getMaargURL()="https://demo.hotwax.io/rest/s1/"
+          const omsVal = cookieHelper().get("oms") as string || ""
+          const maargVal = omsVal.startsWith('http')
+            ? omsVal.replace(/\/rest\/s1.*$/, '')
+            : omsVal
+          cookieHelper().set("maarg", maargVal, getDuration())
+        }
       }
     } catch (error) {
       logger.error(error)

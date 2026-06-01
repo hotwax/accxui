@@ -104,6 +104,9 @@ const isInitializing = ref(true);
 const isConfirmingForActiveSession = ref(false);
 const loader = ref<any>(null);
 const isCheckingOms = ref(false);
+// Separate flag to prevent concurrent initialise() calls.
+// isInitializing starts true (to hide form), so we can't use it as the guard.
+let initInProgress = false;
 const isLoggingIn = ref(false);
 let router: any = ref();
 
@@ -190,6 +193,9 @@ const setOms = async () => {
 };
 
 const initialise = async () => {
+  // Guard against concurrent calls — onIonViewWillEnter fires on each navigation
+  if (initInProgress) return;
+  initInProgress = true;
   isInitializing.value = true;
   await presentLoader("Processing");
 
@@ -213,6 +219,7 @@ const initialise = async () => {
     await login(route.query)
     dismissLoader();
     isInitializing.value = false;
+    initInProgress = false;
     return;
   }
 
@@ -221,6 +228,7 @@ const initialise = async () => {
     await login(route.query)
     dismissLoader();
     isInitializing.value = false;
+    initInProgress = false;
     return;
   }
 
@@ -229,8 +237,8 @@ const initialise = async () => {
     await fetchLoginOptions();
   }
 
-  // show OMS input if SAML if configured or if query or state does not have OMS
-  if (loginOption.value.loginAuthType !== 'BASIC' || !cookieHelper().get("OMS")) {
+  // show OMS input if SAML is configured or if OMS cookie is not set
+  if (loginOption.value.loginAuthType !== 'BASIC' || !cookieHelper().get("oms")) {
     showOmsInput.value = true;
   }
 
@@ -239,6 +247,7 @@ const initialise = async () => {
     router.value.push("/");
     dismissLoader();
     isInitializing.value = false;
+    initInProgress = false;
     return;
   }
 
@@ -247,6 +256,7 @@ const initialise = async () => {
     await login({ token: cookieHelper().get("token"), expirationTime: cookieHelper().get("expirationTime") })
     dismissLoader();
     isInitializing.value = false;
+    initInProgress = false;
     return;
   }
 
@@ -262,6 +272,7 @@ const initialise = async () => {
   }
   dismissLoader();
   isInitializing.value = false;
+    initInProgress = false;
 };
 
 const handleSubmit = () => {
