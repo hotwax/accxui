@@ -82,7 +82,7 @@ export function useAuth() {
     try {
       if(!omsToken && username && password) {
         const resp = await api({
-          url: "login",
+          url: commonUtil.isMoqui() ? "admin/login" : "login",
           method: "post",
           data: commonUtil.isMoqui() ? {
             "username": username,
@@ -147,7 +147,7 @@ export function useAuth() {
 
       try {
         let resp = await api({
-          url: "logout",
+          url: commonUtil.isMoqui() ? "admin/logout" : "logout",
           method: commonUtil.isMoqui() ? "POST" : "GET",
           baseURL: commonUtil.getOmsURL()
         }) as any;
@@ -196,7 +196,7 @@ export function useAuth() {
     loginOption.value = {}
     try {
       const resp = await api({
-        url: "checkLoginOptions",
+        url: commonUtil.isMoqui() ? "admin/checkLoginOptions" : "checkLoginOptions",
         method: "GET",
         baseURL: commonUtil.getOmsURL()
       });
@@ -205,7 +205,7 @@ export function useAuth() {
         if (resp.data.maargInstanceUrl) {
           // OFBiz deployment: OFBiz tells the PWA where its Moqui instance is
           cookieHelper().set("maarg", resp.data.maargInstanceUrl, getDuration())
-        } else if (import.meta.env.VITE_OMS_TYPE === 'moqui') {
+        } else if (commonUtil.isMoqui()) {
           // Moqui-only deployment: the OMS IS the maarg.
           // Strip any /rest/s1/... path suffix so getMaargURL() can append /rest/s1/ itself.
           // e.g. "http://localhost:8080" → maarg="http://localhost:8080" → getMaargURL()="http://localhost:8080/rest/s1/"

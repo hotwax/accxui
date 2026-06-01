@@ -10,7 +10,7 @@ const requestInterceptor = async (config: any) => {
 
   // The following are the endpoints needs to bypass the auth check and when this calls are made we will assume
   // that we are always relogin with the new credentials present in cookies.
-  const noAuthEndpoints = ["login", "logout", "checkLoginOptions", "admin/user/profile", "admin/user/permissions", "getPermissions", "app-bridge/login"]
+  const noAuthEndpoints = ["login", "logout", "checkLoginOptions", "user/profile", "user/permissions", "getPermissions", "app-bridge/login"]
 
   // When the same app is opened in multiple tabs and logout from one tab, then another tab still uses the old
   // session, to handle this scenario we have added check to always validate authentication before api calls
@@ -18,7 +18,8 @@ const requestInterceptor = async (config: any) => {
   // the session automatically.
   // Bypass the check for endpoints that don't require authentication (like login, logout, profile),
   // as these are often called during the authentication flow itself or to refresh local state.
-  if (!useAuth().isAuthenticated.value && !noAuthEndpoints.includes(config.url)) {
+  const isAnonymousEndpoint = noAuthEndpoints.some((endpoint: string) => config.url.includes(endpoint));
+  if (!useAuth().isAuthenticated.value && !isAnonymousEndpoint) {
     await useAuth().logout({ isUserUnauthorised: true, invalidAppContext: true })
     useAuth().clearAuth()
     return Promise.reject(new Error("INVALID_APP_CONTEXT"));
