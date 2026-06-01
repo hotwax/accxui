@@ -19,9 +19,9 @@ describe("Returns happy path (stub backend)", () => {
 
     cy.get("[data-testid=create-submit-btn]").click();
 
-    // Lands on detail; push and watch sync
+    // Lands on detail as a requested return; approve it to trigger the Shopify sync.
     cy.contains("Shopify sync");
-    cy.get("[data-testid=detail-push-btn]").click();
+    cy.get("[data-testid=detail-approve-btn]").click();
     cy.contains("Synced", { timeout: 15000 });
   });
 

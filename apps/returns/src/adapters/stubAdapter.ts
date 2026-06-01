@@ -34,12 +34,16 @@ function seedShopifyReturn(): StubReturn {
     orderId: "DEMO-2002",
     orderName: "#2002",
     orderDate: "2026-05-20T08:00:00Z",
-    statusId: "RETURN_REQUESTED",
+    // An already-approved, synced return (a return must be approved before it syncs to Shopify).
+    statusId: "RETURN_APPROVED",
     entryDate: "2026-05-28T10:00:00Z",
     origin: "shopify",
     sync: { shopify: "synced" },
     items: [{ orderItemSeqId: "00001", productId: "P9", productName: "Wool Beanie", returnQuantity: 1, returnReasonId: "DEFECTIVE", returnReasonDesc: "Defective item" }],
-    statuses: [{ statusId: "RETURN_REQUESTED", statusDate: "2026-05-28T10:00:00Z" }],
+    statuses: [
+      { statusId: "RETURN_REQUESTED", statusDate: "2026-05-28T10:00:00Z" },
+      { statusId: "RETURN_APPROVED", statusDate: "2026-05-28T10:05:00Z" },
+    ],
     externalIds: { shopify: "gid://shopify/Return/555" },
     pushAttempted: false,
     pollsUntilSynced: 0,
@@ -89,6 +93,31 @@ export const stubAdapter: ReturnsService = {
       pushAttempted: false, pollsUntilSynced: 0,
     });
     return { returnId };
+  },
+  async approveReturn(returnId) {
+    const r = store.get(returnId);
+    if (!r) throw new Error("Return not found");
+    if (r.statusId !== "RETURN_REQUESTED") throw new Error("Only requested returns can be approved");
+    r.statusId = "RETURN_APPROVED";
+    r.statuses = [...r.statuses, { statusId: "RETURN_APPROVED", statusDate: "2026-05-29T12:05:00Z" }];
+    // Approval triggers the OMS->Shopify push (getSyncStatus then progresses pending -> synced).
+    r.pushAttempted = true;
+    r.pollsUntilSynced = 1;
+    r.sync = { shopify: "pending" };
+  },
+  async rejectReturn(returnId) {
+    const r = store.get(returnId);
+    if (!r) throw new Error("Return not found");
+    if (r.statusId !== "RETURN_REQUESTED") throw new Error("Only requested returns can be rejected");
+    r.statusId = "RETURN_REJECTED";
+    r.statuses = [...r.statuses, { statusId: "RETURN_REJECTED", statusDate: "2026-05-29T12:05:00Z" }];
+  },
+  async cancelReturn(returnId) {
+    const r = store.get(returnId);
+    if (!r) throw new Error("Return not found");
+    if (!["RETURN_REQUESTED", "RETURN_APPROVED"].includes(r.statusId)) throw new Error("Return cannot be cancelled");
+    r.statusId = "RETURN_CANCELLED";
+    r.statuses = [...r.statuses, { statusId: "RETURN_CANCELLED", statusDate: "2026-05-29T12:05:00Z" }];
   },
   async getOrderForReturn(orderId) {
     return { ...ORDER, orderId };

@@ -9,6 +9,11 @@ export interface ReturnsService {
   listReturns(p: { pageIndex?: number; pageSize?: number; statusId?: string }): Promise<{ items: ReturnSummary[]; total: number }>;
   getReturn(returnId: string): Promise<ReturnDetail>;
   createReturn(input: CreateReturnInput): Promise<{ returnId: string }>;
+  // Approval lifecycle. approve transitions RETURN_REQUESTED -> RETURN_APPROVED and (server-side)
+  // triggers the OMS->Shopify push; reject/cancel are terminal and never sync.
+  approveReturn(returnId: string): Promise<void>;
+  rejectReturn(returnId: string): Promise<void>;
+  cancelReturn(returnId: string): Promise<void>;
   getOrderForReturn(orderId: string): Promise<OrderForReturn>;
   listReturnReasons(): Promise<ReturnReason[]>;
   pushToTarget(returnId: string, target: SyncTarget): Promise<PushOutcome>;

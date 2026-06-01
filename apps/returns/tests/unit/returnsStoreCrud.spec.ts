@@ -37,4 +37,44 @@ describe("returnsStore CRUD (stub adapter)", () => {
     await store.pushAndPoll(returnId, "shopify", { intervalMs: 0, maxAttempts: 5 });
     expect(store.current?.sync.shopify).toBe("synced");
   });
+
+  async function createRequested() {
+    const store = useReturnsStore();
+    const returnId = await store.submitReturn({
+      orderId: "DEMO-1001",
+      items: [{ orderItemSeqId: "00001", productId: "P1", returnQuantity: 1, returnReasonId: "RTN_NOT_WANT" }],
+    });
+    await store.fetchReturn(returnId);
+    expect(store.current?.statusId).toBe("RETURN_REQUESTED");
+    return { store, returnId };
+  }
+
+  it("approve transitions requested -> approved and syncs to Shopify", async () => {
+    const { store, returnId } = await createRequested();
+    expect(store.current?.sync.shopify).toBe("not_synced");
+    await store.approveReturn(returnId, { intervalMs: 0, maxAttempts: 5 });
+    expect(store.current?.statusId).toBe("RETURN_APPROVED");
+    // approval triggered the push; pollSync (called inside approveReturn) drives it to synced
+    expect(store.current?.sync.shopify).toBe("synced");
+  });
+
+  it("reject transitions requested -> rejected and never syncs", async () => {
+    const { store, returnId } = await createRequested();
+    await store.rejectReturn(returnId);
+    expect(store.current?.statusId).toBe("RETURN_REJECTED");
+    expect(store.current?.sync.shopify).toBe("not_synced");
+  });
+
+  it("cancel transitions an approved return -> cancelled", async () => {
+    const { store, returnId } = await createRequested();
+    await store.approveReturn(returnId, { intervalMs: 0, maxAttempts: 5 });
+    await store.cancelReturn(returnId);
+    expect(store.current?.statusId).toBe("RETURN_CANCELLED");
+  });
+
+  it("rejecting a non-requested return throws (guard)", async () => {
+    const { store, returnId } = await createRequested();
+    await store.approveReturn(returnId, { intervalMs: 0, maxAttempts: 5 });
+    await expect(store.rejectReturn(returnId)).rejects.toThrow();
+  });
 });

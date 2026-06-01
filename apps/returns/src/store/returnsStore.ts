@@ -53,6 +53,22 @@ export const useReturnsStore = defineStore("returns", {
       const { returnId } = await getReturnsService().createReturn(input);
       return returnId;
     },
+    /** Approve a requested return; approval triggers the Shopify push, so poll it to completion. */
+    async approveReturn(returnId: string, opts: { intervalMs?: number; maxAttempts?: number } = {}) {
+      await getReturnsService().approveReturn(returnId);
+      await this.fetchReturn(returnId);
+      if (this.current?.sync.shopify === "pending") {
+        return this.pollSync(returnId, "shopify", opts);
+      }
+    },
+    async rejectReturn(returnId: string) {
+      await getReturnsService().rejectReturn(returnId);
+      await this.fetchReturn(returnId);
+    },
+    async cancelReturn(returnId: string) {
+      await getReturnsService().cancelReturn(returnId);
+      await this.fetchReturn(returnId);
+    },
     async loadOrder(orderId: string) {
       return getReturnsService().getOrderForReturn(orderId);
     },

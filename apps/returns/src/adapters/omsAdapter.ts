@@ -169,6 +169,21 @@ export const omsAdapter: ReturnsService = {
     return { returnId: resp.data.returnId };
   },
 
+  async approveReturn(returnId) {
+    const resp: any = await omsApi({ url: `oms/returns/${returnId}/approve`, method: "POST" });
+    if (commonUtil.hasError(resp)) throw new Error("Failed to approve return");
+  },
+
+  async rejectReturn(returnId) {
+    const resp: any = await omsApi({ url: `oms/returns/${returnId}/reject`, method: "POST" });
+    if (commonUtil.hasError(resp)) throw new Error("Failed to reject return");
+  },
+
+  async cancelReturn(returnId) {
+    const resp: any = await omsApi({ url: `oms/returns/${returnId}/cancel`, method: "POST" });
+    if (commonUtil.hasError(resp)) throw new Error("Failed to cancel return");
+  },
+
   async getOrderForReturn(orderId) {
     const resp: any = await omsApi({ url: `oms/orders/${orderId}`, method: "GET" });
     if (commonUtil.hasError(resp)) throw new Error("Order not found");
