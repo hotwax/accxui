@@ -95,6 +95,37 @@ describe("stubAdapter", () => {
     expect(reasons.every((r) => r.returnReasonId.startsWith("APPEASE_"))).toBe(true);
   });
 
+  it("co-creates a lost-in-shipment appeasement with real product lines and a summed refund", async () => {
+    __resetStub();
+    const { appeasementReturnId } = await stubAdapter.createReturn({
+      orderId: "DEMO-1001",
+      items: [],
+      appeasement: {
+        currencyUomId: "USD", reasonId: "APPEASE_GOODWILL",
+        items: [{ orderItemSeqId: "00001", quantity: 1 }], // Classic Tee @ 19.99
+      },
+    });
+    const detail = await stubAdapter.getReturn(appeasementReturnId!);
+    expect(detail.type).toBe("appeasement");
+    expect(detail.items).toHaveLength(1);
+    expect(detail.items[0].productId).toBe("P1");
+    expect(detail.items[0].returnQuantity).toBe(1);
+    // Default refund = unitPrice × qty (no override supplied).
+    expect(detail.appeasement?.amount).toBeCloseTo(19.99, 2);
+  });
+
+  it("an amount-only appeasement still persists no product lines", async () => {
+    __resetStub();
+    const { appeasementReturnId } = await stubAdapter.createReturn({
+      orderId: "DEMO-1001",
+      items: [],
+      appeasement: { amount: 8.5, currencyUomId: "USD", reasonId: "APPEASE_GOODWILL" },
+    });
+    const detail = await stubAdapter.getReturn(appeasementReturnId!);
+    expect(detail.items).toHaveLength(0);
+    expect(detail.appeasement?.amount).toBe(8.5);
+  });
+
   it("settles an approved appeasement to synced with a shopifyRefundId (not a return id)", async () => {
     const { appeasementReturnId } = await stubAdapter.createReturn({
       orderId: "DEMO-1001",

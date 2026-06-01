@@ -125,22 +125,39 @@ export const stubAdapter: ReturnsService = {
     if (returnId) makeStandard(returnId);
     if (!appeasement) return { returnId };
 
-    // Eligibility + amount cap (kept-merchandise value). Mirrors the server-side guard (Open Q6).
+    // Eligibility + amount cap (kept-merchandise value). Mirrors the server-side guard.
     const returnedQty: Record<string, number> = {};
     for (const i of items) returnedQty[i.orderItemSeqId] = (returnedQty[i.orderItemSeqId] ?? 0) + i.returnQuantity;
     const keptValue = ORDER.items.reduce(
       (sum, l) => sum + Math.max(0, l.returnableQty - (returnedQty[l.orderItemSeqId] ?? 0)) * l.unitPrice, 0);
     if (keptValue <= 0) throw new Error("Appeasement requires at least one kept item");
-    if (appeasement.amount <= 0 || appeasement.amount > keptValue) throw new Error("Appeasement amount out of range");
+
+    // Lost-in-shipment shape: real product lines from the picked order items.
+    const appItems = (appeasement.items ?? []).map((ai) => {
+      const line = ORDER.items.find((l) => l.orderItemSeqId === ai.orderItemSeqId);
+      return {
+        orderItemSeqId: ai.orderItemSeqId,
+        productId: line?.productId ?? "",
+        productName: line?.productName ?? "",
+        returnQuantity: ai.quantity,
+        returnReasonId: appeasement.reasonId,
+        returnReasonDesc: APPEASEMENT_REASONS.find((x) => x.returnReasonId === appeasement.reasonId)?.description,
+      };
+    });
+    const autoTotal = (appeasement.items ?? []).reduce(
+      (s, ai) => s + (ORDER.items.find((l) => l.orderItemSeqId === ai.orderItemSeqId)?.unitPrice ?? 0) * ai.quantity, 0);
+    // amount is the override when present, else the picked-line total (item shape) or the typed amount (amount shape).
+    const refundAmount = appeasement.amount ?? autoTotal;
+    if (refundAmount <= 0 || refundAmount > keptValue) throw new Error("Appeasement amount out of range");
 
     const appeasementReturnId = String(seq++);
     store.set(appeasementReturnId, {
       returnId: appeasementReturnId, type: "appeasement", orderId, orderName: ORDER.orderName,
       orderDate: "2026-05-22T08:00:00Z", statusId: "RETURN_REQUESTED", entryDate: now, origin: "pwa",
       sync: { shopify: "not_synced" },
-      items: [],
+      items: appItems,
       appeasement: {
-        amount: appeasement.amount, currencyUomId: appeasement.currencyUomId,
+        amount: refundAmount, currencyUomId: appeasement.currencyUomId,
         reasonId: appeasement.reasonId,
         reasonDesc: APPEASEMENT_REASONS.find((x) => x.returnReasonId === appeasement.reasonId)?.description,
         note: appeasement.note, relatedReturnId: returnId || undefined,
