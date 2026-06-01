@@ -49,6 +49,32 @@ describe("Returns happy path (stub backend)", () => {
     cy.url().should("include", "/return-detail/");
   });
 
+  it("creates a lost-in-shipment appeasement by picking a lost item", () => {
+    cy.visit("/create-return");
+    cy.get("ion-input[label='Order ID'] input").type("DEMO-1001");
+    cy.contains("ion-button", "Look up order").click();
+
+    // Keep everything (no standard-return selection) so the appeasement is eligible.
+    cy.get("[data-testid=create-appeasement-toggle]").click();
+    cy.get("[data-testid=create-appeasement-mode-items]").click();
+
+    // Pick one unit of the first lost line.
+    cy.get("[data-testid=create-appeasement-items]").contains("ion-item", "Classic Tee").within(() => {
+      cy.get("ion-select").first().click();
+    });
+    cy.get("ion-select-option").contains("1").click();
+
+    // Reason, then submit.
+    cy.get("[data-testid=create-appeasement-reason]").click();
+    cy.get("ion-select-option").first().click();
+    cy.get("[data-testid=create-submit-btn]").click();
+
+    // Lands on the appeasement detail, showing the lost product line + a refund amount.
+    cy.url().should("include", "/return-detail/");
+    cy.get("[data-testid=detail-appeasement-items]").contains("Classic Tee");
+    cy.get("[data-testid=detail-appeasement-amount]").should("contain", "19.99");
+  });
+
   it("shows a Shopify-origin return in the list", () => {
     cy.visit("/tabs/returns");
     cy.contains("ion-badge", "From Shopify");
