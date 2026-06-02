@@ -380,7 +380,7 @@ const getMaargBaseURL = () => {
 
 const getOmsURL = () => {
   const oms = getEmbeddedAppStoreSafe().oms || cookieHelper().get("oms")
-  // VITE_OMS_TYPE=moqui → use Moqui REST paths (/rest/s1/)
+  // VITE_OMS_TYPE=MOQUI → use Moqui REST paths (/rest/s1/)
   // VITE_OMS_TYPE unset  → use OFBiz paths (/api/)  [default, backward-compatible]
   let omsURL = ""
   if (oms) {
@@ -891,7 +891,7 @@ const getFacilityChipLabel = (selectedFacilityIds: string[], facilities: any[]):
 };
 
 const isMoqui = () => {
-  return import.meta.env.VITE_OMS_TYPE?.toLowerCase() === "moqui"
+  return import.meta.env.VITE_OMS_TYPE === "MOQUI"
 }
 
 export const commonUtil = {

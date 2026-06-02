@@ -12,7 +12,6 @@ interface DiscoverLocalApiServersOptions {
   fetcher?: typeof fetch;
 }
 
-const DEFAULT_LOCAL_API_SERVER_PORTS = [8080, 8443, 8081, 8082];
 const LOCAL_API_SERVER_HOST = "localhost";
 const LOCAL_API_SERVER_DISCOVERY_ENDPOINT = "/__accxui/local-api-servers";
 const REQUEST_TIMEOUT_MS = 1000;
@@ -26,11 +25,6 @@ const parsePortList = (value?: string) => {
     .filter((port) => Number.isInteger(port) && port > 0 && port <= 65535);
 };
 
-const uniquePorts = (ports: number[]) => [...new Set(ports)];
-
-const isRestSignal = (response: Response) => {
-  return response.ok || [401, 403, 405].includes(response.status);
-};
 
 const probe = async (fetcher: typeof fetch, url: string, isSignal: (response: Response) => boolean) => {
   const controller = new AbortController();
@@ -61,19 +55,6 @@ const detectLocalApiServer = async (port: number, fetcher: typeof fetch): Promis
         oms,
         port,
         signal: "loginOptions"
-      };
-    }
-  } catch {
-    // Try the base REST path before treating this port as unavailable.
-  }
-
-  try {
-    if (await probe(fetcher, baseRestUrl, isRestSignal)) {
-      return {
-        label: `Local API Server ${port}`,
-        oms,
-        port,
-        signal: "rest"
       };
     }
   } catch {
@@ -112,11 +93,7 @@ const getDevServerLocalApiServers = async (fetcher: typeof fetch) => {
 };
 
 export const getLocalApiServerProbePorts = () => {
-  return uniquePorts([
-    ...parsePortList(import.meta.env.VITE_LOCAL_API_SERVER_PORTS),
-    ...parsePortList(import.meta.env.VITE_LOCAL_MOQUI_PORTS),
-    ...DEFAULT_LOCAL_API_SERVER_PORTS
-  ]);
+  return [...new Set([...parsePortList(import.meta.env.VITE_LOCAL_API_SERVER_PORTS), 8080])];
 };
 
 export const discoverLocalApiServers = async (options: DiscoverLocalApiServersOptions = {}) => {

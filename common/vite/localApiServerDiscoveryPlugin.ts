@@ -9,7 +9,6 @@ interface LocalApiServer {
   signal: LocalApiServerSignal;
 }
 
-const DEFAULT_LOCAL_API_SERVER_PORTS = [8080, 8443, 8081, 8082];
 const LOCAL_API_SERVER_HOST = "localhost";
 const DISCOVERY_PATH = "/__accxui/local-api-servers";
 const REQUEST_TIMEOUT_MS = 700;
@@ -21,14 +20,6 @@ const parsePortList = (value?: string) => {
     .split(",")
     .map((port) => Number(port.trim()))
     .filter((port) => Number.isInteger(port) && port > 0 && port <= 65535);
-};
-
-const getProbePorts = () => {
-  return [...new Set([
-    ...parsePortList(process.env.VITE_LOCAL_API_SERVER_PORTS),
-    ...parsePortList(process.env.VITE_LOCAL_MOQUI_PORTS),
-    ...DEFAULT_LOCAL_API_SERVER_PORTS
-  ])];
 };
 
 const fetchWithTimeout = async (url: string) => {
@@ -46,10 +37,6 @@ const fetchWithTimeout = async (url: string) => {
   }
 };
 
-const isRestSignal = (response: Response) => {
-  return response.ok || [401, 403, 405].includes(response.status);
-};
-
 const detectLocalApiServer = async (port: number): Promise<LocalApiServer | null> => {
   const oms = `http://${LOCAL_API_SERVER_HOST}:${port}`;
   const baseRestUrl = `${oms}/rest/s1/`;
@@ -65,28 +52,14 @@ const detectLocalApiServer = async (port: number): Promise<LocalApiServer | null
       };
     }
   } catch {
-    // Try the base REST path before treating this port as unavailable.
-  }
-
-  try {
-    const response = await fetchWithTimeout(baseRestUrl);
-    if (isRestSignal(response)) {
-      return {
-        label: `Local API Server ${port}`,
-        oms,
-        port,
-        signal: "rest"
-      };
-    }
-  } catch {
     return null;
   }
 
   return null;
 };
 
-const discoverLocalApiServers = async () => {
-  const results = await Promise.all(getProbePorts().map(detectLocalApiServer));
+const discoverLocalApiServers = async (ports: number[]) => {
+  const results = await Promise.all(ports.map(detectLocalApiServer));
 
   return results.filter(Boolean) as LocalApiServer[];
 };
@@ -102,7 +75,8 @@ export const localApiServerDiscoveryPlugin = (): Plugin => ({
         return;
       }
 
-      const servers = await discoverLocalApiServers();
+      const ports = [...new Set([...parsePortList(server.config.env.VITE_LOCAL_API_SERVER_PORTS), 8080])];
+      const servers = await discoverLocalApiServers(ports);
       res.setHeader("content-type", "application/json");
       res.end(JSON.stringify(servers));
     });
