@@ -23,9 +23,13 @@ describe("Exchange happy path (stub backend)", () => {
     // Default fulfillment (Ship to customer) is fine; submit.
     cy.get("[data-testid=create-submit-btn]").click();
 
-    // Detail shows the exchange block as a requested return; approve to drive the push.
-    cy.get("[data-testid=detail-exchange-card]").should("exist");
-    cy.get("[data-testid=detail-approve-btn]").click();
+    // An exchange lands on the dedicated exchange-detail screen showing both halves.
+    cy.get("[data-testid=exchange-returning-section]").should("exist");
+    cy.get("[data-testid=exchange-replacement-section]").should("exist");
+    cy.get("[data-testid=exchange-replacement-order]").should("exist");
+
+    // Approve to drive the push.
+    cy.get("[data-testid=exchange-approve-btn]").click();
 
     // Two-step push settles to "Exchange confirmed".
     cy.contains("Exchange confirmed", { timeout: 15000 });

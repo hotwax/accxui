@@ -70,7 +70,7 @@
               :data-testid="`returns-row-${r.returnId}`"
               v-for="r in filteredReturns"
               :key="r.returnId"
-              @click="router.push(`/return-detail/${r.returnId}`)"
+              @click="router.push(r.isExchange ? `/exchange-detail/${r.returnId}` : `/return-detail/${r.returnId}`)"
             >
               <ion-item lines="none">
                 <ion-label>
@@ -80,6 +80,7 @@
                 </ion-label>
               </ion-item>
               <div class="metadata">
+                <ion-badge v-if="r.isExchange" color="secondary" data-testid="returns-exchange-badge">{{ translate("Exchange") }}</ion-badge>
                 <ion-badge v-if="r.type === 'appeasement'" color="warning" data-testid="returns-appeasement-badge">{{ translate("Appeasement") }}</ion-badge>
                 <ion-badge v-if="r.origin === 'shopify'" color="tertiary">{{ translate("From Shopify") }}</ion-badge>
                 <ion-badge v-if="r.sync" :color="syncColor(r.sync.shopify)">{{ syncLabel(r.sync.shopify) }}</ion-badge>

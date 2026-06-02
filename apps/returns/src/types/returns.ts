@@ -20,6 +20,9 @@ export interface ShopifySync {
   // Exchange create-push step 2 (returnProcess). PROC_OK is the authoritative "exchange confirmed".
   processStatusId?: string | null;     // PROC_OK | PROC_PENDING | PROC_FAILED | null
   processErrorMessage?: string | null; // present when processStatusId == PROC_FAILED
+  // The backend marks an exchange HERE (return-half linked to a replacement order), not at the top level.
+  isExchange?: boolean | null;
+  replacementOrderId?: string | null;  // the outgoing replacement ("exchange") order id
 }
 
 /** Outcome of an outbound push trigger (the "failed" case is surfaced as a thrown error instead). */
@@ -52,14 +55,18 @@ export interface AppeasementFields {
   relatedReturnId?: string; // the standard return created alongside it
 }
 
-/** The replacement order, present on a ReturnDetail when isExchange === true. */
+/**
+ * The replacement order linkage, present on a ReturnDetail when isExchange === true. The real backend's
+ * return detail only carries the replacementOrderId (via shopifySync); the order-level fields below are
+ * optional and, when absent, sourced from getReplacementOrder on the exchange-detail screen.
+ */
 export interface ExchangeDetail {
   replacementOrderId: string;
   orderName?: string;
-  fulfillmentType: FulfillmentType;
-  orderStatusId: string; // ORDER_COMPLETED (immediate) | ORDER_APPROVED (shipped, in fulfillment)
-  items: Array<{ productId: string; quantity: number; unitPrice?: number; itemDescription?: string }>;
-  exchangeCreditAmount: number; // 0 = even swap
+  fulfillmentType?: FulfillmentType;
+  orderStatusId?: string; // ORDER_COMPLETED (immediate) | ORDER_APPROVED (shipped, in fulfillment)
+  items?: Array<{ productId: string; quantity: number; unitPrice?: number; itemDescription?: string }>;
+  exchangeCreditAmount?: number; // 0 / absent = even swap
 }
 
 /** A single lost order line picked for a lost-in-shipment appeasement. */
@@ -112,6 +119,9 @@ export interface ReturnSummary {
   returnChannelEnumId?: string;
   origin?: ReturnOrigin;
   sync?: Record<SyncTarget, SyncState>;
+  // True when this row is the return-half of an exchange. Lets the list open exchange rows on the
+  // exchange page directly (no redirects). Sourced from the list row's isExchange / shopifySync.isExchange.
+  isExchange?: boolean;
   // Return type discriminator. Optional on a summary (the list endpoint may omit it); the adapter
   // defaults it to "standard". An "appeasement" row renders a type badge.
   type?: ReturnType;
@@ -174,6 +184,34 @@ export interface OrderForReturn {
   billingEmail?: string;
 }
 
+/** A line on the outgoing replacement order shown on the exchange-detail screen. */
+export interface ReplacementOrderItem {
+  productId: string;
+  productName: string; // "" when the backend doesn't supply one; views fall back to productId
+  sku?: string;
+  quantity: number;
+  unitPrice: number;
+}
+
+/**
+ * The outgoing replacement ("exchange") order, fetched for the exchange-detail screen's replacement
+ * panel via getReplacementOrder(exchange.replacementOrderId). Order-level detail beyond the mirrored
+ * lines the return detail's `exchange` block already carries — date, status, total, fulfillment/tracking.
+ */
+export interface ReplacementOrderDetail {
+  orderId: string;
+  orderName: string;            // customer-facing name; falls back to orderId when absent
+  orderDate?: string;
+  statusId: string;             // ORDER_APPROVED (shipped, in fulfillment) | ORDER_COMPLETED (handed over)
+  currencyUomId: string;        // defaults to USD when absent
+  grandTotal?: number;          // order total (trusted from backend)
+  fulfillmentType?: FulfillmentType;
+  shipmentMethod?: string;      // fulfillment method label
+  trackingCode?: string;        // shipped fulfillment: tracking number, when available
+  carrier?: string;             // shipped fulfillment: carrier label, when available
+  items: ReplacementOrderItem[];
+}
+
 export interface ReturnReason {
   returnReasonId: string;
   description: string;
@@ -188,9 +226,16 @@ export interface CreateReturnInput {
 
 export interface CreateExchangeInput {
   orderId: string;
-  fulfillmentType: FulfillmentType;
   returnItems: ReturnItemInput[];     // what comes back (same shape as a return line)
   exchangeItems: ExchangeItemInput[]; // what goes out (mirrored from returnItems for same-product)
   note?: string;
   currencyUomId?: string;
+  // No fulfillmentType: the replacement order is created at the _NA_ facility; how it's fulfilled is
+  // decided on the exchange's approval page (Approve = broker / Complete = fulfill from a chosen facility).
+}
+
+/** A physical facility the operator can fulfill an exchange from (the Complete picker). */
+export interface Facility {
+  facilityId: string;
+  facilityName: string;
 }

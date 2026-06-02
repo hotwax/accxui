@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { mapReturnDetail, mapOrderToReturnable, mapReturnType, APPEASEMENT_RETURN_TYPE_ID, buildAppeasementCreateBody, buildExchangeCreateBody } from "@/adapters/omsAdapter";
+import { mapReturnDetail, mapOrderToReturnable, mapReplacementOrder, mapReturnType, APPEASEMENT_RETURN_TYPE_ID, buildAppeasementCreateBody, buildExchangeCreateBody } from "@/adapters/omsAdapter";
 
 describe("mapReturnDetail", () => {
   it("maps a synced shopify-origin return (PUSH_OK + SHOPIFY_RTN_ID)", () => {
@@ -239,6 +239,17 @@ describe("exchange mapping", () => {
     expect(d.sync.shopify).toBe("synced");
   });
 
+  it("detects an exchange from shopifySync (isExchange + replacementOrderId), no top-level block", () => {
+    // The real backend marks the exchange on shopifySync, not at the top level (order M100358 shape).
+    const d = mapReturnDetail({
+      returnDetail: { returnId: "M100358", statusId: "RETURN_REQUESTED", entryDate: 1, orderId: "M100620", currencyUomId: "USD" },
+      items: [{ orderItemSeqId: "01", productId: "24050", returnQuantity: 1, returnReasonId: "DEFECTIVE" }],
+      shopifySync: { synced: false, shopifyReturnId: null, isExchange: true, replacementOrderId: "M100621" },
+    });
+    expect(d.isExchange).toBe(true);
+    expect(d.exchange?.replacementOrderId).toBe("M100621");
+  });
+
   it("leaves a non-exchange return with isExchange undefined and the standard collapse", () => {
     const d = mapReturnDetail({
       returnDetail: { returnId: "M52", statusId: "RETURN_APPROVED", entryDate: 1 },
@@ -297,15 +308,14 @@ describe("buildAppeasementCreateBody", () => {
 describe("buildExchangeCreateBody", () => {
   const base = {
     orderId: "DEMO-1001",
-    fulfillmentType: "SHIPPED" as const,
     returnItems: [{ orderItemSeqId: "00001", returnQuantity: 1, returnReasonId: "RTN_SIZE_EXCHANGE" }],
     exchangeItems: [{ productId: "P1", quantity: 1 }],
   };
 
-  it("sends orderId, fulfillmentType, returnItems (seqId/qty/reason only) and exchangeItems", () => {
+  it("sends orderId, returnItems (seqId/qty/reason only) and exchangeItems — no fulfillmentType", () => {
     const body = buildExchangeCreateBody({ ...base, currencyUomId: "USD" });
     expect(body.orderId).toBe("DEMO-1001");
-    expect(body.fulfillmentType).toBe("SHIPPED");
+    expect("fulfillmentType" in body).toBe(false);
     expect(body.returnItems).toEqual([{ orderItemSeqId: "00001", returnQuantity: 1, returnReasonId: "RTN_SIZE_EXCHANGE" }]);
     expect(body.exchangeItems).toEqual([{ productId: "P1", quantity: 1 }]);
     expect(body.currencyUomId).toBe("USD");
@@ -320,5 +330,45 @@ describe("buildExchangeCreateBody", () => {
     const body = buildExchangeCreateBody(base);
     expect("note" in body).toBe(false);
     expect("currencyUomId" in body).toBe(false);
+  });
+});
+
+describe("mapReplacementOrder", () => {
+  it("maps order header, fulfillment/tracking and flattened line items", () => {
+    const o = mapReplacementOrder({
+      orderDetail: {
+        orderId: "EXC100100", orderName: "EXC-#1001-1", orderDate: "2026-05-29T12:00:00Z",
+        orderStatusId: "ORDER_APPROVED", currencyUomId: "USD", grandTotal: 39.98,
+        shipGroups: [{
+          shipmentMethod: "Standard", trackingCode: "1Z999AA10123456784", carrier: "UPS",
+          items: [
+            { orderItemSeqId: "00001", productId: "P1", productName: "Classic Tee", sku: "TEE-1", quantity: 1, unitPrice: 19.99 },
+            { orderItemSeqId: "00002", productId: "P2", productName: "Denim Jacket", quantity: 1, unitPrice: 19.99 },
+          ],
+        }],
+      },
+    });
+    expect(o.orderId).toBe("EXC100100");
+    expect(o.orderName).toBe("EXC-#1001-1");
+    expect(o.statusId).toBe("ORDER_APPROVED");
+    expect(o.grandTotal).toBe(39.98);
+    expect(o.trackingCode).toBe("1Z999AA10123456784");
+    expect(o.carrier).toBe("UPS");
+    expect(o.shipmentMethod).toBe("Standard");
+    expect(o.items).toHaveLength(2);
+    expect(o.items[0]).toMatchObject({ productId: "P1", productName: "Classic Tee", sku: "TEE-1", quantity: 1, unitPrice: 19.99 });
+  });
+
+  it("defaults currency to USD, falls back orderName to orderId, and coerces numeric strings", () => {
+    const o = mapReplacementOrder({
+      orderDetail: {
+        orderId: "EXC2", orderStatusId: "ORDER_COMPLETED",
+        shipGroups: [{ items: [{ orderItemSeqId: "00001", productId: "P1", quantity: "2", unitPrice: "10.00" }] }],
+      },
+    });
+    expect(o.currencyUomId).toBe("USD");
+    expect(o.orderName).toBe("EXC2");
+    expect(o.grandTotal).toBeUndefined();
+    expect(o.items[0]).toMatchObject({ productId: "P1", productName: "", quantity: 2, unitPrice: 10 });
   });
 });

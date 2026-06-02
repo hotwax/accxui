@@ -5,7 +5,7 @@ vi.stubEnv("VITE_RETURNS_BACKEND", "stub");
 
 import { useReturnsStore } from "@/store/returnsStore";
 import { getReturnsService } from "@/services/ReturnsService";
-import { __resetStub } from "@/adapters/stubAdapter";
+import { __resetStub, stubAdapter } from "@/adapters/stubAdapter";
 
 describe("returnsStore CRUD (stub adapter)", () => {
   beforeEach(() => { setActivePinia(createPinia()); __resetStub(); });
@@ -195,7 +195,7 @@ describe("returnsStore CRUD (stub adapter)", () => {
   it("submits an exchange and drives it to synced via approve+poll (PROC_OK)", async () => {
     const store = useReturnsStore();
     const returnId = await store.submitExchange({
-      orderId: "DEMO-1001", fulfillmentType: "SHIPPED",
+      orderId: "DEMO-1001",
       returnItems: [{ orderItemSeqId: "00001", returnQuantity: 1, returnReasonId: "RTN_SIZE_EXCHANGE" }],
       exchangeItems: [{ productId: "P1", quantity: 1 }],
     });
@@ -210,10 +210,46 @@ describe("returnsStore CRUD (stub adapter)", () => {
     expect(store.current?.shopifySync?.processStatusId).toBe("PROC_OK");
   });
 
+  it("approving an exchange never fires the plain pushToShopify (only polls the auto exchange push)", async () => {
+    const store = useReturnsStore();
+    const returnId = await store.submitExchange({
+      orderId: "DEMO-1001",
+      returnItems: [{ orderItemSeqId: "00001", returnQuantity: 1, returnReasonId: "RTN_SIZE_EXCHANGE" }],
+      exchangeItems: [{ productId: "P1", quantity: 1 }],
+    });
+    await store.fetchReturn(returnId);
+    // Real backend: the exchange push is async, so the return still reads not_synced right after approve.
+    // A correct client must NOT react to that gap by kicking the plain pushToShopify (it omits the exchange
+    // line items and races the automatic exchange push → phantom "invalid quantity" PUSH_FAILED).
+    const pushSpy = vi.spyOn(stubAdapter, "pushToTarget");
+    await store.approveReturn(returnId, { intervalMs: 0, maxAttempts: 6 });
+    expect(pushSpy).not.toHaveBeenCalled();
+    // The automatic exchange push (driven by polling) still settles it to synced (PROC_OK).
+    expect(store.current?.sync.shopify).toBe("synced");
+    expect(store.current?.shopifySync?.processStatusId).toBe("PROC_OK");
+    pushSpy.mockRestore();
+  });
+
+  it("loadReplacementOrder returns the outgoing order for an exchange", async () => {
+    const store = useReturnsStore();
+    const returnId = await store.submitExchange({
+      orderId: "DEMO-1001",
+      returnItems: [{ orderItemSeqId: "00001", returnQuantity: 1, returnReasonId: "RTN_SIZE_EXCHANGE" }],
+      exchangeItems: [{ productId: "P1", quantity: 1 }],
+    });
+    await store.fetchReturn(returnId);
+    const replacementOrderId = store.current?.exchange?.replacementOrderId;
+    expect(replacementOrderId).toBeTruthy();
+    const order = await store.loadReplacementOrder(replacementOrderId!);
+    expect(order.orderId).toBe(replacementOrderId);
+    expect(order.statusId).toBe("ORDER_CREATED");
+    expect(order.items[0].productId).toBe("P1");
+  });
+
   it("retryExchangePush re-arms and polls a stuck exchange to synced", async () => {
     const store = useReturnsStore();
     const returnId = await store.submitExchange({
-      orderId: "DEMO-1001", fulfillmentType: "SHIPPED",
+      orderId: "DEMO-1001",
       returnItems: [{ orderItemSeqId: "00001", returnQuantity: 1, returnReasonId: "RTN_SIZE_EXCHANGE" }],
       exchangeItems: [{ productId: "P1", quantity: 1 }],
     });

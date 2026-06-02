@@ -77,15 +77,15 @@
                   <p>{{ r.exchange.fulfillmentType === 'IMMEDIATE' ? translate("Handed over in store") : translate("Shipped to customer") }}</p>
                   <p class="muted">{{ r.exchange.orderStatusId === 'ORDER_COMPLETED' ? translate("Replacement completed") : translate("Replacement approved — in fulfillment") }}</p>
                   <ion-list data-testid="detail-exchange-items">
-                    <ion-item v-for="(it, idx) in r.exchange.items" :key="idx" lines="none">
+                    <ion-item v-for="(it, idx) in (r.exchange.items || [])" :key="idx" lines="none">
                       <ion-label>
                         <h3>{{ it.itemDescription || it.productId }}</h3>
                         <p>{{ translate("Quantity") }}: {{ it.quantity }}</p>
                       </ion-label>
                     </ion-item>
                   </ion-list>
-                  <p class="muted">{{ r.exchange.exchangeCreditAmount > 0
-                    ? `${translate('Refund difference owed')}: ${commonUtil.formatCurrency(r.exchange.exchangeCreditAmount, r.appeasement?.currencyUomId || 'USD')}`
+                  <p class="muted">{{ (r.exchange.exchangeCreditAmount ?? 0) > 0
+                    ? `${translate('Refund difference owed')}: ${commonUtil.formatCurrency(r.exchange.exchangeCreditAmount ?? 0, r.appeasement?.currencyUomId || 'USD')}`
                     : translate("Even swap — no refund difference") }}</p>
                 </ion-card-content>
               </ion-card>

@@ -3,9 +3,9 @@ import { maargApiKey } from "@/util/maargAuth";
 import type { ReturnsService } from "@/services/ReturnsService";
 import type {
   AppeasementInput, AppeasementItemInput,
-  CreateExchangeInput, ExchangeDetail, ExchangeItemInput, FulfillmentType,
-  CreateReturnInput, OrderForReturn, PushOutcome, ReturnableLine, ReturnDetail, ReturnReason,
-  ReturnSummary, ReturnType, SyncState, SyncTarget,
+  CreateExchangeInput, ExchangeDetail, ExchangeItemInput, Facility, FulfillmentType,
+  CreateReturnInput, OrderForReturn, PushOutcome, ReplacementOrderDetail, ReturnableLine, ReturnDetail,
+  ReturnReason, ReturnSummary, ReturnType, SyncState, SyncTarget,
 } from "@/types/returns";
 import {
   resolveOrigin, resolveExchangeSyncState, resolveShopifySyncState, type Identification, type ShopifySync,
@@ -49,23 +49,30 @@ export function mapReturnDetail(raw: RawReturnDetail): ReturnDetail {
   const idents = raw.identifications ?? [];
   const items = raw.items ?? [];
   const origin = resolveOrigin(idents);
-  const isExchange = raw.isExchange === true;
+  // The backend marks an exchange on `shopifySync` (shopifySync.isExchange + replacementOrderId). Older/stub
+  // payloads use a top-level isExchange + exchange block, so accept both.
+  const isExchange = raw.isExchange === true || raw.shopifySync?.isExchange === true;
+  const replacementOrderId = raw.exchange?.replacementOrderId ?? raw.shopifySync?.replacementOrderId ?? undefined;
   const shopify: SyncState = isExchange
     ? resolveExchangeSyncState(raw.shopifySync)
     : resolveShopifySyncState(raw.shopifySync);
-  const exchange: ExchangeDetail | undefined = isExchange && raw.exchange
+  // The detail only needs to carry the replacement order id; the exchange-detail screen fetches the rest
+  // (status, fulfillment, lines, total) via getReplacementOrder. Use the richer raw.exchange block when present.
+  const exchange: ExchangeDetail | undefined = isExchange && replacementOrderId
     ? {
-        replacementOrderId: raw.exchange.replacementOrderId,
-        orderName: raw.exchange.orderName,
-        fulfillmentType: raw.exchange.fulfillmentType,
-        orderStatusId: raw.exchange.orderStatusId,
-        items: (raw.exchange.items ?? []).map((it) => ({
-          productId: it.productId,
-          quantity: Number(it.quantity),
-          unitPrice: it.unitPrice != null ? Number(it.unitPrice) : undefined,
-          itemDescription: it.itemDescription,
-        })),
-        exchangeCreditAmount: Number(raw.exchange.exchangeCreditAmount ?? 0),
+        replacementOrderId,
+        orderName: raw.exchange?.orderName,
+        fulfillmentType: raw.exchange?.fulfillmentType,
+        orderStatusId: raw.exchange?.orderStatusId,
+        items: raw.exchange?.items
+          ? raw.exchange.items.map((it) => ({
+              productId: it.productId,
+              quantity: Number(it.quantity),
+              unitPrice: it.unitPrice != null ? Number(it.unitPrice) : undefined,
+              itemDescription: it.itemDescription,
+            }))
+          : undefined,
+        exchangeCreditAmount: raw.exchange?.exchangeCreditAmount != null ? Number(raw.exchange.exchangeCreditAmount) : undefined,
       }
     : undefined;
   const shopifyReturnId = raw.shopifySync?.shopifyReturnId
@@ -134,9 +141,24 @@ interface RawOrderItem {
   alreadyReturnedQuantity?: number | string;
   returnableQuantity?: number | string;
 }
+interface RawShipGroup {
+  items?: RawOrderItem[];
+  shipmentMethod?: string;
+  trackingCode?: string;
+  carrier?: string;
+}
 interface RawOrder {
   // orderName/externalOrderId are the customer-facing name; orderExternalId is the GID (never displayed).
-  orderDetail: { orderId: string; orderName?: string; externalOrderId?: string; orderExternalId?: string; billingEmail?: string; currencyUomId?: string; shipGroups?: Array<{ items?: RawOrderItem[] }> };
+  orderDetail: { orderId: string; orderName?: string; externalOrderId?: string; orderExternalId?: string; billingEmail?: string; currencyUomId?: string; shipGroups?: Array<RawShipGroup> };
+}
+interface RawReplacementOrder {
+  orderDetail: {
+    orderId: string; orderName?: string; externalOrderId?: string; orderDate?: string | number;
+    // The order's status is the EXISTING `orderStatusId` field (ORDER_APPROVED | ORDER_COMPLETED) —
+    // not a new `statusId` alias. Mirrors the same field on the return detail's exchange block.
+    orderStatusId?: string; currencyUomId?: string; grandTotal?: number | string;
+    fulfillmentType?: FulfillmentType; shipGroups?: Array<RawShipGroup>;
+  };
 }
 
 /** Map `GET /oms/orders/{id}` into an OrderForReturn, trusting the backend's returnableQuantity. */
@@ -165,6 +187,38 @@ export function mapOrderToReturnable(raw: RawOrder): OrderForReturn {
     orderName: raw.orderDetail.orderName ?? raw.orderDetail.externalOrderId ?? "",
     currencyUomId: raw.orderDetail.currencyUomId ?? "USD",
     billingEmail: raw.orderDetail.billingEmail,
+    items,
+  };
+}
+
+/**
+ * Map `GET /oms/orders/{id}` into a ReplacementOrderDetail for the exchange-detail replacement panel.
+ * Order-level detail (date, status, total, fulfillment/tracking) plus the flattened ship-group lines.
+ * Trusts the backend `grandTotal`; defaults currency to USD; falls back orderName to the order id.
+ */
+export function mapReplacementOrder(raw: RawReplacementOrder): ReplacementOrderDetail {
+  const od = raw.orderDetail;
+  const groups = od.shipGroups ?? [];
+  const items = groups.flatMap((g) => g.items ?? []).map((it) => ({
+    productId: it.productId ?? "",
+    productName: it.productName ?? "",
+    sku: it.sku ?? undefined,
+    quantity: Number(it.quantity),
+    unitPrice: Number(it.unitPrice),
+  }));
+  // Fulfillment/tracking ride the (typically single) ship group.
+  const fulfillment = groups.find((g) => g.trackingCode || g.shipmentMethod || g.carrier);
+  return {
+    orderId: od.orderId,
+    orderName: od.orderName ?? od.externalOrderId ?? od.orderId,
+    orderDate: od.orderDate != null ? String(od.orderDate) : undefined,
+    statusId: od.orderStatusId ?? "",
+    currencyUomId: od.currencyUomId ?? "USD",
+    grandTotal: od.grandTotal != null ? Number(od.grandTotal) : undefined,
+    fulfillmentType: od.fulfillmentType,
+    shipmentMethod: fulfillment?.shipmentMethod,
+    trackingCode: fulfillment?.trackingCode,
+    carrier: fulfillment?.carrier,
     items,
   };
 }
@@ -202,15 +256,16 @@ export function buildAppeasementCreateBody(orderId: string, a: AppeasementInput,
 }
 
 /** Build the POST body for the customerExchange create call. unitPrice is omitted per item when absent
- *  (backend defaults to the product price → even swap). Optional note/currencyUomId are omitted when empty. */
+ *  (backend defaults to the product price → even swap). Optional note/currencyUomId are omitted when empty.
+ *  No fulfillmentType: the backend creates the replacement order at the _NA_ facility; fulfillment is
+ *  decided later on the exchange's approval page. */
 export function buildExchangeCreateBody(input: CreateExchangeInput): {
-  orderId: string; fulfillmentType: FulfillmentType;
+  orderId: string;
   returnItems: Array<{ orderItemSeqId: string; returnQuantity: number; returnReasonId: string }>;
   exchangeItems: ExchangeItemInput[]; note?: string; currencyUomId?: string;
 } {
   return {
     orderId: input.orderId,
-    fulfillmentType: input.fulfillmentType,
     returnItems: input.returnItems.map((i) => ({
       orderItemSeqId: i.orderItemSeqId,
       returnQuantity: i.returnQuantity,
@@ -251,6 +306,8 @@ export const omsAdapter: ReturnsService = {
       statusId: r.statusId,
       entryDate: String(r.entryDate),
       returnChannelEnumId: r.returnChannelEnumId,
+      // Open exchange rows on the exchange page directly. Accept the flag at the row level or on shopifySync.
+      isExchange: r.isExchange === true || r.shopifySync?.isExchange === true,
     }));
     // returnsCount is the count in this response; treated as the total for the demo's pagination.
     const total = Number(resp.data?.returnsCount ?? items.length);
@@ -317,9 +374,13 @@ export const omsAdapter: ReturnsService = {
     if (commonUtil.hasError(resp)) throw new Error("Failed to cancel return");
   },
 
-  async completeReturn(returnId) {
+  async completeReturn(returnId, facilityId) {
     // OMS -> RETURN_COMPLETED immediately; the Shopify completion (returnProcess + returnClose) runs async.
-    const resp: any = await omsApi({ url: `oms/returns/${returnId}/complete`, method: "POST" });
+    // For an exchange, facilityId is the chosen physical facility the replacement is fulfilled from.
+    const resp: any = await omsApi({
+      url: `oms/returns/${returnId}/complete`, method: "POST",
+      ...(facilityId ? { data: { facilityId } } : {}),
+    });
     if (commonUtil.hasError(resp)) throw new Error("Failed to complete return");
   },
 
@@ -333,6 +394,23 @@ export const omsAdapter: ReturnsService = {
     const resp: any = await omsApi({ url: `oms/orders/${orderId}`, method: "GET" });
     if (commonUtil.hasError(resp)) throw new Error("Order not found");
     return mapOrderToReturnable(resp.data);
+  },
+
+  async getReplacementOrder(orderId): Promise<ReplacementOrderDetail> {
+    const resp: any = await omsApi({ url: `oms/orders/${orderId}`, method: "GET" });
+    if (commonUtil.hasError(resp)) throw new Error("Replacement order not found");
+    return mapReplacementOrder(resp.data);
+  },
+
+  async listFacilities(): Promise<Facility[]> {
+    // Physical facilities only — exclude virtual ones (mirrors the transfers app's facility fetch).
+    const resp: any = await omsApi({
+      url: "oms/facilities", method: "GET",
+      params: { facilityTypeId: "VIRTUAL_FACILITY", facilityTypeId_op: "equals", facilityTypeId_not: "Y", pageSize: 250 },
+    });
+    if (commonUtil.hasError(resp)) throw new Error("Failed to load facilities");
+    const rows: any[] = Array.isArray(resp.data) ? resp.data : resp.data?.facilities ?? [];
+    return rows.map((f) => ({ facilityId: f.facilityId, facilityName: f.facilityName ?? f.facilityId }));
   },
 
   async listReturnReasons(): Promise<ReturnReason[]> {

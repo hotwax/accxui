@@ -142,33 +142,52 @@ describe("stubAdapter", () => {
 
   it("creates a same-product exchange with isExchange + an exchange block", async () => {
     const { returnId } = await stubAdapter.createExchange({
-      orderId: "DEMO-1001", fulfillmentType: "SHIPPED",
+      orderId: "DEMO-1001",
       returnItems: [{ orderItemSeqId: "00001", returnQuantity: 1, returnReasonId: "RTN_SIZE_EXCHANGE" }],
       exchangeItems: [{ productId: "P1", quantity: 1 }],
     });
     const d = await stubAdapter.getReturn(returnId);
     expect(d.isExchange).toBe(true);
     expect(d.statusId).toBe("RETURN_REQUESTED");
-    expect(d.exchange?.fulfillmentType).toBe("SHIPPED");
-    expect(d.exchange?.orderStatusId).toBe("ORDER_APPROVED");
-    expect(d.exchange?.items[0].productId).toBe("P1");
+    // Created at the _NA_ facility, in a "created" state — fulfillment is decided at approve/complete.
+    expect(d.exchange?.orderStatusId).toBe("ORDER_CREATED");
+    expect(d.exchange?.items?.[0].productId).toBe("P1");
     expect(d.exchange?.exchangeCreditAmount).toBe(0);
     expect(d.sync.shopify).toBe("not_synced");
   });
 
-  it("marks an IMMEDIATE exchange replacement order completed", async () => {
+  it("approving an exchange brokers the replacement order (ORDER_APPROVED)", async () => {
     const { returnId } = await stubAdapter.createExchange({
-      orderId: "DEMO-1001", fulfillmentType: "IMMEDIATE",
+      orderId: "DEMO-1001",
       returnItems: [{ orderItemSeqId: "00001", returnQuantity: 1, returnReasonId: "RTN_SIZE_EXCHANGE" }],
       exchangeItems: [{ productId: "P1", quantity: 1 }],
     });
+    await stubAdapter.approveReturn(returnId);
+    expect((await stubAdapter.getReturn(returnId)).exchange?.orderStatusId).toBe("ORDER_APPROVED");
+  });
+
+  it("completing an exchange from a facility marks the replacement order completed", async () => {
+    const { returnId } = await stubAdapter.createExchange({
+      orderId: "DEMO-1001",
+      returnItems: [{ orderItemSeqId: "00001", returnQuantity: 1, returnReasonId: "RTN_SIZE_EXCHANGE" }],
+      exchangeItems: [{ productId: "P1", quantity: 1 }],
+    });
+    await stubAdapter.completeReturn(returnId, "STORE_DT");
     const d = await stubAdapter.getReturn(returnId);
+    expect(d.statusId).toBe("RETURN_COMPLETED");
     expect(d.exchange?.orderStatusId).toBe("ORDER_COMPLETED");
+  });
+
+  it("lists physical facilities to fulfill an exchange from", async () => {
+    const facilities = await stubAdapter.listFacilities();
+    expect(facilities.length).toBeGreaterThan(0);
+    expect(facilities[0]).toHaveProperty("facilityId");
+    expect(facilities[0]).toHaveProperty("facilityName");
   });
 
   it("progresses an approved exchange PUSH -> PROC_OK across polls", async () => {
     const { returnId } = await stubAdapter.createExchange({
-      orderId: "DEMO-1001", fulfillmentType: "SHIPPED",
+      orderId: "DEMO-1001",
       returnItems: [{ orderItemSeqId: "00001", returnQuantity: 1, returnReasonId: "RTN_SIZE_EXCHANGE" }],
       exchangeItems: [{ productId: "P1", quantity: 1 }],
     });
@@ -183,7 +202,7 @@ describe("stubAdapter", () => {
 
   it("retryExchangePush re-arms a stuck exchange from PROC_PENDING back through PROC_OK", async () => {
     const { returnId } = await stubAdapter.createExchange({
-      orderId: "DEMO-1001", fulfillmentType: "SHIPPED",
+      orderId: "DEMO-1001",
       returnItems: [{ orderItemSeqId: "00001", returnQuantity: 1, returnReasonId: "RTN_SIZE_EXCHANGE" }],
       exchangeItems: [{ productId: "P1", quantity: 1 }],
     });
@@ -196,9 +215,37 @@ describe("stubAdapter", () => {
     expect((await stubAdapter.getReturn(returnId)).shopifySync?.processStatusId).toBe("PROC_OK");
   });
 
+  it("marks the exchange return-half isExchange on the list summary", async () => {
+    const { returnId } = await stubAdapter.createExchange({
+      orderId: "DEMO-1001",
+      returnItems: [{ orderItemSeqId: "00001", returnQuantity: 1, returnReasonId: "RTN_SIZE_EXCHANGE" }],
+      exchangeItems: [{ productId: "P1", quantity: 1 }],
+    });
+    const { items } = await stubAdapter.listReturns({ pageIndex: 0, pageSize: 50 });
+    expect(items.find((r) => r.returnId === returnId)?.isExchange).toBe(true);
+    expect(items.find((r) => r.returnId === "10000")?.isExchange).toBeFalsy();
+  });
+
+  it("getReplacementOrder returns the outgoing order detail for an exchange", async () => {
+    const { returnId, replacementOrderId } = await stubAdapter.createExchange({
+      orderId: "DEMO-1001",
+      returnItems: [{ orderItemSeqId: "00001", returnQuantity: 1, returnReasonId: "RTN_SIZE_EXCHANGE" }],
+      exchangeItems: [{ productId: "P1", quantity: 1 }],
+    });
+    expect(replacementOrderId).toBeTruthy();
+    const order = await stubAdapter.getReplacementOrder(replacementOrderId!);
+    expect(order.orderId).toBe(replacementOrderId);
+    expect(order.statusId).toBe("ORDER_CREATED");
+    expect(order.items[0].productId).toBe("P1");
+    expect(order.items[0].unitPrice).toBeGreaterThan(0);
+    expect(order.grandTotal).toBeGreaterThan(0);
+    // The seeded return id is unrelated; this is the replacement order.
+    expect(order.orderId).not.toBe(returnId);
+  });
+
   it("retryExchangePush is an idempotent no-op once the exchange is already confirmed", async () => {
     const { returnId } = await stubAdapter.createExchange({
-      orderId: "DEMO-1001", fulfillmentType: "SHIPPED",
+      orderId: "DEMO-1001",
       returnItems: [{ orderItemSeqId: "00001", returnQuantity: 1, returnReasonId: "RTN_SIZE_EXCHANGE" }],
       exchangeItems: [{ productId: "P1", quantity: 1 }],
     });

@@ -136,26 +136,9 @@
               <p v-if="appeasementHint" class="error" role="alert">{{ appeasementHint }}</p>
             </ion-card-content>
           </ion-card>
-
-          <ion-card v-if="order && hasReturnable && mode === 'exchange'" class="fulfillment">
-            <ion-card-header>
-              <ion-card-title>{{ translate("Replacement delivery") }}</ion-card-title>
-            </ion-card-header>
-            <ion-card-content>
-              <ion-segment data-testid="create-fulfillment-segment" :value="fulfillmentType"
-                @ionChange="fulfillmentType = $event.detail.value as 'SHIPPED' | 'IMMEDIATE'">
-                <ion-segment-button value="SHIPPED" data-testid="create-fulfillment-shipped">
-                  <ion-label>{{ translate("Ship to customer") }}</ion-label>
-                </ion-segment-button>
-                <ion-segment-button value="IMMEDIATE" data-testid="create-fulfillment-immediate">
-                  <ion-label>{{ translate("Hand over now") }}</ion-label>
-                </ion-segment-button>
-              </ion-segment>
-              <p class="muted">{{ fulfillmentType === 'IMMEDIATE'
-                ? translate("The replacement is handed over now and its order completes immediately.")
-                : translate("The replacement is shipped to the customer through the normal fulfillment flow.") }}</p>
-            </ion-card-content>
-          </ion-card>
+          <!-- Fulfillment is no longer chosen here. The replacement order is created at the _NA_ facility;
+               how it's fulfilled is decided on the exchange's approval page (Approve = broker / Complete =
+               fulfill from a chosen physical facility). -->
         </main>
       </div>
 
@@ -180,7 +163,7 @@ import {
 import { bagCheckOutline, checkmarkDoneOutline } from "ionicons/icons";
 import { useReturnsStore } from "@/store/returnsStore";
 import { describeApiError } from "@/util/errorMessage";
-import type { FulfillmentType, OrderForReturn, ReturnReason } from "@/types/returns";
+import type { OrderForReturn, ReturnReason } from "@/types/returns";
 
 const store = useReturnsStore();
 
@@ -196,7 +179,6 @@ const appeasementReasonId = ref<string>("");
 const appeasementNote = ref<string>("");
 const appeasementMode = ref<"amount" | "items">("amount");
 const mode = ref<"return" | "exchange">("return");
-const fulfillmentType = ref<FulfillmentType>("SHIPPED");
 function setMode(m: "return" | "exchange") {
   mode.value = m;
   if (m === "exchange") appeasementEnabled.value = false; // appeasement is unavailable for exchanges
@@ -341,14 +323,14 @@ async function submit(): Promise<string | undefined> {
     emitter.emit("presentLoader", { message: "Submitting exchange" });
     let exchangeReturnId: string | undefined;
     try {
-      exchangeReturnId = await store.submitExchange({ orderId: order.value.orderId, fulfillmentType: fulfillmentType.value, returnItems, exchangeItems, currencyUomId: order.value.currencyUomId });
+      exchangeReturnId = await store.submitExchange({ orderId: order.value.orderId, returnItems, exchangeItems, currencyUomId: order.value.currencyUomId });
     } catch (e) {
       error.value = describeApiError(e, translate("Failed to create exchange"));
       commonUtil.showToast(error.value);
     } finally {
       emitter.emit("dismissLoader");
     }
-    if (exchangeReturnId) router.push(`/return-detail/${exchangeReturnId}`);
+    if (exchangeReturnId) router.push(`/exchange-detail/${exchangeReturnId}`);
     return exchangeReturnId;
   }
   const appeasement = appeasementEnabled.value && appeasementValid.value
@@ -391,7 +373,7 @@ defineExpose({
   appeasementMode, appeasementSelections, appeasementAmountTouched,
   setAppeasementMode, setAppeasementQty, onAppeasementAmountInput,
   appeasementItemsTotal, pickedAppeasementItems, appeasementEffectiveTotal,
-  mode, fulfillmentType, setMode,
+  mode, setMode,
 });
 </script>
 

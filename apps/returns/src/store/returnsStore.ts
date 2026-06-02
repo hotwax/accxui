@@ -64,18 +64,28 @@ export const useReturnsStore = defineStore("returns", {
       return this.pollSync(returnId, "shopify", opts);
     },
     /**
-     * Approve a requested return. Approval is meant to trigger the OMS→Shopify push server-side, but that
-     * push can wedge, so if it didn't fire we kick it from the client — approval always drives the sync,
-     * with no separate manual step — then poll the in-flight push to completion.
+     * Approve a requested return. Approval triggers the OMS→Shopify push server-side; for a plain return
+     * that push can wedge, so if it didn't fire we kick it from the client (the plain `pushToShopify` is
+     * idempotent), then poll the in-flight push to completion.
+     *
+     * Exchanges are the exception: the approve SECA fully owns the *exchange* push (returnCreate WITH the
+     * replacement line items, then returnProcess), and it runs async — so the return still reads not_synced
+     * the instant we re-fetch. We must NOT react to that gap by kicking `pushToTarget`: that calls the plain
+     * `pushToShopify`, which omits the exchange items and races the automatic exchange push over the same
+     * returnable units, producing a phantom "invalid quantity" PUSH_FAILED on an exchange that actually
+     * succeeded. For an exchange we only poll; a genuinely-failed exchange is recovered via the type-correct
+     * Retry (retryExchangePush → pushExchangeToShopify).
      */
     async approveReturn(returnId: string, opts: { intervalMs?: number; maxAttempts?: number } = {}) {
       await getReturnsService().approveReturn(returnId);
       await this.fetchReturn(returnId);
       const isAppeasement = this.current?.type === "appeasement";
+      const isExchange = this.current?.isExchange === true;
       let sync = this.current?.sync.shopify;
       if (sync !== "synced") {
-        // Not pending means the backend didn't start a push (still not_synced, or a prior attempt failed) → kick it.
-        if (sync === "not_synced" || sync === "failed") {
+        // Plain return only: not pending means the backend didn't start a push (still not_synced, or a prior
+        // attempt failed) → kick it. Never for an exchange — see the doc comment above.
+        if (!isExchange && (sync === "not_synced" || sync === "failed")) {
           await getReturnsService().pushToTarget(returnId, "shopify");
         }
         sync = await this.pollSync(returnId, "shopify", opts);
@@ -116,8 +126,9 @@ export const useReturnsStore = defineStore("returns", {
      * Complete an approved/received return. The OMS transition is immediate; the Shopify completion
      * (close) runs async, so poll it to completion just like approve polls the create-push.
      */
-    async completeReturn(returnId: string, opts: { intervalMs?: number; maxAttempts?: number } = {}) {
-      await getReturnsService().completeReturn(returnId);
+    async completeReturn(returnId: string, opts: { intervalMs?: number; maxAttempts?: number } = {}, facilityId?: string) {
+      // For an exchange, facilityId is the chosen physical facility the replacement is fulfilled from.
+      await getReturnsService().completeReturn(returnId, facilityId);
       return this.pollCompletion(returnId, opts);
     },
     /** Re-run a failed Shopify completion (CLOSE_FAILED), then poll until it settles. */
@@ -139,6 +150,14 @@ export const useReturnsStore = defineStore("returns", {
     },
     async loadOrder(orderId: string) {
       return getReturnsService().getOrderForReturn(orderId);
+    },
+    /** Fetch the outgoing replacement order for an exchange (the exchange-detail replacement panel). */
+    async loadReplacementOrder(orderId: string) {
+      return getReturnsService().getReplacementOrder(orderId);
+    },
+    /** Physical facilities an exchange can be fulfilled from (the Complete picker on the exchange page). */
+    async loadFacilities() {
+      return getReturnsService().listFacilities();
     },
     async loadReasons() {
       return getReturnsService().listReturnReasons();

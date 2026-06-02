@@ -1,6 +1,6 @@
 import type {
-  CreateExchangeInput, CreateReturnInput, OrderForReturn, PushOutcome, ReturnDetail, ReturnReason,
-  ReturnSummary, SyncState, SyncTarget,
+  CreateExchangeInput, CreateReturnInput, Facility, OrderForReturn, PushOutcome, ReplacementOrderDetail,
+  ReturnDetail, ReturnReason, ReturnSummary, SyncState, SyncTarget,
 } from "@/types/returns";
 import { stubAdapter } from "@/adapters/stubAdapter";
 import { omsAdapter } from "@/adapters/omsAdapter";
@@ -18,9 +18,14 @@ export interface ReturnsService {
   cancelReturn(returnId: string): Promise<void>;
   // Complete transitions RETURN_APPROVED/RETURN_RECEIVED -> RETURN_COMPLETED and (server-side) triggers
   // the async Shopify completion (returnProcess + returnClose). retryComplete re-runs a failed close.
-  completeReturn(returnId: string): Promise<void>;
+  // For an exchange, completing fulfills the replacement order from `facilityId` (the chosen physical facility).
+  completeReturn(returnId: string, facilityId?: string): Promise<void>;
   retryComplete(returnId: string): Promise<void>;
+  // Physical facilities an exchange can be fulfilled from (the Complete picker on the exchange page).
+  listFacilities(): Promise<Facility[]>;
   getOrderForReturn(orderId: string): Promise<OrderForReturn>;
+  // The outgoing replacement order for an exchange (order-level detail for the exchange-detail panel).
+  getReplacementOrder(orderId: string): Promise<ReplacementOrderDetail>;
   listReturnReasons(): Promise<ReturnReason[]>;
   listAppeasementReasons(): Promise<ReturnReason[]>;
   pushToTarget(returnId: string, target: SyncTarget): Promise<PushOutcome>;

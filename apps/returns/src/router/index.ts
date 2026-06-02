@@ -33,6 +33,7 @@ const routes: Array<RouteRecordRaw> = [
   },
   { path: "/create-return", name: "CreateReturn", component: () => import("@/views/CreateReturn.vue"), beforeEnter: authGuard },
   { path: "/return-detail/:returnId", name: "ReturnDetail", component: () => import("@/views/ReturnDetail.vue"), props: true, beforeEnter: authGuard },
+  { path: "/exchange-detail/:returnId", name: "ExchangeDetail", component: () => import("@/views/ExchangeDetail.vue"), props: true, beforeEnter: authGuard },
 ];
 
 const router = createRouter({ history: createWebHistory(import.meta.env.BASE_URL), routes });
