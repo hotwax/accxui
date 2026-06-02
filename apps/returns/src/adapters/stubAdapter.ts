@@ -1,6 +1,6 @@
 import type { ReturnsService } from "@/services/ReturnsService";
 import type {
-  CreateReturnInput, OrderForReturn, ReturnDetail, ReturnReason,
+  CreateExchangeInput, CreateReturnInput, OrderForReturn, ReturnDetail, ReturnReason,
   ReturnSummary, SyncState, SyncTarget,
 } from "@/types/returns";
 
@@ -171,6 +171,52 @@ export const stubAdapter: ReturnsService = {
     // Navigate to the standard return when there is one, else to the stand-alone appeasement.
     return { returnId: returnId || appeasementReturnId, appeasementReturnId };
   },
+  async createExchange({ orderId, fulfillmentType, returnItems, exchangeItems }: CreateExchangeInput) {
+    const now = "2026-05-29T12:00:00Z";
+    const returnId = String(seq++);
+    const replacementOrderId = `EXC${returnId}`;
+    store.set(returnId, {
+      returnId, type: "standard", orderId, orderName: ORDER.orderName, orderDate: "2026-05-22T08:00:00Z",
+      statusId: "RETURN_REQUESTED", entryDate: now, origin: "pwa",
+      sync: { shopify: "not_synced" },
+      items: returnItems.map((i) => {
+        const line = ORDER.items.find((l) => l.orderItemSeqId === i.orderItemSeqId);
+        return {
+          orderItemSeqId: i.orderItemSeqId, productId: line?.productId ?? "", productName: line?.productName ?? "",
+          returnQuantity: i.returnQuantity, returnReasonId: i.returnReasonId,
+          returnReasonDesc: REASONS.find((x) => x.returnReasonId === i.returnReasonId)?.description,
+        };
+      }),
+      isExchange: true,
+      exchange: {
+        replacementOrderId, orderName: `${ORDER.orderName}-EXC`, fulfillmentType,
+        orderStatusId: fulfillmentType === "IMMEDIATE" ? "ORDER_COMPLETED" : "ORDER_APPROVED",
+        items: exchangeItems.map((e) => {
+          const line = ORDER.items.find((l) => l.productId === e.productId);
+          return { productId: e.productId, quantity: e.quantity, unitPrice: line?.unitPrice, itemDescription: line?.productName };
+        }),
+        exchangeCreditAmount: 0,
+      },
+      statuses: [{ statusId: "RETURN_REQUESTED", statusDate: now }],
+      externalIds: { shopify: null },
+      shopifySync: null,
+      pushAttempted: false, pollsUntilSynced: 0,
+      closeAttempted: false, pollsUntilClosed: 0,
+    });
+    return { returnId, replacementOrderId };
+  },
+
+  async retryExchangePush(returnId) {
+    const r = store.get(returnId);
+    if (!r) throw new Error("Return not found");
+    if (!r.isExchange) throw new Error("retryExchangePush called on a non-exchange return");
+    if (r.sync.shopify === "synced") return; // already confirmed (PROC_OK) — idempotent no-op, mirrors the live backend
+    // Idempotent resume: re-arm the push so getSyncStatus re-progresses, clearing any error.
+    r.pushAttempted = true;
+    r.sync = { shopify: "pending" };
+    r.shopifySync = { ...(r.shopifySync ?? {}), pushStatusId: "PUSH_PENDING", processStatusId: null, processErrorMessage: null };
+  },
+
   async approveReturn(returnId) {
     const r = store.get(returnId);
     if (!r) throw new Error("Return not found");
@@ -244,6 +290,20 @@ export const stubAdapter: ReturnsService = {
   async getSyncStatus(returnId): Promise<Record<SyncTarget, SyncState>> {
     const r = store.get(returnId);
     if (!r) throw new Error("Return not found");
+    if (r.isExchange && r.pushAttempted && r.sync.shopify !== "synced") {
+      const ss = r.shopifySync ?? {};
+      if (ss.processStatusId === "PROC_PENDING") {
+        // step 2 completes
+        r.shopifySync = { ...ss, processStatusId: "PROC_OK" };
+        r.sync = { shopify: "synced" };
+        r.externalIds = { shopify: ss.shopifyReturnId ?? "gid://shopify/Return/EXC999" };
+      } else {
+        // step 1: returnCreate done, process now pending
+        r.shopifySync = { ...ss, pushStatusId: "PUSH_OK", processStatusId: "PROC_PENDING", shopifyReturnId: ss.shopifyReturnId ?? "gid://shopify/Return/EXC999" };
+        r.sync = { shopify: "pending" };
+      }
+      return r.sync;
+    }
     if (r.pushAttempted && r.sync.shopify !== "synced") {
       if (r.pollsUntilSynced > 0) {
         r.pollsUntilSynced -= 1;

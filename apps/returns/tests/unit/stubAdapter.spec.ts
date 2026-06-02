@@ -139,4 +139,74 @@ describe("stubAdapter", () => {
     expect(settled.shopifySync?.shopifyRefundId).toBeTruthy();
     expect(settled.shopifySync?.shopifyReturnId ?? null).toBeNull();
   });
+
+  it("creates a same-product exchange with isExchange + an exchange block", async () => {
+    const { returnId } = await stubAdapter.createExchange({
+      orderId: "DEMO-1001", fulfillmentType: "SHIPPED",
+      returnItems: [{ orderItemSeqId: "00001", returnQuantity: 1, returnReasonId: "RTN_SIZE_EXCHANGE" }],
+      exchangeItems: [{ productId: "P1", quantity: 1 }],
+    });
+    const d = await stubAdapter.getReturn(returnId);
+    expect(d.isExchange).toBe(true);
+    expect(d.statusId).toBe("RETURN_REQUESTED");
+    expect(d.exchange?.fulfillmentType).toBe("SHIPPED");
+    expect(d.exchange?.orderStatusId).toBe("ORDER_APPROVED");
+    expect(d.exchange?.items[0].productId).toBe("P1");
+    expect(d.exchange?.exchangeCreditAmount).toBe(0);
+    expect(d.sync.shopify).toBe("not_synced");
+  });
+
+  it("marks an IMMEDIATE exchange replacement order completed", async () => {
+    const { returnId } = await stubAdapter.createExchange({
+      orderId: "DEMO-1001", fulfillmentType: "IMMEDIATE",
+      returnItems: [{ orderItemSeqId: "00001", returnQuantity: 1, returnReasonId: "RTN_SIZE_EXCHANGE" }],
+      exchangeItems: [{ productId: "P1", quantity: 1 }],
+    });
+    const d = await stubAdapter.getReturn(returnId);
+    expect(d.exchange?.orderStatusId).toBe("ORDER_COMPLETED");
+  });
+
+  it("progresses an approved exchange PUSH -> PROC_OK across polls", async () => {
+    const { returnId } = await stubAdapter.createExchange({
+      orderId: "DEMO-1001", fulfillmentType: "SHIPPED",
+      returnItems: [{ orderItemSeqId: "00001", returnQuantity: 1, returnReasonId: "RTN_SIZE_EXCHANGE" }],
+      exchangeItems: [{ productId: "P1", quantity: 1 }],
+    });
+    await stubAdapter.approveReturn(returnId);
+    let sync = await stubAdapter.getSyncStatus(returnId); // step 1: PUSH_OK / PROC_PENDING
+    expect(sync.shopify).toBe("pending");
+    sync = await stubAdapter.getSyncStatus(returnId);      // step 2: PROC_OK
+    expect(sync.shopify).toBe("synced");
+    const d = await stubAdapter.getReturn(returnId);
+    expect(d.shopifySync?.processStatusId).toBe("PROC_OK");
+  });
+
+  it("retryExchangePush re-arms a stuck exchange from PROC_PENDING back through PROC_OK", async () => {
+    const { returnId } = await stubAdapter.createExchange({
+      orderId: "DEMO-1001", fulfillmentType: "SHIPPED",
+      returnItems: [{ orderItemSeqId: "00001", returnQuantity: 1, returnReasonId: "RTN_SIZE_EXCHANGE" }],
+      exchangeItems: [{ productId: "P1", quantity: 1 }],
+    });
+    await stubAdapter.approveReturn(returnId);
+    await stubAdapter.getSyncStatus(returnId); // advance to PUSH_OK / PROC_PENDING
+    // Simulate a stuck mid-flight push: retry before PROC_OK fires.
+    await stubAdapter.retryExchangePush(returnId);
+    expect((await stubAdapter.getSyncStatus(returnId)).shopify).toBe("pending"); // step 1 re-runs
+    expect((await stubAdapter.getSyncStatus(returnId)).shopify).toBe("synced");  // step 2 confirms
+    expect((await stubAdapter.getReturn(returnId)).shopifySync?.processStatusId).toBe("PROC_OK");
+  });
+
+  it("retryExchangePush is an idempotent no-op once the exchange is already confirmed", async () => {
+    const { returnId } = await stubAdapter.createExchange({
+      orderId: "DEMO-1001", fulfillmentType: "SHIPPED",
+      returnItems: [{ orderItemSeqId: "00001", returnQuantity: 1, returnReasonId: "RTN_SIZE_EXCHANGE" }],
+      exchangeItems: [{ productId: "P1", quantity: 1 }],
+    });
+    await stubAdapter.approveReturn(returnId);
+    await stubAdapter.getSyncStatus(returnId);
+    await stubAdapter.getSyncStatus(returnId); // now PROC_OK / synced
+    await stubAdapter.retryExchangePush(returnId);
+    // Still synced — a confirmed exchange is never spuriously un-synced.
+    expect((await stubAdapter.getReturn(returnId)).sync.shopify).toBe("synced");
+  });
 });

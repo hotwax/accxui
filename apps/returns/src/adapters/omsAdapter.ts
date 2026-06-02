@@ -291,6 +291,17 @@ export const omsAdapter: ReturnsService = {
     return { returnId: returnId || appeasementReturnId, appeasementReturnId };
   },
 
+  async createExchange(input: CreateExchangeInput) {
+    const resp: any = await omsApi({ url: "oms/returns/customerExchange", method: "POST", data: buildExchangeCreateBody(input) });
+    if (commonUtil.hasError(resp)) throw new Error("Failed to create exchange");
+    return { returnId: resp.data.returnId, replacementOrderId: resp.data.replacementOrderId };
+  },
+
+  async retryExchangePush(returnId) {
+    const resp: any = await omsApi({ url: `oms/returns/${returnId}/pushExchangeToShopify`, method: "POST" });
+    if (commonUtil.hasError(resp)) throw new Error("Failed to push exchange to Shopify");
+  },
+
   async approveReturn(returnId) {
     const resp: any = await omsApi({ url: `oms/returns/${returnId}/approve`, method: "POST" });
     if (commonUtil.hasError(resp)) throw new Error("Failed to approve return");

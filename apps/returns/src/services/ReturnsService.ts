@@ -1,5 +1,5 @@
 import type {
-  CreateReturnInput, OrderForReturn, PushOutcome, ReturnDetail, ReturnReason,
+  CreateExchangeInput, CreateReturnInput, OrderForReturn, PushOutcome, ReturnDetail, ReturnReason,
   ReturnSummary, SyncState, SyncTarget,
 } from "@/types/returns";
 import { stubAdapter } from "@/adapters/stubAdapter";
@@ -9,6 +9,8 @@ export interface ReturnsService {
   listReturns(p: { pageIndex?: number; pageSize?: number; statusId?: string }): Promise<{ items: ReturnSummary[]; total: number }>;
   getReturn(returnId: string): Promise<ReturnDetail>;
   createReturn(input: CreateReturnInput): Promise<{ returnId: string; appeasementReturnId?: string }>;
+  createExchange(input: CreateExchangeInput): Promise<{ returnId: string; replacementOrderId?: string }>;
+  retryExchangePush(returnId: string): Promise<void>;
   // Approval lifecycle. approve transitions RETURN_REQUESTED -> RETURN_APPROVED and (server-side)
   // triggers the OMS->Shopify push; reject/cancel are terminal and never sync.
   approveReturn(returnId: string): Promise<void>;
