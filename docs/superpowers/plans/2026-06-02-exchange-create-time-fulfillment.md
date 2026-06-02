@@ -1217,15 +1217,20 @@ git commit -m "feat(returns): create-form exchange fulfillment pickers + shippin
 
 ---
 
-## Task 7: Exchange detail (`ExchangeDetail.vue`)
+## Task 7: Exchange detail (`ExchangeDetail.vue`) — read-only (no lifecycle actions)
+
+Exchanges are created at their terminal state and **cannot be approved, completed, rejected, or canceled**.
+The detail screen is therefore **read-only**: header, Returning section, Shopify sync card (+ Retry on a
+failed push), the completion/close card (+ Retry, for immediate), and the Replacement panel. No "Actions"
+card at all.
 
 **Files:**
 - Modify: `src/views/ExchangeDetail.vue`
-- Test: `tests/unit/ExchangeDetail.spec.ts` (if present; otherwise see Step 1 note)
+- Test: `tests/unit/ExchangeDetail.spec.ts` (exists — replace its action-button assertions)
 
-- [ ] **Step 1: Add/adjust the unit test for no-approve, cancel-only**
+- [ ] **Step 1: Replace the unit test to assert NO lifecycle action buttons**
 
-If `tests/unit/ExchangeDetail.spec.ts` exists, replace any assertions that expect an approve/complete button with the assertions below. If it does not exist, create it with this minimal shape (it mounts the view and drives `enter()` directly, since `onIonViewWillEnter` doesn't fire under a plain mount). Mirror the existing setup used by other view specs in `tests/unit/` (Pinia + Ionic test mounting):
+`tests/unit/ExchangeDetail.spec.ts` exists. Replace its body (keep imports/helpers that already work in the file; the shape below shows the intent — adapt to the file's existing setup/mount helpers). It mounts the view and drives `enter()` directly, since `onIonViewWillEnter` doesn't fire under a plain mount:
 
 ```ts
 import { describe, it, expect, beforeEach } from "vitest";
@@ -1250,24 +1255,25 @@ async function makeExchange(fulfillmentType: "SHIPPED" | "IMMEDIATE") {
 }
 
 describe("ExchangeDetail", () => {
-  it("shipped: shows Cancel, never Approve or Complete; sync settles to Exchange confirmed", async () => {
+  it("shipped: read-only — no approve/complete/cancel buttons; sync settles to Exchange confirmed", async () => {
     const returnId = await makeExchange("SHIPPED");
     const wrapper = mount(ExchangeDetail, { props: { returnId }, global: { stubs: { "ion-page": false } } });
     await (wrapper.vm as any).enter();
     await flushPromises();
     expect(wrapper.find("[data-testid=exchange-approve-btn]").exists()).toBe(false);
     expect(wrapper.find("[data-testid=exchange-complete-btn]").exists()).toBe(false);
-    expect(wrapper.find("[data-testid=exchange-cancel-btn]").exists()).toBe(true);
+    expect(wrapper.find("[data-testid=exchange-cancel-btn]").exists()).toBe(false);
     const store = useReturnsStore();
     expect(store.current?.sync.shopify).toBe("synced");
   });
 
-  it("immediate: shows neither Cancel nor Approve (return-half is completed)", async () => {
+  it("immediate: read-only — no action buttons", async () => {
     const returnId = await makeExchange("IMMEDIATE");
     const wrapper = mount(ExchangeDetail, { props: { returnId }, global: { stubs: { "ion-page": false } } });
     await (wrapper.vm as any).enter();
     await flushPromises();
     expect(wrapper.find("[data-testid=exchange-approve-btn]").exists()).toBe(false);
+    expect(wrapper.find("[data-testid=exchange-complete-btn]").exists()).toBe(false);
     expect(wrapper.find("[data-testid=exchange-cancel-btn]").exists()).toBe(false);
   });
 });
@@ -1276,32 +1282,23 @@ describe("ExchangeDetail", () => {
 - [ ] **Step 2: Run to verify failure**
 
 Run: `npx vitest run tests/unit/ExchangeDetail.spec.ts`
-Expected: FAIL — the approve button still renders (and/or the spec is new and the component still has Approve/Complete).
+Expected: FAIL — the component still renders Approve/Complete/Cancel buttons.
 
-- [ ] **Step 3: Remove Approve/Complete from the template**
+- [ ] **Step 3: Delete the entire "Lifecycle actions" card from the template**
 
-In `src/views/ExchangeDetail.vue`, replace the entire "Lifecycle actions" `<ion-card>` (the one gated `v-if="canApprove || canComplete || canCancel"`) with a Cancel-only card:
+In `src/views/ExchangeDetail.vue`, delete the whole "Lifecycle actions" `<ion-card>` (the one gated
+`v-if="canApprove || canComplete || canCancel"`, containing the approve/complete/reject/cancel buttons).
+Remove it entirely — there is NO replacement card. The completion/close card and the Shopify sync card stay.
 
-```html
-            <!-- Lifecycle actions: exchanges are created at their terminal state, so only Cancel remains
-                 (shipped/RETURN_APPROVED). An immediate/RETURN_COMPLETED exchange shows no actions. -->
-            <ion-card v-if="canCancel">
-              <ion-card-header>
-                <ion-card-title>{{ translate("Actions") }}</ion-card-title>
-              </ion-card-header>
-              <ion-card-content>
-                <ion-button expand="block" color="medium" fill="outline" :disabled="busy" @click="cancel" data-testid="exchange-cancel-btn">
-                  {{ translate("Cancel exchange") }}
-                </ion-button>
-              </ion-card-content>
-            </ion-card>
-```
+- [ ] **Step 4: Remove the now-dead muted hints in the sync card**
 
-- [ ] **Step 4: Remove the "syncs when approved" hint**
-
-In the Shopify sync card, delete this line:
+In the Shopify sync card, delete BOTH of these lines (an exchange is never `canApprove` and never
+`RETURN_CANCELLED` now, so both branches are dead):
 
 ```html
+                <p v-if="cancelledInShopify" class="muted">
+                  {{ translate("Cancelled in OMS — still synced to Shopify") }}<template v-if="r.shopifySync?.returnStatusId"> · {{ r.shopifySync.returnStatusId }}</template>
+                </p>
                 <p v-else-if="canApprove" class="muted">{{ translate("Syncs to Shopify automatically when approved.") }}</p>
 ```
 
@@ -1309,11 +1306,16 @@ In the Shopify sync card, delete this line:
 
 In `<script setup>`:
 
-(a) Delete the computeds `canApprove` and `canComplete`. Keep `canCancel`, `isCompleted`, `closeState`, `cancelledInShopify`.
+(a) Delete the computeds `canApprove`, `canComplete`, `canCancel`, and `cancelledInShopify`. Keep
+`isCompleted`, `closeState`, `exchangeCredit`, `isExchange`, `loaded`, `r`.
 
-(b) Delete the functions `approve()`, `reject()`, and `complete()` (the facility-picker completion). Keep `cancel()`, `retryComplete()`, `retryPush()`, `runAction()`, `confirmAction()`.
+(b) Delete the functions `approve()`, `reject()`, `complete()` (the facility-picker completion), `cancel()`,
+and `confirmAction()`. Keep `retryComplete()`, `retryPush()`, `runAction()`, `loadReplacement()`, `enter()`.
 
-(c) `commonUtil` is still used (`formatCurrency` in the template) — keep its import. `alertController` is still used by `cancel()`/`confirmAction()` — keep it. No other import changes.
+(c) Remove the now-unused `alertController` from the `@ionic/vue` import (it was only used by
+`confirmAction()`/`complete()`). `commonUtil` stays (used by `formatCurrency` in the template). Verify no
+other references to the deleted symbols remain (`store.loadFacilities`, `store.completeReturn`,
+`store.cancelReturn`, `store.rejectReturn`, `store.approveReturn` should no longer be called from this file).
 
 - [ ] **Step 6: Run to verify pass**
 
@@ -1323,13 +1325,13 @@ Expected: PASS.
 - [ ] **Step 7: Type-check**
 
 Run: `npx vue-tsc --noEmit`
-Expected: clean (no unused-symbol or missing-symbol errors in `ExchangeDetail.vue`).
+Expected: clean for `ExchangeDetail.vue` (no unused-symbol or missing-symbol errors).
 
 - [ ] **Step 8: Commit**
 
 ```bash
 git add src/views/ExchangeDetail.vue tests/unit/ExchangeDetail.spec.ts
-git commit -m "feat(returns): exchange detail drops approve/complete (skip-approval flow)"
+git commit -m "feat(returns): exchange detail is read-only (exchanges can't be approved/completed/canceled)"
 ```
 
 ---

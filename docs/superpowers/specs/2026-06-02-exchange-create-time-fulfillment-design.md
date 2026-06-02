@@ -103,17 +103,20 @@ is removed.
 - `completeReturn(returnId, opts)` — drop the `facilityId` arg.
 - `loadFacilities()` stays (now consumed by the create form, not the detail).
 
-## 6. Exchange detail (`views/ExchangeDetail.vue`)
+## 6. Exchange detail (`views/ExchangeDetail.vue`) — read-only
 
-- **Remove:** the Approve button, the Complete button, the facility-picker `complete()` function,
-  `canApprove`, `canComplete`, and the "syncs automatically when approved" hint.
+Exchanges are created at their terminal state and **cannot be approved, completed, rejected, or canceled**.
+The detail is read-only — there is **no Actions card**.
+
+- **Remove:** the entire lifecycle Actions card (Approve / Complete / Reject / **Cancel**), the
+  `complete()` facility-picker, and the computeds `canApprove` / `canComplete` / `canCancel` /
+  `cancelledInShopify`; the functions `approve()` / `reject()` / `complete()` / `cancel()` /
+  `confirmAction()`; the "syncs automatically when approved" and "cancelled in OMS" muted hints; and the now
+  unused `alertController` import.
 - **Keep:**
-  - Header / Returning section / Replacement panel (panel now shows the create-time
-    `fulfillmentType` + `shipmentMethod`; tracking for shipped).
+  - Header / Returning section / Replacement panel (panel shows the create-time `fulfillmentType` +
+    `shipmentMethod`; tracking for shipped).
   - Shopify **sync card** + Retry (`retryExchangePush`) for a failed push.
-  - **Actions card** gated on `canCancel` only — Cancel renders for a shipped `RETURN_APPROVED`; an
-    immediate `RETURN_COMPLETED` shows no actions. (Reject is dropped: exchanges never sit at
-    `RETURN_REQUESTED` now.)
   - **Completion/close card** (read-only state + Retry) for the immediate case (`isCompleted`).
 - `enter()` still polls a `pending` push and, when completed, a `pending` close.
 
