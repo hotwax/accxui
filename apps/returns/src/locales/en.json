@@ -95,5 +95,20 @@
   "Refund specific items": "Refund specific items",
   "Refund amount (override)": "Refund amount (override)",
   "Pick at least one lost item.": "Pick at least one lost item.",
-  "Refund can't exceed the kept-item value of": "Refund can't exceed the kept-item value of"
+  "Refund can't exceed the kept-item value of": "Refund can't exceed the kept-item value of",
+  "Exchange": "Exchange",
+  "Exchange confirmed": "Exchange confirmed",
+  "Submitting exchange": "Submitting exchange",
+  "Failed to create exchange": "Failed to create exchange",
+  "Replacement delivery": "Replacement delivery",
+  "Ship to customer": "Ship to customer",
+  "Shipped to customer": "Shipped to customer",
+  "Hand over now": "Hand over now",
+  "Handed over in store": "Handed over in store",
+  "Replacement completed": "Replacement completed",
+  "Replacement approved — in fulfillment": "Replacement approved — in fulfillment",
+  "Refund difference owed": "Refund difference owed",
+  "Even swap — no refund difference": "Even swap — no refund difference",
+  "The replacement is handed over now and its order completes immediately.": "The replacement is handed over now and its order completes immediately.",
+  "The replacement is shipped to the customer through the normal fulfillment flow.": "The replacement is shipped to the customer through the normal fulfillment flow."
 }
