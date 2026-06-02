@@ -5,7 +5,7 @@ import type {
   AppeasementInput, AppeasementItemInput,
   CreateExchangeInput, ExchangeDetail, ExchangeItemInput, Facility, FulfillmentType,
   CreateReturnInput, OrderForReturn, PushOutcome, ReplacementOrderDetail, ReturnableLine, ReturnDetail,
-  ReturnReason, ReturnSummary, ReturnType, SyncState, SyncTarget,
+  ReturnReason, ReturnSummary, ReturnType, ShipmentMethod, SyncState, SyncTarget,
 } from "@/types/returns";
 import {
   resolveOrigin, resolveExchangeSyncState, resolveShopifySyncState, type Identification, type ShopifySync,
@@ -256,13 +256,14 @@ export function buildAppeasementCreateBody(orderId: string, a: AppeasementInput,
 }
 
 /** Build the POST body for the customerExchange create call. unitPrice is omitted per item when absent
- *  (backend defaults to the product price → even swap). Optional note/currencyUomId are omitted when empty.
- *  No fulfillmentType: the backend creates the replacement order at the _NA_ facility; fulfillment is
- *  decided later on the exchange's approval page. */
+ *  (backend defaults to the product price → even swap). fulfillmentType is required; SHIPPED carries
+ *  shipmentMethodTypeId (ignored server-side until the backend threads it through), IMMEDIATE carries
+ *  facilityId (origin facility issued from now). Optional note/currencyUomId are omitted when empty. */
 export function buildExchangeCreateBody(input: CreateExchangeInput): {
   orderId: string;
   returnItems: Array<{ orderItemSeqId: string; returnQuantity: number; returnReasonId: string }>;
-  exchangeItems: ExchangeItemInput[]; note?: string; currencyUomId?: string;
+  exchangeItems: ExchangeItemInput[]; fulfillmentType: FulfillmentType;
+  shipmentMethodTypeId?: string; facilityId?: string; note?: string; currencyUomId?: string;
 } {
   return {
     orderId: input.orderId,
@@ -276,6 +277,9 @@ export function buildExchangeCreateBody(input: CreateExchangeInput): {
       quantity: e.quantity,
       ...(e.unitPrice != null ? { unitPrice: e.unitPrice } : {}),
     })),
+    fulfillmentType: input.fulfillmentType,
+    ...(input.shipmentMethodTypeId ? { shipmentMethodTypeId: input.shipmentMethodTypeId } : {}),
+    ...(input.facilityId ? { facilityId: input.facilityId } : {}),
     ...(input.note ? { note: input.note } : {}),
     ...(input.currencyUomId ? { currencyUomId: input.currencyUomId } : {}),
   };
@@ -374,13 +378,9 @@ export const omsAdapter: ReturnsService = {
     if (commonUtil.hasError(resp)) throw new Error("Failed to cancel return");
   },
 
-  async completeReturn(returnId, facilityId) {
+  async completeReturn(returnId) {
     // OMS -> RETURN_COMPLETED immediately; the Shopify completion (returnProcess + returnClose) runs async.
-    // For an exchange, facilityId is the chosen physical facility the replacement is fulfilled from.
-    const resp: any = await omsApi({
-      url: `oms/returns/${returnId}/complete`, method: "POST",
-      ...(facilityId ? { data: { facilityId } } : {}),
-    });
+    const resp: any = await omsApi({ url: `oms/returns/${returnId}/complete`, method: "POST" });
     if (commonUtil.hasError(resp)) throw new Error("Failed to complete return");
   },
 
@@ -411,6 +411,17 @@ export const omsAdapter: ReturnsService = {
     if (commonUtil.hasError(resp)) throw new Error("Failed to load facilities");
     const rows: any[] = Array.isArray(resp.data) ? resp.data : resp.data?.facilities ?? [];
     return rows.map((f) => ({ facilityId: f.facilityId, facilityName: f.facilityName ?? f.facilityId }));
+  },
+
+  async listShipmentMethods(): Promise<ShipmentMethod[]> {
+    // Global shipment method types (the create-page picker for a shipped exchange).
+    const resp: any = await omsApi({ url: "oms/shippingGateways/shipmentMethodTypes", method: "GET" });
+    if (commonUtil.hasError(resp)) throw new Error("Failed to load shipment methods");
+    const rows: any[] = Array.isArray(resp.data) ? resp.data : resp.data?.shipmentMethodTypes ?? [];
+    return rows.map((m) => ({
+      shipmentMethodTypeId: m.shipmentMethodTypeId,
+      description: m.description ?? m.shipmentMethodTypeId,
+    }));
   },
 
   async listReturnReasons(): Promise<ReturnReason[]> {

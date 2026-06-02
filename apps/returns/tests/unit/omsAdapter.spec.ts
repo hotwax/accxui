@@ -310,15 +310,25 @@ describe("buildExchangeCreateBody", () => {
     orderId: "DEMO-1001",
     returnItems: [{ orderItemSeqId: "00001", returnQuantity: 1, returnReasonId: "RTN_SIZE_EXCHANGE" }],
     exchangeItems: [{ productId: "P1", quantity: 1 }],
+    fulfillmentType: "SHIPPED" as const,
   };
 
-  it("sends orderId, returnItems (seqId/qty/reason only) and exchangeItems — no fulfillmentType", () => {
-    const body = buildExchangeCreateBody({ ...base, currencyUomId: "USD" });
+  it("sends fulfillmentType + shipmentMethodTypeId for a shipped exchange", () => {
+    const body = buildExchangeCreateBody({ ...base, shipmentMethodTypeId: "STANDARD", currencyUomId: "USD" });
     expect(body.orderId).toBe("DEMO-1001");
-    expect("fulfillmentType" in body).toBe(false);
+    expect(body.fulfillmentType).toBe("SHIPPED");
+    expect(body.shipmentMethodTypeId).toBe("STANDARD");
+    expect("facilityId" in body).toBe(false);
     expect(body.returnItems).toEqual([{ orderItemSeqId: "00001", returnQuantity: 1, returnReasonId: "RTN_SIZE_EXCHANGE" }]);
     expect(body.exchangeItems).toEqual([{ productId: "P1", quantity: 1 }]);
     expect(body.currencyUomId).toBe("USD");
+  });
+
+  it("sends fulfillmentType + facilityId for an immediate exchange", () => {
+    const body = buildExchangeCreateBody({ ...base, fulfillmentType: "IMMEDIATE", facilityId: "STORE_DT" });
+    expect(body.fulfillmentType).toBe("IMMEDIATE");
+    expect(body.facilityId).toBe("STORE_DT");
+    expect("shipmentMethodTypeId" in body).toBe(false);
   });
 
   it("omits unitPrice per exchange item when absent, includes it when present", () => {
