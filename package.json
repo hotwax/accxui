@@ -8,8 +8,7 @@
     "build": "vue-tsc && vite build",
     "preview": "vite preview",
     "test:unit": "vitest",
-    "lint": "eslint .",
-    "console": "node moqui-console.mjs"
+    "lint": "eslint ."
   },
   "dependencies": {
     "@capacitor/android": "catalog:",
