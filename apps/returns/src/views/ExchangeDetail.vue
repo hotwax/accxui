@@ -214,14 +214,13 @@ async function _enter() {
     await store.fetchReturn(props.returnId);
     await loadReplacement();
     // A freshly-created exchange loads "pending" — poll the create-push (PROC) to completion.
-    // intervalMs: 0 keeps the view responsive; the store default (3 s) is for background tasks.
     if (store.current?.sync.shopify === "pending") {
       busy.value = true;
-      try { await store.pollSync(props.returnId, "shopify", { intervalMs: 0 }); } finally { busy.value = false; }
+      try { await store.pollSync(props.returnId, "shopify"); } finally { busy.value = false; }
     }
     if (isCompleted.value && closeState.value === "pending") {
       busy.value = true;
-      try { await store.pollCompletion(props.returnId, { intervalMs: 0 }); } finally { busy.value = false; }
+      try { await store.pollCompletion(props.returnId); } finally { busy.value = false; }
     }
   } catch (e) {
     error.value = describeApiError(e, translate("Failed to load exchange"));

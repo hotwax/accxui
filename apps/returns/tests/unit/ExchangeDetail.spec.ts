@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { setActivePinia, createPinia } from "pinia";
-import { mount, flushPromises } from "@vue/test-utils";
+import { mount } from "@vue/test-utils";
 
 vi.stubEnv("VITE_RETURNS_BACKEND", "stub");
 vi.mock("@/router", () => ({ default: { push: () => {/* noop */} } }));
@@ -31,23 +31,35 @@ async function makeExchange(fulfillmentType: "SHIPPED" | "IMMEDIATE") {
 describe("ExchangeDetail", () => {
   it("shipped: read-only — no approve/complete/cancel buttons; sync settles to Exchange confirmed", async () => {
     const returnId = await makeExchange("SHIPPED");
-    const wrapper = mount(ExchangeDetail, { props: { returnId }, global: { stubs: { "ion-page": false } } });
-    await (wrapper.vm as any).enter();
-    await flushPromises();
-    expect(wrapper.find("[data-testid=exchange-approve-btn]").exists()).toBe(false);
-    expect(wrapper.find("[data-testid=exchange-complete-btn]").exists()).toBe(false);
-    expect(wrapper.find("[data-testid=exchange-cancel-btn]").exists()).toBe(false);
-    const store = useReturnsStore();
-    expect(store.current?.sync.shopify).toBe("synced");
+    vi.useFakeTimers();
+    try {
+      const wrapper = mount(ExchangeDetail, { props: { returnId }, global: { stubs: { "ion-page": false } } });
+      const p = (wrapper.vm as any).enter();
+      await vi.runAllTimersAsync();   // flush the poll sleeps + microtasks
+      await p;
+      expect(wrapper.find("[data-testid=exchange-approve-btn]").exists()).toBe(false);
+      expect(wrapper.find("[data-testid=exchange-complete-btn]").exists()).toBe(false);
+      expect(wrapper.find("[data-testid=exchange-cancel-btn]").exists()).toBe(false);
+      const store = useReturnsStore();
+      expect(store.current?.sync.shopify).toBe("synced");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("immediate: read-only — no action buttons", async () => {
     const returnId = await makeExchange("IMMEDIATE");
-    const wrapper = mount(ExchangeDetail, { props: { returnId }, global: { stubs: { "ion-page": false } } });
-    await (wrapper.vm as any).enter();
-    await flushPromises();
-    expect(wrapper.find("[data-testid=exchange-approve-btn]").exists()).toBe(false);
-    expect(wrapper.find("[data-testid=exchange-complete-btn]").exists()).toBe(false);
-    expect(wrapper.find("[data-testid=exchange-cancel-btn]").exists()).toBe(false);
+    vi.useFakeTimers();
+    try {
+      const wrapper = mount(ExchangeDetail, { props: { returnId }, global: { stubs: { "ion-page": false } } });
+      const p = (wrapper.vm as any).enter();
+      await vi.runAllTimersAsync();   // flush the poll sleeps + microtasks
+      await p;
+      expect(wrapper.find("[data-testid=exchange-approve-btn]").exists()).toBe(false);
+      expect(wrapper.find("[data-testid=exchange-complete-btn]").exists()).toBe(false);
+      expect(wrapper.find("[data-testid=exchange-cancel-btn]").exists()).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
