@@ -1,5 +1,5 @@
 import type {
-  CreateExchangeInput, CreateReturnInput, Facility, OrderForReturn, PushOutcome, ReplacementOrderDetail,
+  CreateExchangeInput, CreateReturnInput, Facility, Geo, OrderForReturn, PushOutcome, ReplacementOrderDetail,
   ReturnDetail, ReturnReason, ReturnSummary, ShipmentMethod, SyncState, SyncTarget,
 } from "@/types/returns";
 import { stubAdapter } from "@/adapters/stubAdapter";
@@ -20,6 +20,9 @@ export interface ReturnsService {
   // the async Shopify completion (returnProcess + returnClose). retryComplete re-runs a failed close.
   completeReturn(returnId: string): Promise<void>;
   retryComplete(returnId: string): Promise<void>;
+  // Geo lists for the create-page shipping-address dropdowns (SHIPPED exchange).
+  listCountries(): Promise<Geo[]>;
+  listStates(countryGeoId: string): Promise<Geo[]>;
   // Shipment methods for the create-page picker (shown for a SHIPPED exchange).
   listShipmentMethods(): Promise<ShipmentMethod[]>;
   // Physical facilities an exchange can be fulfilled from (the Complete picker on the exchange page).
