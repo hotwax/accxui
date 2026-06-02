@@ -183,6 +183,7 @@ export interface OrderForReturn {
   currencyUomId: string;
   items: ReturnableLine[];
   billingEmail?: string;
+  shippingAddress?: PostalAddress; // the order's ship-to; prefills the exchange shipping-address form
 }
 
 /** A line on the outgoing replacement order shown on the exchange-detail screen. */
@@ -236,6 +237,7 @@ export interface CreateExchangeInput {
   fulfillmentType: FulfillmentType;
   shipmentMethodTypeId?: string; // required (client-side) for SHIPPED; ignored server-side until backend threads it through
   facilityId?: string;           // required for IMMEDIATE — origin facility the ship group is issued from
+  shippingAddress?: PostalAddress; // SHIPPED only — the replacement order's ship-to (geoIds from the dropdowns)
 }
 
 /** A physical facility the operator can fulfill an exchange from (the Complete picker). */
@@ -248,4 +250,23 @@ export interface Facility {
 export interface ShipmentMethod {
   shipmentMethodTypeId: string;
   description: string;
+}
+
+/** A postal address (replacement ship-to / order ship-to). geoIds drive the country/state dropdowns. */
+export interface PostalAddress {
+  toName?: string;
+  attnName?: string;
+  address1: string;
+  address2?: string;
+  city: string;
+  stateProvinceGeoId?: string;  // omitted for countries without a state level
+  postalCode: string;
+  countryGeoId: string;
+  phone?: string;
+}
+
+/** A selectable geo (country or state/province) for the address dropdowns. */
+export interface Geo {
+  geoId: string;
+  geoName: string;
 }
