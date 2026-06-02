@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { resolveOrigin, resolveShopifyCloseState, resolveShopifySyncState } from "@/util/syncState";
+import { resolveExchangeSyncState, resolveOrigin, resolveShopifyCloseState, resolveShopifySyncState } from "@/util/syncState";
 
 describe("resolveOrigin", () => {
   it("is shopify when a SHOPIFY_RTN_ID identification exists", () => {
@@ -56,5 +56,38 @@ describe("resolveShopifyCloseState", () => {
   });
   it("is failed on CLOSE_FAILED", () => {
     expect(resolveShopifyCloseState({ shopifyReturnId: "gid://1", closePushStatusId: "CLOSE_FAILED", closePushErrorMessage: "boom" })).toBe("failed");
+  });
+});
+
+describe("resolveExchangeSyncState", () => {
+  it("is not_synced when shopifySync is null", () => {
+    expect(resolveExchangeSyncState(null)).toBe("not_synced");
+  });
+  it("is not_synced when shopifySync is undefined", () => {
+    expect(resolveExchangeSyncState(undefined)).toBe("not_synced");
+  });
+  it("is synced only on PROC_OK (authoritative confirmed)", () => {
+    expect(resolveExchangeSyncState({ pushStatusId: "PUSH_OK", processStatusId: "PROC_OK" })).toBe("synced");
+  });
+  it("is pending on PUSH_OK while the process step has not completed", () => {
+    expect(resolveExchangeSyncState({ pushStatusId: "PUSH_OK", processStatusId: "PROC_PENDING" })).toBe("pending");
+  });
+  it("treats PUSH_OK with no process status as still pending (awaiting process)", () => {
+    expect(resolveExchangeSyncState({ pushStatusId: "PUSH_OK", processStatusId: null })).toBe("pending");
+  });
+  it("is pending on PUSH_PENDING", () => {
+    expect(resolveExchangeSyncState({ pushStatusId: "PUSH_PENDING" })).toBe("pending");
+  });
+  it("is failed on PUSH_FAILED", () => {
+    expect(resolveExchangeSyncState({ pushStatusId: "PUSH_FAILED" })).toBe("failed");
+  });
+  it("is failed on PROC_FAILED", () => {
+    expect(resolveExchangeSyncState({ pushStatusId: "PUSH_OK", processStatusId: "PROC_FAILED" })).toBe("failed");
+  });
+  it("is failed on PROC_FAILED even when pushStatusId is absent", () => {
+    expect(resolveExchangeSyncState({ processStatusId: "PROC_FAILED" })).toBe("failed");
+  });
+  it("is not_synced when present but empty", () => {
+    expect(resolveExchangeSyncState({ pushStatusId: null, processStatusId: null })).toBe("not_synced");
   });
 });

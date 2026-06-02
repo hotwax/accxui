@@ -17,6 +17,9 @@ export interface ShopifySync {
   pushErrorMessage?: string | null; // present when pushStatusId == PUSH_FAILED
   closePushStatusId?: string | null;     // completion-push: CLOSE_OK | CLOSE_PENDING | CLOSE_FAILED | null
   closePushErrorMessage?: string | null; // present when closePushStatusId == CLOSE_FAILED
+  // Exchange create-push step 2 (returnProcess). PROC_OK is the authoritative "exchange confirmed".
+  processStatusId?: string | null;     // PROC_OK | PROC_PENDING | PROC_FAILED | null
+  processErrorMessage?: string | null; // present when processStatusId == PROC_FAILED
 }
 
 /** Outcome of an outbound push trigger (the "failed" case is surfaced as a thrown error instead). */
