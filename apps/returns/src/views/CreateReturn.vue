@@ -39,6 +39,16 @@
         </aside>
 
         <main>
+          <ion-segment v-if="order && hasReturnable" data-testid="create-mode-segment" :value="mode"
+            @ionChange="setMode($event.detail.value as 'return' | 'exchange')">
+            <ion-segment-button value="return" data-testid="create-mode-return">
+              <ion-label>{{ translate("Return") }}</ion-label>
+            </ion-segment-button>
+            <ion-segment-button value="exchange" data-testid="create-mode-exchange">
+              <ion-label>{{ translate("Exchange") }}</ion-label>
+            </ion-segment-button>
+          </ion-segment>
+
           <div class="empty-state" data-testid="create-empty" v-if="!order">
             <ion-icon :icon="bagCheckOutline" color="medium" />
             <h1>{{ translate("Start a return") }}</h1>
@@ -71,7 +81,7 @@
             </ion-item>
           </ion-list>
 
-          <ion-card v-if="order && hasReturnable" class="appeasement">
+          <ion-card v-if="order && hasReturnable && mode === 'return'" class="appeasement">
             <ion-item lines="none">
               <ion-toggle data-testid="create-appeasement-toggle" :checked="appeasementEnabled"
                 :disabled="!hasKeptItems" @ionChange="appeasementEnabled = $event.detail.checked">
@@ -126,6 +136,26 @@
               <p v-if="appeasementHint" class="error" role="alert">{{ appeasementHint }}</p>
             </ion-card-content>
           </ion-card>
+
+          <ion-card v-if="order && hasReturnable && mode === 'exchange'" class="fulfillment">
+            <ion-card-header>
+              <ion-card-title>{{ translate("Replacement delivery") }}</ion-card-title>
+            </ion-card-header>
+            <ion-card-content>
+              <ion-segment data-testid="create-fulfillment-segment" :value="fulfillmentType"
+                @ionChange="fulfillmentType = $event.detail.value as 'SHIPPED' | 'IMMEDIATE'">
+                <ion-segment-button value="SHIPPED" data-testid="create-fulfillment-shipped">
+                  <ion-label>{{ translate("Ship to customer") }}</ion-label>
+                </ion-segment-button>
+                <ion-segment-button value="IMMEDIATE" data-testid="create-fulfillment-immediate">
+                  <ion-label>{{ translate("Hand over now") }}</ion-label>
+                </ion-segment-button>
+              </ion-segment>
+              <p class="muted">{{ fulfillmentType === 'IMMEDIATE'
+                ? translate("The replacement is handed over now and its order completes immediately.")
+                : translate("The replacement is shipped to the customer through the normal fulfillment flow.") }}</p>
+            </ion-card-content>
+          </ion-card>
         </main>
       </div>
 
@@ -150,7 +180,7 @@ import {
 import { bagCheckOutline, checkmarkDoneOutline } from "ionicons/icons";
 import { useReturnsStore } from "@/store/returnsStore";
 import { describeApiError } from "@/util/errorMessage";
-import type { OrderForReturn, ReturnReason } from "@/types/returns";
+import type { FulfillmentType, OrderForReturn, ReturnReason } from "@/types/returns";
 
 const store = useReturnsStore();
 
@@ -165,6 +195,12 @@ const appeasementAmount = ref<number | null>(null);
 const appeasementReasonId = ref<string>("");
 const appeasementNote = ref<string>("");
 const appeasementMode = ref<"amount" | "items">("amount");
+const mode = ref<"return" | "exchange">("return");
+const fulfillmentType = ref<FulfillmentType>("SHIPPED");
+function setMode(m: "return" | "exchange") {
+  mode.value = m;
+  if (m === "exchange") appeasementEnabled.value = false; // appeasement is unavailable for exchanges
+}
 const appeasementSelections = reactive<Record<string, { qty: number }>>({});
 // Did the operator type an explicit override? While false, the amount field mirrors the picked-line total.
 const appeasementAmountTouched = ref(false);
@@ -257,7 +293,10 @@ const hasItemsSelected = computed(() =>
 // Submit needs at least one of: a standard return (selected items) OR an appeasement. A stand-alone
 // goodwill refund (customer keeps everything) is valid — the backend accepts an appeasement with no
 // accompanying item return.
-const canSubmit = computed(() => (hasItemsSelected.value || appeasementEnabled.value) && appeasementValid.value);
+const canSubmit = computed(() =>
+  mode.value === "exchange"
+    ? hasItemsSelected.value
+    : (hasItemsSelected.value || appeasementEnabled.value) && appeasementValid.value);
 
 async function lookupOrder() {
   error.value = "";
@@ -293,6 +332,25 @@ async function submit(): Promise<string | undefined> {
       const line = order.value!.items.find((i) => i.orderItemSeqId === orderItemSeqId)!;
       return { orderItemSeqId, productId: line.productId, productName: line.productName, returnQuantity: s.qty, returnReasonId: s.returnReasonId! };
     });
+  // Exchange: send the picked lines back and the SAME products out (mirrored), with a fulfillment choice.
+  if (mode.value === "exchange") {
+    if (!items.length) return;
+    const returnItems = items.map((i) => ({ orderItemSeqId: i.orderItemSeqId, returnQuantity: i.returnQuantity, returnReasonId: i.returnReasonId }));
+    const exchangeItems = items.map((i) => ({ productId: i.productId, quantity: i.returnQuantity }));
+    error.value = "";
+    emitter.emit("presentLoader", { message: "Submitting exchange" });
+    let exchangeReturnId: string | undefined;
+    try {
+      exchangeReturnId = await store.submitExchange({ orderId: order.value.orderId, fulfillmentType: fulfillmentType.value, returnItems, exchangeItems, currencyUomId: order.value.currencyUomId });
+    } catch (e) {
+      error.value = describeApiError(e, translate("Failed to create exchange"));
+      commonUtil.showToast(error.value);
+    } finally {
+      emitter.emit("dismissLoader");
+    }
+    if (exchangeReturnId) router.push(`/return-detail/${exchangeReturnId}`);
+    return exchangeReturnId;
+  }
   const appeasement = appeasementEnabled.value && appeasementValid.value
     ? {
         currencyUomId: order.value.currencyUomId,
@@ -333,6 +391,7 @@ defineExpose({
   appeasementMode, appeasementSelections, appeasementAmountTouched,
   setAppeasementMode, setAppeasementQty, onAppeasementAmountInput,
   appeasementItemsTotal, pickedAppeasementItems, appeasementEffectiveTotal,
+  mode, fulfillmentType, setMode,
 });
 </script>
 

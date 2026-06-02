@@ -176,4 +176,33 @@ describe("CreateReturn.vue", () => {
     expect((wrapper.vm as any).appeasementValid).toBe(false);
     expect((wrapper.vm as any).appeasementHint).toContain("Pick at least one lost item");
   });
+
+  it("submits a same-product exchange with mirrored exchangeItems and SHIPPED fulfillment", async () => {
+    const wrapper = mount(CreateReturn, { global: { stubs: { "ion-page": false } } });
+    (wrapper.vm as any).orderId = "DEMO-1001";
+    await (wrapper.vm as any).lookupOrder();
+    await flushPromises();
+    (wrapper.vm as any).setMode("exchange");
+    (wrapper.vm as any).selections["00001"] = { qty: 1, returnReasonId: "RTN_SIZE_EXCHANGE" };
+    await flushPromises();
+    expect((wrapper.vm as any).canSubmit).toBe(true);
+    const id = await (wrapper.vm as any).submit();
+    expect(id).toBeTruthy();
+
+    const created = await getReturnsService().getReturn(id);
+    expect(created.isExchange).toBe(true);
+    expect(created.exchange?.fulfillmentType).toBe("SHIPPED");
+    expect(created.exchange?.items[0].productId).toBe("P1");
+  });
+
+  it("hides the appeasement and ignores it in exchange mode", async () => {
+    const wrapper = mount(CreateReturn, { global: { stubs: { "ion-page": false } } });
+    (wrapper.vm as any).orderId = "DEMO-1001";
+    await (wrapper.vm as any).lookupOrder();
+    await flushPromises();
+    (wrapper.vm as any).setMode("exchange");
+    await flushPromises();
+    expect((wrapper.vm as any).appeasementEnabled).toBe(false);
+    expect(wrapper.find("[data-testid=create-appeasement-toggle]").exists()).toBe(false);
+  });
 });
