@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { mapReturnDetail, mapOrderToReturnable, mapReplacementOrder, mapReturnType, APPEASEMENT_RETURN_TYPE_ID, buildAppeasementCreateBody, buildExchangeCreateBody } from "@/adapters/omsAdapter";
+import { mapReturnDetail, mapOrderToReturnable, mapReplacementOrder, mapReturnType, APPEASEMENT_RETURN_TYPE_ID, buildAppeasementCreateBody, buildExchangeCreateBody, mapPostalAddress } from "@/adapters/omsAdapter";
 
 describe("mapReturnDetail", () => {
   it("maps a synced shopify-origin return (PUSH_OK + SHOPIFY_RTN_ID)", () => {
@@ -380,5 +380,48 @@ describe("mapReplacementOrder", () => {
     expect(o.orderName).toBe("EXC2");
     expect(o.grandTotal).toBeUndefined();
     expect(o.items[0]).toMatchObject({ productId: "P1", productName: "", quantity: 2, unitPrice: 10 });
+  });
+});
+
+describe("mapPostalAddress", () => {
+  it("maps a full address and omits empty optionals", () => {
+    const a = mapPostalAddress({
+      toName: "Jane Doe", address1: "123 Main St", address2: "Apt 4", city: "Austin",
+      stateProvinceGeoId: "USA_TX", postalCode: "78701", countryGeoId: "USA", phone: "+1 512 555 0100",
+    });
+    expect(a).toEqual({
+      toName: "Jane Doe", address1: "123 Main St", address2: "Apt 4", city: "Austin",
+      stateProvinceGeoId: "USA_TX", postalCode: "78701", countryGeoId: "USA", phone: "+1 512 555 0100",
+    });
+  });
+  it("returns undefined when there is no address1", () => {
+    expect(mapPostalAddress(null)).toBeUndefined();
+    expect(mapPostalAddress({ city: "Austin" })).toBeUndefined();
+  });
+});
+
+describe("mapOrderToReturnable shippingAddress", () => {
+  it("surfaces the first ship group's shipping address", () => {
+    const o = mapOrderToReturnable({
+      orderDetail: {
+        orderId: "DEMO-1001",
+        shipGroups: [{ shippingAddress: { address1: "1 A St", city: "Austin", postalCode: "78701", countryGeoId: "USA" }, items: [] }],
+      },
+    });
+    expect(o.shippingAddress).toMatchObject({ address1: "1 A St", city: "Austin", countryGeoId: "USA" });
+  });
+});
+
+describe("buildExchangeCreateBody shippingAddress", () => {
+  const base = {
+    orderId: "DEMO-1001",
+    returnItems: [{ orderItemSeqId: "00001", returnQuantity: 1, returnReasonId: "RTN_SIZE_EXCHANGE" }],
+    exchangeItems: [{ productId: "P1", quantity: 1 }],
+    fulfillmentType: "SHIPPED" as const,
+  };
+  it("includes shippingAddress when present, omits it when absent", () => {
+    const addr = { address1: "1 A St", city: "Austin", postalCode: "78701", countryGeoId: "USA" };
+    expect((buildExchangeCreateBody({ ...base, shippingAddress: addr }) as any).shippingAddress).toEqual(addr);
+    expect("shippingAddress" in buildExchangeCreateBody(base)).toBe(false);
   });
 });

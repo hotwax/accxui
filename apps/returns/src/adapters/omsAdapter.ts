@@ -3,8 +3,8 @@ import { maargApiKey } from "@/util/maargAuth";
 import type { ReturnsService } from "@/services/ReturnsService";
 import type {
   AppeasementInput, AppeasementItemInput,
-  CreateExchangeInput, ExchangeDetail, ExchangeItemInput, Facility, FulfillmentType,
-  CreateReturnInput, OrderForReturn, PushOutcome, ReplacementOrderDetail, ReturnableLine, ReturnDetail,
+  CreateExchangeInput, ExchangeDetail, ExchangeItemInput, Facility, FulfillmentType, Geo,
+  CreateReturnInput, OrderForReturn, PostalAddress, PushOutcome, ReplacementOrderDetail, ReturnableLine, ReturnDetail,
   ReturnReason, ReturnSummary, ReturnType, ShipmentMethod, SyncState, SyncTarget,
 } from "@/types/returns";
 import {
@@ -141,11 +141,33 @@ interface RawOrderItem {
   alreadyReturnedQuantity?: number | string;
   returnableQuantity?: number | string;
 }
+interface RawPostalAddress {
+  toName?: string; attnName?: string; address1?: string; address2?: string; city?: string;
+  stateProvinceGeoId?: string; postalCode?: string; countryGeoId?: string; phone?: string;
+}
+
+/** Map a raw ship-group postal address; returns undefined when there's no usable address (no address1). */
+export function mapPostalAddress(raw?: RawPostalAddress | null): PostalAddress | undefined {
+  if (!raw || !raw.address1) return undefined;
+  return {
+    ...(raw.toName ? { toName: raw.toName } : {}),
+    ...(raw.attnName ? { attnName: raw.attnName } : {}),
+    address1: raw.address1,
+    ...(raw.address2 ? { address2: raw.address2 } : {}),
+    city: raw.city ?? "",
+    ...(raw.stateProvinceGeoId ? { stateProvinceGeoId: raw.stateProvinceGeoId } : {}),
+    postalCode: raw.postalCode ?? "",
+    countryGeoId: raw.countryGeoId ?? "",
+    ...(raw.phone ? { phone: raw.phone } : {}),
+  };
+}
+
 interface RawShipGroup {
   items?: RawOrderItem[];
   shipmentMethod?: string;
   trackingCode?: string;
   carrier?: string;
+  shippingAddress?: RawPostalAddress;
 }
 interface RawOrder {
   // orderName/externalOrderId are the customer-facing name; orderExternalId is the GID (never displayed).
@@ -181,6 +203,9 @@ export function mapOrderToReturnable(raw: RawOrder): OrderForReturn {
       unitPrice: Number(it.unitPrice),
     };
   });
+  const shippingAddress = (raw.orderDetail.shipGroups ?? [])
+    .map((g) => mapPostalAddress(g.shippingAddress))
+    .find((a) => a != null);
   return {
     orderId: raw.orderDetail.orderId,
     // Prefer orderName, then its alias externalOrderId. Never orderExternalId (the GID).
@@ -188,6 +213,7 @@ export function mapOrderToReturnable(raw: RawOrder): OrderForReturn {
     currencyUomId: raw.orderDetail.currencyUomId ?? "USD",
     billingEmail: raw.orderDetail.billingEmail,
     items,
+    ...(shippingAddress ? { shippingAddress } : {}),
   };
 }
 
@@ -264,6 +290,7 @@ export function buildExchangeCreateBody(input: CreateExchangeInput): {
   returnItems: Array<{ orderItemSeqId: string; returnQuantity: number; returnReasonId: string }>;
   exchangeItems: ExchangeItemInput[]; fulfillmentType: FulfillmentType;
   shipmentMethodTypeId?: string; facilityId?: string; note?: string; currencyUomId?: string;
+  shippingAddress?: PostalAddress;
 } {
   return {
     orderId: input.orderId,
@@ -282,6 +309,7 @@ export function buildExchangeCreateBody(input: CreateExchangeInput): {
     ...(input.facilityId ? { facilityId: input.facilityId } : {}),
     ...(input.note ? { note: input.note } : {}),
     ...(input.currencyUomId ? { currencyUomId: input.currencyUomId } : {}),
+    ...(input.shippingAddress ? { shippingAddress: input.shippingAddress } : {}),
   };
 }
 
@@ -422,6 +450,20 @@ export const omsAdapter: ReturnsService = {
       shipmentMethodTypeId: m.shipmentMethodTypeId,
       description: m.description ?? m.shipmentMethodTypeId,
     }));
+  },
+
+  async listCountries(): Promise<Geo[]> {
+    const resp: any = await omsApi({ url: "oms/geos", method: "GET", params: { geoTypeId: "COUNTRY", pageSize: 300 } });
+    if (commonUtil.hasError(resp)) throw new Error("Failed to load countries");
+    const rows: any[] = Array.isArray(resp.data) ? resp.data : resp.data?.geos ?? [];
+    return rows.map((g) => ({ geoId: g.geoId, geoName: g.geoName ?? g.geoId }));
+  },
+
+  async listStates(countryGeoId: string): Promise<Geo[]> {
+    const resp: any = await omsApi({ url: "oms/geos", method: "GET", params: { geoIdFrom: countryGeoId, geoTypeId: "PROVINCE", pageSize: 300 } });
+    if (commonUtil.hasError(resp)) throw new Error("Failed to load states");
+    const rows: any[] = Array.isArray(resp.data) ? resp.data : resp.data?.geos ?? [];
+    return rows.map((g) => ({ geoId: g.geoId, geoName: g.geoName ?? g.geoId }));
   },
 
   async listReturnReasons(): Promise<ReturnReason[]> {
