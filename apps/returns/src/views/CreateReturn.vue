@@ -136,9 +136,84 @@
               <p v-if="appeasementHint" class="error" role="alert">{{ appeasementHint }}</p>
             </ion-card-content>
           </ion-card>
-          <!-- Fulfillment is no longer chosen here. The replacement order is created at the _NA_ facility;
-               how it's fulfilled is decided on the exchange's approval page (Approve = broker / Complete =
-               fulfill from a chosen physical facility). -->
+          <ion-card v-if="order && hasReturnable && mode === 'exchange'" class="fulfillment">
+            <ion-card-header>
+              <ion-card-title>{{ translate("Fulfillment") }}</ion-card-title>
+            </ion-card-header>
+            <ion-card-content>
+              <ion-segment data-testid="create-fulfillment-segment" :value="exchangeFulfillment"
+                @ionChange="exchangeFulfillment = $event.detail.value as FulfillmentType">
+                <ion-segment-button value="SHIPPED" data-testid="create-fulfillment-shipped">
+                  <ion-label>{{ translate("Ship to customer") }}</ion-label>
+                </ion-segment-button>
+                <ion-segment-button value="IMMEDIATE" data-testid="create-fulfillment-immediate">
+                  <ion-label>{{ translate("Hand over now") }}</ion-label>
+                </ion-segment-button>
+              </ion-segment>
+
+              <template v-if="exchangeFulfillment === 'SHIPPED'">
+                <ion-item>
+                  <ion-select data-testid="create-shipment-method" :label="translate('Shipment method')"
+                    label-placement="stacked" :placeholder="translate('Select a method')"
+                    :value="selectedShipmentMethodId" @ionChange="selectedShipmentMethodId = $event.detail.value">
+                    <ion-select-option v-for="m in shipmentMethods" :key="m.shipmentMethodTypeId" :value="m.shipmentMethodTypeId">{{ m.description }}</ion-select-option>
+                  </ion-select>
+                </ion-item>
+                <p class="muted ion-padding-start">{{ translate("Shipped exchanges currently ship Standard regardless of selection; more methods arrive when the backend lands.") }}</p>
+
+                <h3 class="ion-padding-start">{{ translate("Shipping address") }}</h3>
+                <ion-item>
+                  <ion-input data-testid="create-ship-toName" :label="translate('Recipient')" label-placement="stacked"
+                    :value="shippingAddress.toName" @ionInput="shippingAddress.toName = String($event.target.value ?? '')" />
+                </ion-item>
+                <ion-item>
+                  <ion-input data-testid="create-ship-address1" :label="translate('Address line 1')" label-placement="stacked"
+                    :value="shippingAddress.address1" @ionInput="shippingAddress.address1 = String($event.target.value ?? '')" />
+                </ion-item>
+                <ion-item>
+                  <ion-input data-testid="create-ship-address2" :label="translate('Address line 2')" label-placement="stacked"
+                    :value="shippingAddress.address2" @ionInput="shippingAddress.address2 = String($event.target.value ?? '')" />
+                </ion-item>
+                <ion-item>
+                  <ion-input data-testid="create-ship-city" :label="translate('City')" label-placement="stacked"
+                    :value="shippingAddress.city" @ionInput="shippingAddress.city = String($event.target.value ?? '')" />
+                </ion-item>
+                <ion-item>
+                  <ion-select data-testid="create-ship-country" :label="translate('Country')" label-placement="stacked"
+                    :placeholder="translate('Select a country')" :value="shippingAddress.countryGeoId"
+                    @ionChange="onCountryChange($event.detail.value)">
+                    <ion-select-option v-for="c in countries" :key="c.geoId" :value="c.geoId">{{ c.geoName }}</ion-select-option>
+                  </ion-select>
+                </ion-item>
+                <ion-item v-if="states.length">
+                  <ion-select data-testid="create-ship-state" :label="translate('State / Province')" label-placement="stacked"
+                    :placeholder="translate('Select a state / province')" :value="shippingAddress.stateProvinceGeoId"
+                    @ionChange="shippingAddress.stateProvinceGeoId = $event.detail.value">
+                    <ion-select-option v-for="s in states" :key="s.geoId" :value="s.geoId">{{ s.geoName }}</ion-select-option>
+                  </ion-select>
+                </ion-item>
+                <ion-item>
+                  <ion-input data-testid="create-ship-postalCode" :label="translate('Postal code')" label-placement="stacked"
+                    :value="shippingAddress.postalCode" @ionInput="shippingAddress.postalCode = String($event.target.value ?? '')" />
+                </ion-item>
+                <ion-item>
+                  <ion-input data-testid="create-ship-phone" :label="translate('Phone')" label-placement="stacked"
+                    :value="shippingAddress.phone" @ionInput="shippingAddress.phone = String($event.target.value ?? '')" />
+                </ion-item>
+              </template>
+
+              <template v-else>
+                <ion-item>
+                  <ion-select data-testid="create-fulfillment-facility" :label="translate('Fulfillment facility')"
+                    label-placement="stacked" :placeholder="translate('Select a facility')"
+                    :value="selectedFacilityId" @ionChange="selectedFacilityId = $event.detail.value">
+                    <ion-select-option v-for="f in facilities" :key="f.facilityId" :value="f.facilityId">{{ f.facilityName }}</ion-select-option>
+                  </ion-select>
+                </ion-item>
+                <p class="muted ion-padding-start">{{ translate("Stock is issued from this facility now.") }}</p>
+              </template>
+            </ion-card-content>
+          </ion-card>
         </main>
       </div>
 
@@ -163,7 +238,7 @@ import {
 import { bagCheckOutline, checkmarkDoneOutline } from "ionicons/icons";
 import { useReturnsStore } from "@/store/returnsStore";
 import { describeApiError } from "@/util/errorMessage";
-import type { OrderForReturn, ReturnReason } from "@/types/returns";
+import type { Facility, FulfillmentType, Geo, OrderForReturn, PostalAddress, ReturnReason, ShipmentMethod } from "@/types/returns";
 
 const store = useReturnsStore();
 
@@ -179,9 +254,43 @@ const appeasementReasonId = ref<string>("");
 const appeasementNote = ref<string>("");
 const appeasementMode = ref<"amount" | "items">("amount");
 const mode = ref<"return" | "exchange">("return");
-function setMode(m: "return" | "exchange") {
+const exchangeFulfillment = ref<FulfillmentType>("SHIPPED");
+const shipmentMethods = ref<ShipmentMethod[]>([]);
+const facilities = ref<Facility[]>([]);
+const selectedShipmentMethodId = ref<string>("");
+const selectedFacilityId = ref<string>("");
+const fulfillmentOptionsLoaded = ref(false);
+// Shipping address (SHIPPED only) — prefilled from the order, fully editable. geoIds drive the dropdowns.
+const shippingAddress = reactive<PostalAddress>({ address1: "", city: "", postalCode: "", countryGeoId: "" });
+const countries = ref<Geo[]>([]);
+const states = ref<Geo[]>([]);
+async function setMode(m: "return" | "exchange") {
   mode.value = m;
-  if (m === "exchange") appeasementEnabled.value = false; // appeasement is unavailable for exchanges
+  if (m === "exchange") {
+    appeasementEnabled.value = false; // appeasement is unavailable for exchanges
+    if (!fulfillmentOptionsLoaded.value) {
+      fulfillmentOptionsLoaded.value = true;
+      const [methods, facs, ctys] = await Promise.allSettled([
+        store.loadShipmentMethods(), store.loadFacilities(), store.loadCountries(),
+      ]);
+      shipmentMethods.value = methods.status === "fulfilled" ? methods.value : [];
+      facilities.value = facs.status === "fulfilled" ? facs.value : [];
+      countries.value = ctys.status === "fulfilled" ? ctys.value : [];
+    }
+  }
+}
+// Reload states for a newly chosen country and clear the now-stale state selection.
+async function onCountryChange(countryGeoId: string) {
+  shippingAddress.countryGeoId = countryGeoId;
+  shippingAddress.stateProvinceGeoId = undefined;
+  states.value = countryGeoId ? await store.loadStates(countryGeoId) : [];
+}
+// Prefill the address fields from the order's shipping address (and load that country's states).
+async function prefillShippingAddress() {
+  const a = order.value?.shippingAddress;
+  if (!a) return;
+  Object.assign(shippingAddress, { address2: undefined, toName: undefined, attnName: undefined, phone: undefined, stateProvinceGeoId: undefined }, a);
+  states.value = a.countryGeoId ? await store.loadStates(a.countryGeoId) : [];
 }
 const appeasementSelections = reactive<Record<string, { qty: number }>>({});
 // Did the operator type an explicit override? While false, the amount field mirrors the picked-line total.
@@ -272,12 +381,20 @@ function onAppeasementAmountInput(v: number) {
 const hasItemsSelected = computed(() =>
   Object.values(selections).some((s) => s.qty > 0 && s.returnReasonId)
 );
+// A shipped exchange needs a complete address: street, city, postal, country, and a state when the
+// chosen country has a state level (states list non-empty).
+const shippingAddressValid = computed(() =>
+  !!shippingAddress.address1 && !!shippingAddress.city && !!shippingAddress.postalCode
+    && !!shippingAddress.countryGeoId && (states.value.length === 0 || !!shippingAddress.stateProvinceGeoId));
+
 // Submit needs at least one of: a standard return (selected items) OR an appeasement. A stand-alone
 // goodwill refund (customer keeps everything) is valid — the backend accepts an appeasement with no
 // accompanying item return.
 const canSubmit = computed(() =>
   mode.value === "exchange"
-    ? hasItemsSelected.value
+    ? hasItemsSelected.value && (exchangeFulfillment.value === "SHIPPED"
+        ? !!selectedShipmentMethodId.value && shippingAddressValid.value
+        : !!selectedFacilityId.value)
     : (hasItemsSelected.value || appeasementEnabled.value) && appeasementValid.value);
 
 async function lookupOrder() {
@@ -294,6 +411,7 @@ async function lookupOrder() {
     } catch {
       appeasementReasons.value = [];
     }
+    await prefillShippingAddress();
   } catch (e) {
     error.value = describeApiError(e, translate("Order not found"));
   } finally {
@@ -323,7 +441,13 @@ async function submit(): Promise<string | undefined> {
     emitter.emit("presentLoader", { message: "Submitting exchange" });
     let exchangeReturnId: string | undefined;
     try {
-      exchangeReturnId = await store.submitExchange({ orderId: order.value.orderId, returnItems, exchangeItems, currencyUomId: order.value.currencyUomId });
+      exchangeReturnId = await store.submitExchange({
+        orderId: order.value.orderId, returnItems, exchangeItems, currencyUomId: order.value.currencyUomId,
+        fulfillmentType: exchangeFulfillment.value,
+        ...(exchangeFulfillment.value === "SHIPPED"
+          ? { shipmentMethodTypeId: selectedShipmentMethodId.value, shippingAddress: { ...shippingAddress } }
+          : { facilityId: selectedFacilityId.value }),
+      });
     } catch (e) {
       error.value = describeApiError(e, translate("Failed to create exchange"));
       commonUtil.showToast(error.value);
@@ -374,6 +498,8 @@ defineExpose({
   setAppeasementMode, setAppeasementQty, onAppeasementAmountInput,
   appeasementItemsTotal, pickedAppeasementItems, appeasementEffectiveTotal,
   mode, setMode,
+  exchangeFulfillment, shipmentMethods, facilities, selectedShipmentMethodId, selectedFacilityId,
+  shippingAddress, countries, states, onCountryChange, shippingAddressValid,
 });
 </script>
 

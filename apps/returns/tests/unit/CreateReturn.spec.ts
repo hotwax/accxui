@@ -177,24 +177,78 @@ describe("CreateReturn.vue", () => {
     expect((wrapper.vm as any).appeasementHint).toContain("Pick at least one lost item");
   });
 
-  it("submits a same-product exchange with mirrored exchangeItems (created at _NA_, no fulfillment choice)", async () => {
+  it("shipped exchange: prefills address, requires a method, submits fulfillment + method + address, lands approved", async () => {
     const wrapper = mount(CreateReturn, { global: { stubs: { "ion-page": false } } });
     (wrapper.vm as any).orderId = "DEMO-1001";
     await (wrapper.vm as any).lookupOrder();
     await flushPromises();
-    (wrapper.vm as any).setMode("exchange");
-    // No fulfillment toggle on the create page anymore.
-    expect(wrapper.find("[data-testid=create-fulfillment-segment]").exists()).toBe(false);
+    await (wrapper.vm as any).setMode("exchange");
+    await flushPromises();
+    expect(wrapper.find("[data-testid=create-fulfillment-segment]").exists()).toBe(true);
+    expect((wrapper.vm as any).shippingAddress.address1).toBe("500 Congress Ave");
+    expect((wrapper.vm as any).shippingAddress.countryGeoId).toBe("USA");
     (wrapper.vm as any).selections["00001"] = { qty: 1, returnReasonId: "RTN_SIZE_EXCHANGE" };
+    await flushPromises();
+    expect((wrapper.vm as any).canSubmit).toBe(false);
+    (wrapper.vm as any).selectedShipmentMethodId = "STANDARD";
     await flushPromises();
     expect((wrapper.vm as any).canSubmit).toBe(true);
     const id = await (wrapper.vm as any).submit();
     expect(id).toBeTruthy();
-
     const created = await getReturnsService().getReturn(id);
     expect(created.isExchange).toBe(true);
-    expect(created.exchange?.orderStatusId).toBe("ORDER_CREATED");
-    expect(created.exchange?.items?.[0].productId).toBe("P1");
+    expect(created.statusId).toBe("RETURN_APPROVED");
+    expect(created.exchange?.orderStatusId).toBe("ORDER_APPROVED");
+    expect(created.exchange?.shippingAddress?.address1).toBe("500 Congress Ave");
+  });
+
+  it("shipped exchange: an incomplete address blocks submit", async () => {
+    const wrapper = mount(CreateReturn, { global: { stubs: { "ion-page": false } } });
+    (wrapper.vm as any).orderId = "DEMO-1001";
+    await (wrapper.vm as any).lookupOrder();
+    await flushPromises();
+    await (wrapper.vm as any).setMode("exchange");
+    await flushPromises();
+    (wrapper.vm as any).selections["00001"] = { qty: 1, returnReasonId: "RTN_SIZE_EXCHANGE" };
+    (wrapper.vm as any).selectedShipmentMethodId = "STANDARD";
+    (wrapper.vm as any).shippingAddress.address1 = "";
+    await flushPromises();
+    expect((wrapper.vm as any).canSubmit).toBe(false);
+  });
+
+  it("immediate exchange: requires a facility, no address, submits fulfillmentType + facilityId, lands completed", async () => {
+    const wrapper = mount(CreateReturn, { global: { stubs: { "ion-page": false } } });
+    (wrapper.vm as any).orderId = "DEMO-1001";
+    await (wrapper.vm as any).lookupOrder();
+    await flushPromises();
+    await (wrapper.vm as any).setMode("exchange");
+    await flushPromises();
+    (wrapper.vm as any).exchangeFulfillment = "IMMEDIATE";
+    (wrapper.vm as any).selections["00001"] = { qty: 1, returnReasonId: "RTN_SIZE_EXCHANGE" };
+    await flushPromises();
+    expect((wrapper.vm as any).canSubmit).toBe(false);
+    (wrapper.vm as any).selectedFacilityId = "STORE_DT";
+    await flushPromises();
+    expect((wrapper.vm as any).canSubmit).toBe(true);
+    const id = await (wrapper.vm as any).submit();
+    const created = await getReturnsService().getReturn(id);
+    expect(created.statusId).toBe("RETURN_COMPLETED");
+    expect(created.exchange?.orderStatusId).toBe("ORDER_COMPLETED");
+    expect(created.exchange?.shippingAddress).toBeUndefined();
+  });
+
+  it("changing the country loads its states and clears the chosen state", async () => {
+    const wrapper = mount(CreateReturn, { global: { stubs: { "ion-page": false } } });
+    (wrapper.vm as any).orderId = "DEMO-1001";
+    await (wrapper.vm as any).lookupOrder();
+    await flushPromises();
+    await (wrapper.vm as any).setMode("exchange");
+    await flushPromises();
+    await (wrapper.vm as any).onCountryChange("CAN");
+    await flushPromises();
+    expect((wrapper.vm as any).shippingAddress.countryGeoId).toBe("CAN");
+    expect((wrapper.vm as any).shippingAddress.stateProvinceGeoId).toBeFalsy();
+    expect((wrapper.vm as any).states.some((s: any) => s.geoId === "CAN_ON")).toBe(true);
   });
 
   it("hides the appeasement and ignores it in exchange mode", async () => {
@@ -202,7 +256,7 @@ describe("CreateReturn.vue", () => {
     (wrapper.vm as any).orderId = "DEMO-1001";
     await (wrapper.vm as any).lookupOrder();
     await flushPromises();
-    (wrapper.vm as any).setMode("exchange");
+    await (wrapper.vm as any).setMode("exchange");
     await flushPromises();
     expect((wrapper.vm as any).appeasementEnabled).toBe(false);
     expect(wrapper.find("[data-testid=create-appeasement-toggle]").exists()).toBe(false);
