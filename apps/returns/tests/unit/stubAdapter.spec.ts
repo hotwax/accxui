@@ -140,42 +140,38 @@ describe("stubAdapter", () => {
     expect(settled.shopifySync?.shopifyReturnId ?? null).toBeNull();
   });
 
-  it("creates a same-product exchange with isExchange + an exchange block", async () => {
-    const { returnId } = await stubAdapter.createExchange({
+  it("creates a SHIPPED exchange approved on both halves", async () => {
+    const { returnId, replacementOrderId } = await stubAdapter.createExchange({
       orderId: "DEMO-1001",
       returnItems: [{ orderItemSeqId: "00001", returnQuantity: 1, returnReasonId: "RTN_SIZE_EXCHANGE" }],
       exchangeItems: [{ productId: "P1", quantity: 1 }],
+      fulfillmentType: "SHIPPED",
+      shipmentMethodTypeId: "STANDARD",
     });
-    const d = await stubAdapter.getReturn(returnId);
-    expect(d.isExchange).toBe(true);
-    expect(d.statusId).toBe("RETURN_REQUESTED");
-    // Created at the _NA_ facility, in a "created" state — fulfillment is decided at approve/complete.
-    expect(d.exchange?.orderStatusId).toBe("ORDER_CREATED");
-    expect(d.exchange?.items?.[0].productId).toBe("P1");
-    expect(d.exchange?.exchangeCreditAmount).toBe(0);
-    expect(d.sync.shopify).toBe("not_synced");
+    const detail = await stubAdapter.getReturn(returnId);
+    expect(detail.statusId).toBe("RETURN_APPROVED");
+    expect(detail.isExchange).toBe(true);
+    expect(detail.exchange?.orderStatusId).toBe("ORDER_APPROVED");
+    const repl = await stubAdapter.getReplacementOrder(replacementOrderId!);
+    expect(repl.statusId).toBe("ORDER_APPROVED");
+    expect(repl.fulfillmentType).toBe("SHIPPED");
+    expect(repl.shipmentMethod).toBe("Standard Shipping");
   });
 
-  it("approving an exchange brokers the replacement order (ORDER_APPROVED)", async () => {
-    const { returnId } = await stubAdapter.createExchange({
+  it("creates an IMMEDIATE exchange completed on both halves", async () => {
+    const { returnId, replacementOrderId } = await stubAdapter.createExchange({
       orderId: "DEMO-1001",
       returnItems: [{ orderItemSeqId: "00001", returnQuantity: 1, returnReasonId: "RTN_SIZE_EXCHANGE" }],
       exchangeItems: [{ productId: "P1", quantity: 1 }],
+      fulfillmentType: "IMMEDIATE",
+      facilityId: "STORE_DT",
     });
-    await stubAdapter.approveReturn(returnId);
-    expect((await stubAdapter.getReturn(returnId)).exchange?.orderStatusId).toBe("ORDER_APPROVED");
-  });
-
-  it("completing an exchange from a facility marks the replacement order completed", async () => {
-    const { returnId } = await stubAdapter.createExchange({
-      orderId: "DEMO-1001",
-      returnItems: [{ orderItemSeqId: "00001", returnQuantity: 1, returnReasonId: "RTN_SIZE_EXCHANGE" }],
-      exchangeItems: [{ productId: "P1", quantity: 1 }],
-    });
-    await stubAdapter.completeReturn(returnId, "STORE_DT");
-    const d = await stubAdapter.getReturn(returnId);
-    expect(d.statusId).toBe("RETURN_COMPLETED");
-    expect(d.exchange?.orderStatusId).toBe("ORDER_COMPLETED");
+    const detail = await stubAdapter.getReturn(returnId);
+    expect(detail.statusId).toBe("RETURN_COMPLETED");
+    expect(detail.exchange?.orderStatusId).toBe("ORDER_COMPLETED");
+    const repl = await stubAdapter.getReplacementOrder(replacementOrderId!);
+    expect(repl.statusId).toBe("ORDER_COMPLETED");
+    expect(repl.fulfillmentType).toBe("IMMEDIATE");
   });
 
   it("lists physical facilities to fulfill an exchange from", async () => {
@@ -185,13 +181,21 @@ describe("stubAdapter", () => {
     expect(facilities[0]).toHaveProperty("facilityName");
   });
 
-  it("progresses an approved exchange PUSH -> PROC_OK across polls", async () => {
+  it("lists shipment methods for the create picker", async () => {
+    const methods = await stubAdapter.listShipmentMethods();
+    expect(methods.length).toBeGreaterThan(0);
+    expect(methods[0]).toHaveProperty("shipmentMethodTypeId");
+    expect(methods[0]).toHaveProperty("description");
+  });
+
+  it("progresses an exchange PUSH -> PROC_OK across polls", async () => {
     const { returnId } = await stubAdapter.createExchange({
       orderId: "DEMO-1001",
       returnItems: [{ orderItemSeqId: "00001", returnQuantity: 1, returnReasonId: "RTN_SIZE_EXCHANGE" }],
       exchangeItems: [{ productId: "P1", quantity: 1 }],
+      fulfillmentType: "SHIPPED",
+      shipmentMethodTypeId: "STANDARD",
     });
-    await stubAdapter.approveReturn(returnId);
     let sync = await stubAdapter.getSyncStatus(returnId); // step 1: PUSH_OK / PROC_PENDING
     expect(sync.shopify).toBe("pending");
     sync = await stubAdapter.getSyncStatus(returnId);      // step 2: PROC_OK
@@ -205,8 +209,9 @@ describe("stubAdapter", () => {
       orderId: "DEMO-1001",
       returnItems: [{ orderItemSeqId: "00001", returnQuantity: 1, returnReasonId: "RTN_SIZE_EXCHANGE" }],
       exchangeItems: [{ productId: "P1", quantity: 1 }],
+      fulfillmentType: "SHIPPED",
+      shipmentMethodTypeId: "STANDARD",
     });
-    await stubAdapter.approveReturn(returnId);
     await stubAdapter.getSyncStatus(returnId); // advance to PUSH_OK / PROC_PENDING
     // Simulate a stuck mid-flight push: retry before PROC_OK fires.
     await stubAdapter.retryExchangePush(returnId);
@@ -220,6 +225,8 @@ describe("stubAdapter", () => {
       orderId: "DEMO-1001",
       returnItems: [{ orderItemSeqId: "00001", returnQuantity: 1, returnReasonId: "RTN_SIZE_EXCHANGE" }],
       exchangeItems: [{ productId: "P1", quantity: 1 }],
+      fulfillmentType: "SHIPPED",
+      shipmentMethodTypeId: "STANDARD",
     });
     const { items } = await stubAdapter.listReturns({ pageIndex: 0, pageSize: 50 });
     expect(items.find((r) => r.returnId === returnId)?.isExchange).toBe(true);
@@ -231,11 +238,13 @@ describe("stubAdapter", () => {
       orderId: "DEMO-1001",
       returnItems: [{ orderItemSeqId: "00001", returnQuantity: 1, returnReasonId: "RTN_SIZE_EXCHANGE" }],
       exchangeItems: [{ productId: "P1", quantity: 1 }],
+      fulfillmentType: "SHIPPED",
+      shipmentMethodTypeId: "STANDARD",
     });
     expect(replacementOrderId).toBeTruthy();
     const order = await stubAdapter.getReplacementOrder(replacementOrderId!);
     expect(order.orderId).toBe(replacementOrderId);
-    expect(order.statusId).toBe("ORDER_CREATED");
+    expect(order.statusId).toBe("ORDER_APPROVED");
     expect(order.items[0].productId).toBe("P1");
     expect(order.items[0].unitPrice).toBeGreaterThan(0);
     expect(order.grandTotal).toBeGreaterThan(0);
@@ -248,8 +257,9 @@ describe("stubAdapter", () => {
       orderId: "DEMO-1001",
       returnItems: [{ orderItemSeqId: "00001", returnQuantity: 1, returnReasonId: "RTN_SIZE_EXCHANGE" }],
       exchangeItems: [{ productId: "P1", quantity: 1 }],
+      fulfillmentType: "SHIPPED",
+      shipmentMethodTypeId: "STANDARD",
     });
-    await stubAdapter.approveReturn(returnId);
     await stubAdapter.getSyncStatus(returnId);
     await stubAdapter.getSyncStatus(returnId); // now PROC_OK / synced
     await stubAdapter.retryExchangePush(returnId);

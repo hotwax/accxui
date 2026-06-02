@@ -1,7 +1,7 @@
 import type { ReturnsService } from "@/services/ReturnsService";
 import type {
-  CreateExchangeInput, CreateReturnInput, Facility, OrderForReturn, ReplacementOrderDetail, ReturnDetail,
-  ReturnReason, ReturnSummary, SyncState, SyncTarget,
+  CreateExchangeInput, CreateReturnInput, Facility, FulfillmentType, OrderForReturn, ReplacementOrderDetail,
+  ReturnDetail, ReturnReason, ReturnSummary, ShipmentMethod, SyncState, SyncTarget,
 } from "@/types/returns";
 
 interface StubReturn extends ReturnDetail {
@@ -15,6 +15,12 @@ const FACILITIES: Facility[] = [
   { facilityId: "STORE_DT", facilityName: "Downtown Store" },
   { facilityId: "STORE_MALL", facilityName: "Mall Store" },
   { facilityId: "WAREHOUSE_1", facilityName: "Central Warehouse" },
+];
+
+const SHIPMENT_METHODS: ShipmentMethod[] = [
+  { shipmentMethodTypeId: "STANDARD", description: "Standard Shipping" },
+  { shipmentMethodTypeId: "EXPRESS", description: "Express" },
+  { shipmentMethodTypeId: "NEXT_DAY", description: "Next Day" },
 ];
 
 const REASONS: ReturnReason[] = [
@@ -177,14 +183,21 @@ export const stubAdapter: ReturnsService = {
     // Navigate to the standard return when there is one, else to the stand-alone appeasement.
     return { returnId: returnId || appeasementReturnId, appeasementReturnId };
   },
-  async createExchange({ orderId, returnItems, exchangeItems }: CreateExchangeInput) {
+  async createExchange({ orderId, returnItems, exchangeItems, fulfillmentType, shipmentMethodTypeId, facilityId }: CreateExchangeInput) {
     const now = "2026-05-29T12:00:00Z";
     const returnId = String(seq++);
     const replacementOrderId = `EXC${returnId}`;
+    const immediate = fulfillmentType === "IMMEDIATE";
+    const returnStatus = immediate ? "RETURN_COMPLETED" : "RETURN_APPROVED";
+    const orderStatus = immediate ? "ORDER_COMPLETED" : "ORDER_APPROVED";
+    const shipmentMethod = immediate
+      ? "Handed over in store"
+      : SHIPMENT_METHODS.find((m) => m.shipmentMethodTypeId === shipmentMethodTypeId)?.description ?? "Standard Shipping";
     store.set(returnId, {
       returnId, type: "standard", orderId, orderName: ORDER.orderName, orderDate: "2026-05-22T08:00:00Z",
-      statusId: "RETURN_REQUESTED", entryDate: now, origin: "pwa",
-      sync: { shopify: "not_synced" },
+      statusId: returnStatus, entryDate: now, origin: "pwa",
+      // Exchange push (and close, for immediate) fire at create — arm them so the detail polls them to settled.
+      sync: { shopify: "pending" },
       items: returnItems.map((i) => {
         const line = ORDER.items.find((l) => l.orderItemSeqId === i.orderItemSeqId);
         return {
@@ -195,21 +208,24 @@ export const stubAdapter: ReturnsService = {
       }),
       isExchange: true,
       exchange: {
-        // Created at the _NA_ facility in a "created" state; fulfillment is decided at approve/complete.
         replacementOrderId, orderName: `${ORDER.orderName}-EXC`,
-        orderStatusId: "ORDER_CREATED",
+        orderStatusId: orderStatus, fulfillmentType, shipmentMethod,
         items: exchangeItems.map((e) => {
           const line = ORDER.items.find((l) => l.productId === e.productId);
           return { productId: e.productId, quantity: e.quantity, unitPrice: line?.unitPrice, itemDescription: line?.productName };
         }),
         exchangeCreditAmount: 0,
       },
-      statuses: [{ statusId: "RETURN_REQUESTED", statusDate: now }],
+      statuses: [{ statusId: "RETURN_REQUESTED", statusDate: now }, { statusId: returnStatus, statusDate: now }],
       externalIds: { shopify: null },
-      shopifySync: null,
-      pushAttempted: false, pollsUntilSynced: 0,
-      closeAttempted: false, pollsUntilClosed: 0,
+      // Seed shopifyReturnId + CLOSE_PENDING for immediate so getReturn can advance the close once the push lands.
+      shopifySync: immediate
+        ? { synced: false, pushStatusId: "PUSH_PENDING", shopifyReturnId: `gid://shopify/Return/${replacementOrderId}`, closePushStatusId: "CLOSE_PENDING" }
+        : { synced: false, pushStatusId: "PUSH_PENDING" },
+      pushAttempted: true, pollsUntilSynced: 0,
+      closeAttempted: immediate, pollsUntilClosed: immediate ? 1 : 0,
     });
+    void facilityId; // the chosen facility is the issuance origin server-side; not modeled further in the stub
     return { returnId, replacementOrderId };
   },
 
@@ -269,25 +285,17 @@ export const stubAdapter: ReturnsService = {
     // mark CANCELED there — leave returnStatusId unset, matching the live backend.
     if (r.shopifySync?.synced && r.shopifySync.shopifyReturnId) r.shopifySync = { ...r.shopifySync, returnStatusId: "CANCELED" };
   },
-  async completeReturn(returnId, facilityId) {
+  async completeReturn(returnId) {
     const r = store.get(returnId);
     if (!r) throw new Error("Return not found");
-    if (r.statusId === "RETURN_COMPLETED") return; // idempotent: already completed, no double Shopify completion
-    // For an exchange, completing is allowed straight from REQUESTED (fulfill from the chosen facility now);
-    // a plain return must be approved/received first.
-    const completable = r.isExchange
-      ? ["RETURN_REQUESTED", "RETURN_APPROVED", "RETURN_RECEIVED"]
-      : ["RETURN_APPROVED", "RETURN_RECEIVED"];
-    if (!completable.includes(r.statusId)) throw new Error("Return cannot be completed");
+    if (r.statusId === "RETURN_COMPLETED") return; // idempotent: already completed
+    if (!["RETURN_APPROVED", "RETURN_RECEIVED"].includes(r.statusId)) throw new Error("Return cannot be completed");
     r.statusId = "RETURN_COMPLETED";
     r.statuses = [...r.statuses, { statusId: "RETURN_COMPLETED", statusDate: "2026-05-29T12:10:00Z" }];
-    // Completing an exchange fulfills the replacement order from the chosen physical facility (facilityId).
-    void facilityId;
     if (r.isExchange && r.exchange) r.exchange = { ...r.exchange, orderStatusId: "ORDER_COMPLETED" };
-    // Triggers the async Shopify close only when the return was actually synced; otherwise it no-ops (skipped).
     if (r.shopifySync?.shopifyReturnId) {
       r.closeAttempted = true;
-      r.pollsUntilClosed = 1; // one poll shows pending, the next shows CLOSED
+      r.pollsUntilClosed = 1;
       r.shopifySync = { ...r.shopifySync, closePushStatusId: "CLOSE_PENDING" };
     }
   },
@@ -303,7 +311,6 @@ export const stubAdapter: ReturnsService = {
     return { ...ORDER, orderId };
   },
   async getReplacementOrder(orderId): Promise<ReplacementOrderDetail> {
-    // Synthesize the outgoing order from the stored exchange block (keyed by replacementOrderId).
     const exchangeReturn = [...store.values()].find((r) => r.exchange?.replacementOrderId === orderId);
     if (!exchangeReturn?.exchange) throw new Error("Replacement order not found");
     const ex = exchangeReturn.exchange;
@@ -314,25 +321,27 @@ export const stubAdapter: ReturnsService = {
       quantity: it.quantity,
       unitPrice: it.unitPrice ?? 0,
     }));
-    // Fulfillment is decided at approve/complete, not at creation: a completed exchange was fulfilled from a
-    // physical facility (handed over); anything else is brokered for shipping.
-    const completed = ex.orderStatusId === "ORDER_COMPLETED";
+    // Fulfillment is chosen at create: read it from the stored block. Shipped (approved) carries tracking.
+    const shipped = ex.fulfillmentType === "SHIPPED";
     return {
       orderId,
       orderName: ex.orderName ?? orderId,
       orderDate: "2026-05-29T12:00:00Z",
-      statusId: ex.orderStatusId ?? "ORDER_CREATED",
+      statusId: ex.orderStatusId ?? "ORDER_APPROVED",
       currencyUomId: "USD",
       grandTotal: items.reduce((s, it) => s + it.unitPrice * it.quantity, 0),
-      fulfillmentType: completed ? "IMMEDIATE" : "SHIPPED",
-      shipmentMethod: completed ? "Fulfilled in store" : "Standard Shipping",
-      trackingCode: completed ? undefined : (ex.orderStatusId === "ORDER_APPROVED" ? "1Z999AA10123456784" : undefined),
-      carrier: completed ? undefined : "UPS",
+      fulfillmentType: ex.fulfillmentType,
+      shipmentMethod: ex.shipmentMethod,
+      trackingCode: shipped && ex.orderStatusId === "ORDER_APPROVED" ? "1Z999AA10123456784" : undefined,
+      carrier: shipped ? "UPS" : undefined,
       items,
     };
   },
   async listFacilities() {
     return FACILITIES;
+  },
+  async listShipmentMethods() {
+    return SHIPMENT_METHODS;
   },
   async listReturnReasons() {
     return REASONS;
