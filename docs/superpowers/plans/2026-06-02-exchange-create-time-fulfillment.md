@@ -555,7 +555,356 @@ git commit -m "feat(returns): store loadShipmentMethods + complete arity"
 
 ---
 
-## Task 6: Create form (`CreateReturn.vue`)
+## Task A: Address + geo types
+
+> Shipping-address feature (folded in). Execute after Task 5, before Task 6. Spec:
+> `docs/superpowers/specs/2026-06-02-exchange-shipping-address-design.md`.
+
+**Files:** Modify `src/types/returns.ts`
+
+- [ ] **Step 1: Add `PostalAddress` and `Geo`** — add after the `ShipmentMethod` interface:
+
+```ts
+/** A postal address (replacement ship-to / order ship-to). geoIds drive the country/state dropdowns. */
+export interface PostalAddress {
+  toName?: string;
+  attnName?: string;
+  address1: string;
+  address2?: string;
+  city: string;
+  stateProvinceGeoId?: string;  // omitted for countries without a state level
+  postalCode: string;
+  countryGeoId: string;
+  phone?: string;
+}
+
+/** A selectable geo (country or state/province) for the address dropdowns. */
+export interface Geo {
+  geoId: string;
+  geoName: string;
+}
+```
+
+- [ ] **Step 2: Add `shippingAddress` to `OrderForReturn`** — add a field to the `OrderForReturn` interface:
+
+```ts
+  shippingAddress?: PostalAddress; // the order's ship-to; prefills the exchange shipping-address form
+```
+
+- [ ] **Step 3: Add `shippingAddress` to `CreateExchangeInput`** — add after `facilityId?: string;`:
+
+```ts
+  shippingAddress?: PostalAddress; // SHIPPED only — the replacement order's ship-to (geoIds from the dropdowns)
+```
+
+- [ ] **Step 4: Type-check** — `npx vue-tsc --noEmit`. Expected: no NEW errors from `returns.ts` (cross-file errors from earlier tasks may remain until their tasks run; the known pre-existing `ReturnsList.vue:32` error is unrelated).
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/types/returns.ts
+git commit -m "feat(returns): types for exchange shipping address + geos"
+```
+
+---
+
+## Task B: Service contract for geos
+
+**Files:** Modify `src/services/ReturnsService.ts`
+
+- [ ] **Step 1: Add `Geo` to the import and two methods to the interface** — add `Geo` to the type import list, then add next to `listShipmentMethods`:
+
+```ts
+  // Geo lists for the create-page shipping-address dropdowns (SHIPPED exchange).
+  listCountries(): Promise<Geo[]>;
+  listStates(countryGeoId: string): Promise<Geo[]>;
+```
+
+- [ ] **Step 2: Type-check** — `npx vue-tsc --noEmit`. Expected: errors in `omsAdapter.ts`/`stubAdapter.ts` for the not-yet-implemented `listCountries`/`listStates` (resolved in Tasks C/D).
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add src/services/ReturnsService.ts
+git commit -m "feat(returns): service contract for geo lists"
+```
+
+---
+
+## Task C: omsAdapter — address mapping + geos
+
+**Files:** Modify `src/adapters/omsAdapter.ts`; Test `tests/unit/omsAdapter.spec.ts`
+
+- [ ] **Step 1: Write failing tests** — append to `tests/unit/omsAdapter.spec.ts` (the file imports from `@/adapters/omsAdapter`; add `mapPostalAddress` to that import). Add:
+
+```ts
+describe("mapPostalAddress", () => {
+  it("maps a full address and omits empty optionals", () => {
+    const a = mapPostalAddress({
+      toName: "Jane Doe", address1: "123 Main St", address2: "Apt 4", city: "Austin",
+      stateProvinceGeoId: "USA_TX", postalCode: "78701", countryGeoId: "USA", phone: "+1 512 555 0100",
+    });
+    expect(a).toEqual({
+      toName: "Jane Doe", address1: "123 Main St", address2: "Apt 4", city: "Austin",
+      stateProvinceGeoId: "USA_TX", postalCode: "78701", countryGeoId: "USA", phone: "+1 512 555 0100",
+    });
+  });
+  it("returns undefined when there is no address1", () => {
+    expect(mapPostalAddress(null)).toBeUndefined();
+    expect(mapPostalAddress({ city: "Austin" })).toBeUndefined();
+  });
+});
+
+describe("mapOrderToReturnable shippingAddress", () => {
+  it("surfaces the first ship group's shipping address", () => {
+    const o = mapOrderToReturnable({
+      orderDetail: {
+        orderId: "DEMO-1001",
+        shipGroups: [{ shippingAddress: { address1: "1 A St", city: "Austin", postalCode: "78701", countryGeoId: "USA" }, items: [] }],
+      },
+    });
+    expect(o.shippingAddress).toMatchObject({ address1: "1 A St", city: "Austin", countryGeoId: "USA" });
+  });
+});
+
+describe("buildExchangeCreateBody shippingAddress", () => {
+  const base = {
+    orderId: "DEMO-1001",
+    returnItems: [{ orderItemSeqId: "00001", returnQuantity: 1, returnReasonId: "RTN_SIZE_EXCHANGE" }],
+    exchangeItems: [{ productId: "P1", quantity: 1 }],
+    fulfillmentType: "SHIPPED" as const,
+  };
+  it("includes shippingAddress when present, omits it when absent", () => {
+    const addr = { address1: "1 A St", city: "Austin", postalCode: "78701", countryGeoId: "USA" };
+    expect((buildExchangeCreateBody({ ...base, shippingAddress: addr }) as any).shippingAddress).toEqual(addr);
+    expect("shippingAddress" in buildExchangeCreateBody(base)).toBe(false);
+  });
+});
+```
+
+- [ ] **Step 2: Run to verify failure** — `npx vitest run tests/unit/omsAdapter.spec.ts` → FAIL (`mapPostalAddress` undefined).
+
+- [ ] **Step 3: Implement.** In `src/adapters/omsAdapter.ts`:
+
+(a) Add `Geo` and `PostalAddress` to the type import from `@/types/returns`.
+
+(b) Add a raw type + the pure mapper (place near `mapOrderToReturnable`):
+
+```ts
+interface RawPostalAddress {
+  toName?: string; attnName?: string; address1?: string; address2?: string; city?: string;
+  stateProvinceGeoId?: string; postalCode?: string; countryGeoId?: string; phone?: string;
+}
+
+/** Map a raw ship-group postal address; returns undefined when there's no usable address (no address1). */
+export function mapPostalAddress(raw?: RawPostalAddress | null): PostalAddress | undefined {
+  if (!raw || !raw.address1) return undefined;
+  return {
+    ...(raw.toName ? { toName: raw.toName } : {}),
+    ...(raw.attnName ? { attnName: raw.attnName } : {}),
+    address1: raw.address1,
+    ...(raw.address2 ? { address2: raw.address2 } : {}),
+    city: raw.city ?? "",
+    ...(raw.stateProvinceGeoId ? { stateProvinceGeoId: raw.stateProvinceGeoId } : {}),
+    postalCode: raw.postalCode ?? "",
+    countryGeoId: raw.countryGeoId ?? "",
+    ...(raw.phone ? { phone: raw.phone } : {}),
+  };
+}
+```
+
+(c) Add `shippingAddress?: RawPostalAddress;` to the `RawShipGroup` interface.
+
+(d) In `mapOrderToReturnable`, surface the address — change the returned object to include it. Just before the `return {`, add:
+
+```ts
+  const shippingAddress = (raw.orderDetail.shipGroups ?? [])
+    .map((g) => mapPostalAddress(g.shippingAddress))
+    .find((a) => a != null);
+```
+
+and add to the returned object (after `items,`):
+
+```ts
+    ...(shippingAddress ? { shippingAddress } : {}),
+```
+
+(e) In `buildExchangeCreateBody`, add `shippingAddress?: PostalAddress;` to the return-type annotation, and add to the returned object (after the `facilityId` spread):
+
+```ts
+    ...(input.shippingAddress ? { shippingAddress: input.shippingAddress } : {}),
+```
+
+(f) Add the two geo fetchers after `listShipmentMethods`:
+
+```ts
+  async listCountries(): Promise<Geo[]> {
+    const resp: any = await omsApi({ url: "oms/geos", method: "GET", params: { geoTypeId: "COUNTRY", pageSize: 300 } });
+    if (commonUtil.hasError(resp)) throw new Error("Failed to load countries");
+    const rows: any[] = Array.isArray(resp.data) ? resp.data : resp.data?.geos ?? [];
+    return rows.map((g) => ({ geoId: g.geoId, geoName: g.geoName ?? g.geoId }));
+  },
+  async listStates(countryGeoId: string): Promise<Geo[]> {
+    const resp: any = await omsApi({ url: "oms/geos", method: "GET", params: { geoIdFrom: countryGeoId, geoTypeId: "PROVINCE", pageSize: 300 } });
+    if (commonUtil.hasError(resp)) throw new Error("Failed to load states");
+    const rows: any[] = Array.isArray(resp.data) ? resp.data : resp.data?.geos ?? [];
+    return rows.map((g) => ({ geoId: g.geoId, geoName: g.geoName ?? g.geoId }));
+  },
+```
+
+- [ ] **Step 4: Run to verify pass** — `npx vitest run tests/unit/omsAdapter.spec.ts` → PASS.
+
+- [ ] **Step 5: Type-check** — `npx vue-tsc --noEmit` → `omsAdapter.ts` clean.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add src/adapters/omsAdapter.ts tests/unit/omsAdapter.spec.ts
+git commit -m "feat(returns): omsAdapter shipping-address mapping + geo lists"
+```
+
+---
+
+## Task D: stubAdapter — address + geos
+
+**Files:** Modify `src/adapters/stubAdapter.ts`; Test `tests/unit/stubAdapter.spec.ts`
+
+- [ ] **Step 1: Write failing tests** — append to `tests/unit/stubAdapter.spec.ts`:
+
+```ts
+  it("the demo order carries a shipping address", async () => {
+    const order = await stubAdapter.getOrderForReturn("DEMO-1001");
+    expect(order.shippingAddress).toBeDefined();
+    expect(order.shippingAddress?.countryGeoId).toBe("USA");
+  });
+
+  it("lists countries and a country's states ([] for unknown)", async () => {
+    const countries = await stubAdapter.listCountries();
+    expect(countries.find((c) => c.geoId === "USA")).toBeDefined();
+    const states = await stubAdapter.listStates("USA");
+    expect(states.length).toBeGreaterThan(0);
+    expect(await stubAdapter.listStates("ZZZ")).toEqual([]);
+  });
+
+  it("stores the submitted shipping address on the exchange", async () => {
+    const addr = { address1: "9 New St", city: "Dallas", stateProvinceGeoId: "USA_TX", postalCode: "75201", countryGeoId: "USA" };
+    const { returnId } = await stubAdapter.createExchange({
+      orderId: "DEMO-1001",
+      returnItems: [{ orderItemSeqId: "00001", returnQuantity: 1, returnReasonId: "RTN_SIZE_EXCHANGE" }],
+      exchangeItems: [{ productId: "P1", quantity: 1 }],
+      fulfillmentType: "SHIPPED", shipmentMethodTypeId: "STANDARD", shippingAddress: addr,
+    });
+    const detail = await stubAdapter.getReturn(returnId);
+    expect(detail.exchange?.shippingAddress).toMatchObject({ address1: "9 New St", city: "Dallas" });
+  });
+```
+
+- [ ] **Step 2: Run to verify failure** — `npx vitest run tests/unit/stubAdapter.spec.ts` → FAIL.
+
+- [ ] **Step 3: Implement.** In `src/adapters/stubAdapter.ts`:
+
+(a) Add `Geo` and `PostalAddress` to the type import.
+
+(b) Add a `shippingAddress` to the demo `ORDER` constant (add the field to the `ORDER` object):
+
+```ts
+  shippingAddress: {
+    toName: "Demo Customer", address1: "500 Congress Ave", city: "Austin",
+    stateProvinceGeoId: "USA_TX", postalCode: "78701", countryGeoId: "USA", phone: "+1 512 555 0100",
+  },
+```
+
+(c) Add canned geo data near the `FACILITIES` constant:
+
+```ts
+const COUNTRIES: Geo[] = [
+  { geoId: "USA", geoName: "United States" },
+  { geoId: "CAN", geoName: "Canada" },
+];
+const STATES: Record<string, Geo[]> = {
+  USA: [
+    { geoId: "USA_TX", geoName: "Texas" },
+    { geoId: "USA_CA", geoName: "California" },
+    { geoId: "USA_NY", geoName: "New York" },
+  ],
+  CAN: [
+    { geoId: "CAN_ON", geoName: "Ontario" },
+    { geoId: "CAN_BC", geoName: "British Columbia" },
+  ],
+};
+```
+
+(d) Add the `ExchangeDetail` block's address: in `createExchange`, add `...(shippingAddress ? { shippingAddress } : {})` to the `exchange:` object literal, and destructure `shippingAddress` from the input parameter. (NOTE: `ExchangeDetail` needs a `shippingAddress?: PostalAddress` field — add it to the `ExchangeDetail` interface in `src/types/returns.ts` as part of this task, and import `PostalAddress` there if not already imported. Commit that type tweak with this task.)
+
+(e) Add the geo fetchers after `listShipmentMethods`:
+
+```ts
+  async listCountries() {
+    return COUNTRIES;
+  },
+  async listStates(countryGeoId: string) {
+    return STATES[countryGeoId] ?? [];
+  },
+```
+
+- [ ] **Step 4: Run to verify pass** — `npx vitest run tests/unit/stubAdapter.spec.ts` → PASS.
+
+- [ ] **Step 5: Type-check** — `npx vue-tsc --noEmit` → stub clean (views still pending Task 6).
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add src/adapters/stubAdapter.ts tests/unit/stubAdapter.spec.ts src/types/returns.ts
+git commit -m "feat(returns): stubAdapter shipping address + geo lists"
+```
+
+---
+
+## Task E: Store geo actions
+
+**Files:** Modify `src/store/returnsStore.ts`; Test `tests/unit/returnsStoreCrud.spec.ts`
+
+- [ ] **Step 1: Write failing tests** — add to `tests/unit/returnsStoreCrud.spec.ts`:
+
+```ts
+  it("loadCountries and loadStates proxy the service", async () => {
+    const countries = await store.loadCountries();
+    expect(countries.length).toBeGreaterThan(0);
+    const states = await store.loadStates("USA");
+    expect(states.length).toBeGreaterThan(0);
+  });
+```
+
+- [ ] **Step 2: Run to verify failure** — `npx vitest run tests/unit/returnsStoreCrud.spec.ts` → FAIL.
+
+- [ ] **Step 3: Implement** — add next to `loadShipmentMethods` in `src/store/returnsStore.ts`:
+
+```ts
+    /** Countries for the create-page shipping-address dropdown. */
+    async loadCountries() {
+      return getReturnsService().listCountries();
+    },
+    /** States/provinces for a chosen country (empty when the country has none). */
+    async loadStates(countryGeoId: string) {
+      return getReturnsService().listStates(countryGeoId);
+    },
+```
+
+- [ ] **Step 4: Run to verify pass** — `npx vitest run tests/unit/returnsStoreCrud.spec.ts` → PASS.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/store/returnsStore.ts tests/unit/returnsStoreCrud.spec.ts
+git commit -m "feat(returns): store loadCountries/loadStates"
+```
+
+---
+
+## Task 6: Create form (`CreateReturn.vue`) — fulfillment pickers + shipping address
+
+Builds the SHIPPED shipment-method picker, the IMMEDIATE facility picker, AND the SHIPPED shipping-address
+block in one pass. Depends on Tasks 1–5 (fulfillment) and Tasks A–E (address + geos).
 
 **Files:**
 - Modify: `src/views/CreateReturn.vue`
@@ -563,21 +912,23 @@ git commit -m "feat(returns): store loadShipmentMethods + complete arity"
 
 - [ ] **Step 1: Rewrite the exchange create tests**
 
-In `tests/unit/CreateReturn.spec.ts`, replace the two exchange tests (`"submits a same-product exchange …"` and `"hides the appeasement and ignores it in exchange mode"`) with:
+In `tests/unit/CreateReturn.spec.ts`, replace the two exchange tests (`"submits a same-product exchange …"` and `"hides the appeasement and ignores it in exchange mode"`) with the four below. NOTE: the demo order (`DEMO-1001`) carries a shipping address (Task D), so a SHIPPED exchange's address is prefilled and already valid after lookup — the shipped test relies on that.
 
 ```ts
-  it("shipped exchange: requires a method, submits fulfillmentType + shipmentMethodTypeId, lands approved", async () => {
+  it("shipped exchange: prefills address, requires a method, submits fulfillment + method + address, lands approved", async () => {
     const wrapper = mount(CreateReturn, { global: { stubs: { "ion-page": false } } });
     (wrapper.vm as any).orderId = "DEMO-1001";
     await (wrapper.vm as any).lookupOrder();
     await flushPromises();
     await (wrapper.vm as any).setMode("exchange");
     await flushPromises();
-    // Fulfillment toggle is back on the create page.
     expect(wrapper.find("[data-testid=create-fulfillment-segment]").exists()).toBe(true);
+    // Address prefilled from the order.
+    expect((wrapper.vm as any).shippingAddress.address1).toBe("500 Congress Ave");
+    expect((wrapper.vm as any).shippingAddress.countryGeoId).toBe("USA");
     (wrapper.vm as any).selections["00001"] = { qty: 1, returnReasonId: "RTN_SIZE_EXCHANGE" };
     await flushPromises();
-    // No method chosen yet → submit blocked.
+    // Address is valid (prefilled), but no method chosen yet → submit blocked.
     expect((wrapper.vm as any).canSubmit).toBe(false);
     (wrapper.vm as any).selectedShipmentMethodId = "STANDARD";
     await flushPromises();
@@ -588,10 +939,24 @@ In `tests/unit/CreateReturn.spec.ts`, replace the two exchange tests (`"submits 
     expect(created.isExchange).toBe(true);
     expect(created.statusId).toBe("RETURN_APPROVED");
     expect(created.exchange?.orderStatusId).toBe("ORDER_APPROVED");
-    expect(created.exchange?.items?.[0].productId).toBe("P1");
+    expect(created.exchange?.shippingAddress?.address1).toBe("500 Congress Ave");
   });
 
-  it("immediate exchange: requires a facility, submits fulfillmentType + facilityId, lands completed", async () => {
+  it("shipped exchange: an incomplete address blocks submit", async () => {
+    const wrapper = mount(CreateReturn, { global: { stubs: { "ion-page": false } } });
+    (wrapper.vm as any).orderId = "DEMO-1001";
+    await (wrapper.vm as any).lookupOrder();
+    await flushPromises();
+    await (wrapper.vm as any).setMode("exchange");
+    await flushPromises();
+    (wrapper.vm as any).selections["00001"] = { qty: 1, returnReasonId: "RTN_SIZE_EXCHANGE" };
+    (wrapper.vm as any).selectedShipmentMethodId = "STANDARD";
+    (wrapper.vm as any).shippingAddress.address1 = ""; // clear a required field
+    await flushPromises();
+    expect((wrapper.vm as any).canSubmit).toBe(false);
+  });
+
+  it("immediate exchange: requires a facility, no address, submits fulfillmentType + facilityId, lands completed", async () => {
     const wrapper = mount(CreateReturn, { global: { stubs: { "ion-page": false } } });
     (wrapper.vm as any).orderId = "DEMO-1001";
     await (wrapper.vm as any).lookupOrder();
@@ -609,6 +974,21 @@ In `tests/unit/CreateReturn.spec.ts`, replace the two exchange tests (`"submits 
     const created = await getReturnsService().getReturn(id);
     expect(created.statusId).toBe("RETURN_COMPLETED");
     expect(created.exchange?.orderStatusId).toBe("ORDER_COMPLETED");
+    expect(created.exchange?.shippingAddress).toBeUndefined();
+  });
+
+  it("changing the country loads its states and clears the chosen state", async () => {
+    const wrapper = mount(CreateReturn, { global: { stubs: { "ion-page": false } } });
+    (wrapper.vm as any).orderId = "DEMO-1001";
+    await (wrapper.vm as any).lookupOrder();
+    await flushPromises();
+    await (wrapper.vm as any).setMode("exchange");
+    await flushPromises();
+    await (wrapper.vm as any).onCountryChange("CAN");
+    await flushPromises();
+    expect((wrapper.vm as any).shippingAddress.countryGeoId).toBe("CAN");
+    expect((wrapper.vm as any).shippingAddress.stateProvinceGeoId).toBeFalsy();
+    expect((wrapper.vm as any).states.some((s: any) => s.geoId === "CAN_ON")).toBe(true);
   });
 
   it("hides the appeasement and ignores it in exchange mode", async () => {
@@ -626,9 +1006,9 @@ In `tests/unit/CreateReturn.spec.ts`, replace the two exchange tests (`"submits 
 - [ ] **Step 2: Run to verify failure**
 
 Run: `npx vitest run tests/unit/CreateReturn.spec.ts`
-Expected: FAIL — no `create-fulfillment-segment`, no `selectedShipmentMethodId`, `setMode` is sync, etc.
+Expected: FAIL — no `create-fulfillment-segment`, no `shippingAddress`/`onCountryChange`, `setMode` is sync, etc.
 
-- [ ] **Step 3: Add the Fulfillment card to the template**
+- [ ] **Step 3: Add the Fulfillment card (with the SHIPPED address block) to the template**
 
 In `src/views/CreateReturn.vue`, replace the fulfillment comment block (the `<!-- Fulfillment is no longer chosen here … -->` comment near the end of `<main>`) with:
 
@@ -657,6 +1037,47 @@ In `src/views/CreateReturn.vue`, replace the fulfillment comment block (the `<!-
                   </ion-select>
                 </ion-item>
                 <p class="muted ion-padding-start">{{ translate("Shipped exchanges currently ship Standard regardless of selection; more methods arrive when the backend lands.") }}</p>
+
+                <!-- Shipping address: editable, prefilled from the order; geoIds drive country/state. -->
+                <h3 class="ion-padding-start">{{ translate("Shipping address") }}</h3>
+                <ion-item>
+                  <ion-input data-testid="create-ship-toName" :label="translate('Recipient')" label-placement="stacked"
+                    :value="shippingAddress.toName" @ionInput="shippingAddress.toName = $event.target.value ?? ''" />
+                </ion-item>
+                <ion-item>
+                  <ion-input data-testid="create-ship-address1" :label="translate('Address line 1')" label-placement="stacked"
+                    :value="shippingAddress.address1" @ionInput="shippingAddress.address1 = $event.target.value ?? ''" />
+                </ion-item>
+                <ion-item>
+                  <ion-input data-testid="create-ship-address2" :label="translate('Address line 2')" label-placement="stacked"
+                    :value="shippingAddress.address2" @ionInput="shippingAddress.address2 = $event.target.value ?? ''" />
+                </ion-item>
+                <ion-item>
+                  <ion-input data-testid="create-ship-city" :label="translate('City')" label-placement="stacked"
+                    :value="shippingAddress.city" @ionInput="shippingAddress.city = $event.target.value ?? ''" />
+                </ion-item>
+                <ion-item>
+                  <ion-select data-testid="create-ship-country" :label="translate('Country')" label-placement="stacked"
+                    :placeholder="translate('Select a country')" :value="shippingAddress.countryGeoId"
+                    @ionChange="onCountryChange($event.detail.value)">
+                    <ion-select-option v-for="c in countries" :key="c.geoId" :value="c.geoId">{{ c.geoName }}</ion-select-option>
+                  </ion-select>
+                </ion-item>
+                <ion-item v-if="states.length">
+                  <ion-select data-testid="create-ship-state" :label="translate('State / Province')" label-placement="stacked"
+                    :placeholder="translate('Select a state / province')" :value="shippingAddress.stateProvinceGeoId"
+                    @ionChange="shippingAddress.stateProvinceGeoId = $event.detail.value">
+                    <ion-select-option v-for="s in states" :key="s.geoId" :value="s.geoId">{{ s.geoName }}</ion-select-option>
+                  </ion-select>
+                </ion-item>
+                <ion-item>
+                  <ion-input data-testid="create-ship-postalCode" :label="translate('Postal code')" label-placement="stacked"
+                    :value="shippingAddress.postalCode" @ionInput="shippingAddress.postalCode = $event.target.value ?? ''" />
+                </ion-item>
+                <ion-item>
+                  <ion-input data-testid="create-ship-phone" :label="translate('Phone')" label-placement="stacked"
+                    :value="shippingAddress.phone" @ionInput="shippingAddress.phone = $event.target.value ?? ''" />
+                </ion-item>
               </template>
 
               <template v-else>
@@ -673,14 +1094,16 @@ In `src/views/CreateReturn.vue`, replace the fulfillment comment block (the `<!-
           </ion-card>
 ```
 
-- [ ] **Step 4: Add state, lazy loading, validation, and submit fields to the script**
+Ensure `IonInput` is imported from `@ionic/vue` in this file (it likely already is; add it to the import list if not).
+
+- [ ] **Step 4: Add state, lazy loading, validation, prefill, and submit fields to the script**
 
 In `src/views/CreateReturn.vue` `<script setup>`:
 
 (a) Extend the type import:
 
 ```ts
-import type { Facility, FulfillmentType, OrderForReturn, ReturnReason, ShipmentMethod } from "@/types/returns";
+import type { Facility, FulfillmentType, Geo, OrderForReturn, PostalAddress, ReturnReason, ShipmentMethod } from "@/types/returns";
 ```
 
 (b) Add reactive state near the other `ref`s (after `const mode = ref…`):
@@ -692,9 +1115,13 @@ const facilities = ref<Facility[]>([]);
 const selectedShipmentMethodId = ref<string>("");
 const selectedFacilityId = ref<string>("");
 const fulfillmentOptionsLoaded = ref(false);
+// Shipping address (SHIPPED only) — prefilled from the order, fully editable. geoIds drive the dropdowns.
+const shippingAddress = reactive<PostalAddress>({ address1: "", city: "", postalCode: "", countryGeoId: "" });
+const countries = ref<Geo[]>([]);
+const states = ref<Geo[]>([]);
 ```
 
-(c) Replace the existing `setMode` function with an async version that lazily loads the pickers:
+(c) Replace the existing `setMode` function with an async version that lazily loads the pickers + countries:
 
 ```ts
 async function setMode(m: "return" | "exchange") {
@@ -703,48 +1130,78 @@ async function setMode(m: "return" | "exchange") {
     appeasementEnabled.value = false; // appeasement is unavailable for exchanges
     if (!fulfillmentOptionsLoaded.value) {
       fulfillmentOptionsLoaded.value = true;
-      // Each picker degrades independently — a failure of one must not block the other or the form.
-      const [methods, facs] = await Promise.allSettled([store.loadShipmentMethods(), store.loadFacilities()]);
+      // Each picker degrades independently — a failure of one must not block the others or the form.
+      const [methods, facs, ctys] = await Promise.allSettled([
+        store.loadShipmentMethods(), store.loadFacilities(), store.loadCountries(),
+      ]);
       shipmentMethods.value = methods.status === "fulfilled" ? methods.value : [];
       facilities.value = facs.status === "fulfilled" ? facs.value : [];
+      countries.value = ctys.status === "fulfilled" ? ctys.value : [];
     }
   }
 }
 ```
 
-(d) Replace the `canSubmit` computed with one that requires the right fulfillment field:
+(d) Add a country-change handler and a prefill helper:
 
 ```ts
+// Reload states for a newly chosen country and clear the now-stale state selection.
+async function onCountryChange(countryGeoId: string) {
+  shippingAddress.countryGeoId = countryGeoId;
+  shippingAddress.stateProvinceGeoId = undefined;
+  states.value = countryGeoId ? await store.loadStates(countryGeoId) : [];
+}
+// Prefill the address fields from the order's shipping address (and load that country's states).
+async function prefillShippingAddress() {
+  const a = order.value?.shippingAddress;
+  if (!a) return;
+  Object.assign(shippingAddress, { address2: undefined, toName: undefined, attnName: undefined, phone: undefined, stateProvinceGeoId: undefined }, a);
+  states.value = a.countryGeoId ? await store.loadStates(a.countryGeoId) : [];
+}
+```
+
+(e) Call `prefillShippingAddress()` at the end of `lookupOrder()` after `order.value` is set (inside the `try`, after reasons load). It is safe to call even before the operator opens exchange mode.
+
+(f) Add an address-validity computed and fold it into `canSubmit`:
+
+```ts
+// A shipped exchange needs a complete address: street, city, postal, country, and a state when the
+// chosen country has a state level (states list non-empty).
+const shippingAddressValid = computed(() =>
+  !!shippingAddress.address1 && !!shippingAddress.city && !!shippingAddress.postalCode
+    && !!shippingAddress.countryGeoId && (states.value.length === 0 || !!shippingAddress.stateProvinceGeoId));
+
 const canSubmit = computed(() =>
   mode.value === "exchange"
     ? hasItemsSelected.value && (exchangeFulfillment.value === "SHIPPED"
-        ? !!selectedShipmentMethodId.value
+        ? !!selectedShipmentMethodId.value && shippingAddressValid.value
         : !!selectedFacilityId.value)
     : (hasItemsSelected.value || appeasementEnabled.value) && appeasementValid.value);
 ```
 
-(e) In `submit()`, in the exchange branch, replace the `store.submitExchange({ … })` call with:
+(g) In `submit()`, in the exchange branch, replace the `store.submitExchange({ … })` call with:
 
 ```ts
       exchangeReturnId = await store.submitExchange({
         orderId: order.value.orderId, returnItems, exchangeItems, currencyUomId: order.value.currencyUomId,
         fulfillmentType: exchangeFulfillment.value,
         ...(exchangeFulfillment.value === "SHIPPED"
-          ? { shipmentMethodTypeId: selectedShipmentMethodId.value }
+          ? { shipmentMethodTypeId: selectedShipmentMethodId.value, shippingAddress: { ...shippingAddress } }
           : { facilityId: selectedFacilityId.value }),
       });
 ```
 
-(f) Add the new refs to `defineExpose` (append to the existing object):
+(h) Add the new state to `defineExpose` (append to the existing object):
 
 ```ts
   exchangeFulfillment, shipmentMethods, facilities, selectedShipmentMethodId, selectedFacilityId,
+  shippingAddress, countries, states, onCountryChange, shippingAddressValid,
 ```
 
 - [ ] **Step 5: Run to verify pass**
 
 Run: `npx vitest run tests/unit/CreateReturn.spec.ts`
-Expected: PASS.
+Expected: PASS. If the shipped test's `canSubmit` is false after selecting a method, confirm `prefillShippingAddress` ran (the demo order address sets a valid `USA`/`USA_TX` address and its states load).
 
 - [ ] **Step 6: Type-check**
 
@@ -755,7 +1212,7 @@ Expected: `CreateReturn.vue` clean.
 
 ```bash
 git add src/views/CreateReturn.vue tests/unit/CreateReturn.spec.ts
-git commit -m "feat(returns): create-form exchange fulfillment toggle + pickers"
+git commit -m "feat(returns): create-form exchange fulfillment pickers + shipping address"
 ```
 
 ---
@@ -895,7 +1352,18 @@ git commit -m "feat(returns): exchange detail drops approve/complete (skip-appro
   "Fulfillment facility": "Fulfillment facility",
   "Select a facility": "Select a facility",
   "Stock is issued from this facility now.": "Stock is issued from this facility now.",
-  "Shipped exchanges currently ship Standard regardless of selection; more methods arrive when the backend lands.": "Shipped exchanges currently ship Standard regardless of selection; more methods arrive when the backend lands."
+  "Shipped exchanges currently ship Standard regardless of selection; more methods arrive when the backend lands.": "Shipped exchanges currently ship Standard regardless of selection; more methods arrive when the backend lands.",
+  "Shipping address": "Shipping address",
+  "Recipient": "Recipient",
+  "Address line 1": "Address line 1",
+  "Address line 2": "Address line 2",
+  "City": "City",
+  "State / Province": "State / Province",
+  "Select a state / province": "Select a state / province",
+  "Postal code": "Postal code",
+  "Country": "Country",
+  "Select a country": "Select a country",
+  "Phone": "Phone"
 ```
 
 - [ ] **Step 2: Verify the JSON is valid**
