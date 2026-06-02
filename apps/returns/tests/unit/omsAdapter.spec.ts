@@ -207,6 +207,59 @@ describe("appeasement mapping", () => {
   });
 });
 
+describe("exchange mapping", () => {
+  it("maps isExchange + the exchange block and collapses sync via PROC", () => {
+    const d = mapReturnDetail({
+      returnDetail: { returnId: "M50", statusId: "RETURN_APPROVED", entryDate: 1, currencyUomId: "USD" },
+      items: [{ orderItemSeqId: "00001", productId: "P1", productName: "Classic Tee", returnQuantity: 1, returnReasonId: "RTN_SIZE_EXCHANGE" }],
+      isExchange: true,
+      exchange: {
+        replacementOrderId: "EXC100100", orderName: "EXC-#1001-1", fulfillmentType: "SHIPPED",
+        orderStatusId: "ORDER_APPROVED",
+        items: [{ productId: "P1", quantity: 1, unitPrice: 19.99, itemDescription: "Classic Tee" }],
+        exchangeCreditAmount: 0,
+      },
+      shopifySync: { pushStatusId: "PUSH_OK", processStatusId: "PROC_PENDING", shopifyReturnId: "gid://shopify/Return/1" },
+    });
+    expect(d.isExchange).toBe(true);
+    expect(d.exchange?.replacementOrderId).toBe("EXC100100");
+    expect(d.exchange?.fulfillmentType).toBe("SHIPPED");
+    expect(d.exchange?.exchangeCreditAmount).toBe(0);
+    // PUSH_OK + PROC_PENDING collapses to pending for an exchange (NOT synced).
+    expect(d.sync.shopify).toBe("pending");
+  });
+
+  it("collapses a PROC_OK exchange to synced", () => {
+    const d = mapReturnDetail({
+      returnDetail: { returnId: "M51", statusId: "RETURN_APPROVED", entryDate: 1 },
+      items: [], isExchange: true,
+      exchange: { replacementOrderId: "EXC2", fulfillmentType: "IMMEDIATE", orderStatusId: "ORDER_COMPLETED", items: [], exchangeCreditAmount: 0 },
+      shopifySync: { pushStatusId: "PUSH_OK", processStatusId: "PROC_OK", shopifyReturnId: "gid://shopify/Return/2" },
+    });
+    expect(d.sync.shopify).toBe("synced");
+  });
+
+  it("leaves a non-exchange return with isExchange undefined and the standard collapse", () => {
+    const d = mapReturnDetail({
+      returnDetail: { returnId: "M52", statusId: "RETURN_APPROVED", entryDate: 1 },
+      items: [], shopifySync: { pushStatusId: "PUSH_OK", shopifyReturnId: "gid://shopify/Return/3" },
+    });
+    expect(d.isExchange).toBeFalsy();
+    expect(d.exchange).toBeUndefined();
+    expect(d.sync.shopify).toBe("synced"); // standard collapse: PUSH_OK = synced
+  });
+
+  it("leaves exchange undefined when isExchange is true but the exchange block is absent", () => {
+    const d = mapReturnDetail({
+      returnDetail: { returnId: "M53", statusId: "RETURN_APPROVED", entryDate: 1 },
+      items: [], isExchange: true, // exchange block omitted (e.g. replacement order still being created)
+      shopifySync: null,
+    });
+    expect(d.isExchange).toBe(true);
+    expect(d.exchange).toBeUndefined();
+  });
+});
+
 describe("mapOrderToReturnable currency", () => {
   it("maps the order currencyUomId, defaulting to USD when absent", () => {
     const withCcy = mapOrderToReturnable({

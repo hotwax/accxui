@@ -3,12 +3,12 @@ import { maargApiKey } from "@/util/maargAuth";
 import type { ReturnsService } from "@/services/ReturnsService";
 import type {
   AppeasementInput, AppeasementItemInput,
-  CreateExchangeInput, ExchangeItemInput, FulfillmentType,
+  CreateExchangeInput, ExchangeDetail, ExchangeItemInput, FulfillmentType,
   CreateReturnInput, OrderForReturn, PushOutcome, ReturnableLine, ReturnDetail, ReturnReason,
   ReturnSummary, ReturnType, SyncState, SyncTarget,
 } from "@/types/returns";
 import {
-  resolveOrigin, resolveShopifySyncState, type Identification, type ShopifySync,
+  resolveOrigin, resolveExchangeSyncState, resolveShopifySyncState, type Identification, type ShopifySync,
 } from "@/util/syncState";
 
 // Open Q1 (CONFIRMED): the return-type id that marks a return as an appeasement is the header-level
@@ -36,6 +36,12 @@ interface RawReturnDetail {
   statusHistory?: Array<{ statusId: string; statusDatetime: string | number }>;
   identifications?: Identification[];
   shopifySync?: ShopifySync | null;
+  isExchange?: boolean;
+  exchange?: {
+    replacementOrderId: string; orderName?: string; fulfillmentType: FulfillmentType; orderStatusId: string;
+    items?: Array<{ productId: string; quantity: number | string; unitPrice?: number | string; itemDescription?: string }>;
+    exchangeCreditAmount?: number | string;
+  };
 }
 
 /** Map the `GET /oms/returns/{id}` payload into a ReturnDetail. */
@@ -43,7 +49,25 @@ export function mapReturnDetail(raw: RawReturnDetail): ReturnDetail {
   const idents = raw.identifications ?? [];
   const items = raw.items ?? [];
   const origin = resolveOrigin(idents);
-  const shopify: SyncState = resolveShopifySyncState(raw.shopifySync);
+  const isExchange = raw.isExchange === true;
+  const shopify: SyncState = isExchange
+    ? resolveExchangeSyncState(raw.shopifySync)
+    : resolveShopifySyncState(raw.shopifySync);
+  const exchange: ExchangeDetail | undefined = isExchange && raw.exchange
+    ? {
+        replacementOrderId: raw.exchange.replacementOrderId,
+        orderName: raw.exchange.orderName,
+        fulfillmentType: raw.exchange.fulfillmentType,
+        orderStatusId: raw.exchange.orderStatusId,
+        items: (raw.exchange.items ?? []).map((it) => ({
+          productId: it.productId,
+          quantity: Number(it.quantity),
+          unitPrice: it.unitPrice != null ? Number(it.unitPrice) : undefined,
+          itemDescription: it.itemDescription,
+        })),
+        exchangeCreditAmount: Number(raw.exchange.exchangeCreditAmount ?? 0),
+      }
+    : undefined;
   const shopifyReturnId = raw.shopifySync?.shopifyReturnId
     ?? idents.find((i) => i.returnIdentificationTypeId === "SHOPIFY_RTN_ID")?.idValue
     ?? null;
@@ -73,6 +97,8 @@ export function mapReturnDetail(raw: RawReturnDetail): ReturnDetail {
     returnId: rd.returnId,
     type,
     appeasement,
+    isExchange,
+    exchange,
     // Order ref now lives on returnDetail; fall back to the first item only for older payloads.
     orderId: rd.orderId ?? items[0]?.orderId ?? "",
     orderName,

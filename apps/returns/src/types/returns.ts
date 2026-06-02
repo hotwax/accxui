@@ -52,6 +52,16 @@ export interface AppeasementFields {
   relatedReturnId?: string; // the standard return created alongside it
 }
 
+/** The replacement order, present on a ReturnDetail when isExchange === true. */
+export interface ExchangeDetail {
+  replacementOrderId: string;
+  orderName?: string;
+  fulfillmentType: FulfillmentType;
+  orderStatusId: string; // ORDER_COMPLETED (immediate) | ORDER_APPROVED (shipped, in fulfillment)
+  items: Array<{ productId: string; quantity: number; unitPrice?: number; itemDescription?: string }>;
+  exchangeCreditAmount: number; // 0 = even swap
+}
+
 /** A single lost order line picked for a lost-in-shipment appeasement. */
 export interface AppeasementItemInput {
   orderItemSeqId: string;
@@ -138,6 +148,9 @@ export interface ReturnDetail extends ReturnSummary {
   type: ReturnType;
   // Present only when type === "appeasement".
   appeasement?: AppeasementFields;
+  // Present when this return is the return-half of an exchange.
+  isExchange?: boolean;
+  exchange?: ExchangeDetail;
 }
 
 export interface ReturnableLine {
