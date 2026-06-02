@@ -192,39 +192,42 @@ describe("returnsStore CRUD (stub adapter)", () => {
     expect(detail.appeasement?.amount).toBeCloseTo(19.99, 2);
   });
 
-  it("submits an exchange and drives it to synced via approve+poll (PROC_OK)", async () => {
+  it("submits a SHIPPED exchange and polls it to synced (PROC_OK) without a separate approve step", async () => {
     const store = useReturnsStore();
     const returnId = await store.submitExchange({
       orderId: "DEMO-1001",
       returnItems: [{ orderItemSeqId: "00001", returnQuantity: 1, returnReasonId: "RTN_SIZE_EXCHANGE" }],
       exchangeItems: [{ productId: "P1", quantity: 1 }],
+      fulfillmentType: "SHIPPED",
+      shipmentMethodTypeId: "STANDARD",
     });
     await store.fetchReturn(returnId);
     expect(store.current?.isExchange).toBe(true);
-    expect(store.current?.statusId).toBe("RETURN_REQUESTED");
-    expect(store.current?.sync.shopify).toBe("not_synced");
-
-    await store.approveReturn(returnId, { intervalMs: 0, maxAttempts: 6 });
+    // SHIPPED exchanges skip the approve step — they start RETURN_APPROVED with push already in flight.
     expect(store.current?.statusId).toBe("RETURN_APPROVED");
+    expect(store.current?.sync.shopify).toBe("pending");
+
+    await store.pollSync(returnId, "shopify", { intervalMs: 0, maxAttempts: 6 });
     expect(store.current?.sync.shopify).toBe("synced");
     expect(store.current?.shopifySync?.processStatusId).toBe("PROC_OK");
   });
 
-  it("approving an exchange never fires the plain pushToShopify (only polls the auto exchange push)", async () => {
+  it("exchange push never fires the plain pushToShopify (only polls the auto exchange push)", async () => {
     const store = useReturnsStore();
     const returnId = await store.submitExchange({
       orderId: "DEMO-1001",
       returnItems: [{ orderItemSeqId: "00001", returnQuantity: 1, returnReasonId: "RTN_SIZE_EXCHANGE" }],
       exchangeItems: [{ productId: "P1", quantity: 1 }],
+      fulfillmentType: "SHIPPED",
+      shipmentMethodTypeId: "STANDARD",
     });
     await store.fetchReturn(returnId);
-    // Real backend: the exchange push is async, so the return still reads not_synced right after approve.
-    // A correct client must NOT react to that gap by kicking the plain pushToShopify (it omits the exchange
-    // line items and races the automatic exchange push → phantom "invalid quantity" PUSH_FAILED).
+    // The exchange push is automatic (fired at create-time). The client should never call the plain
+    // pushToShopify — that omits exchange line items and races the automatic exchange push.
     const pushSpy = vi.spyOn(stubAdapter, "pushToTarget");
-    await store.approveReturn(returnId, { intervalMs: 0, maxAttempts: 6 });
+    await store.pollSync(returnId, "shopify", { intervalMs: 0, maxAttempts: 6 });
     expect(pushSpy).not.toHaveBeenCalled();
-    // The automatic exchange push (driven by polling) still settles it to synced (PROC_OK).
+    // The automatic exchange push (driven by polling) settles to synced (PROC_OK).
     expect(store.current?.sync.shopify).toBe("synced");
     expect(store.current?.shopifySync?.processStatusId).toBe("PROC_OK");
     pushSpy.mockRestore();
@@ -236,13 +239,15 @@ describe("returnsStore CRUD (stub adapter)", () => {
       orderId: "DEMO-1001",
       returnItems: [{ orderItemSeqId: "00001", returnQuantity: 1, returnReasonId: "RTN_SIZE_EXCHANGE" }],
       exchangeItems: [{ productId: "P1", quantity: 1 }],
+      fulfillmentType: "SHIPPED",
+      shipmentMethodTypeId: "STANDARD",
     });
     await store.fetchReturn(returnId);
     const replacementOrderId = store.current?.exchange?.replacementOrderId;
     expect(replacementOrderId).toBeTruthy();
     const order = await store.loadReplacementOrder(replacementOrderId!);
     expect(order.orderId).toBe(replacementOrderId);
-    expect(order.statusId).toBe("ORDER_CREATED");
+    expect(order.statusId).toBe("ORDER_APPROVED");
     expect(order.items[0].productId).toBe("P1");
   });
 
@@ -252,9 +257,18 @@ describe("returnsStore CRUD (stub adapter)", () => {
       orderId: "DEMO-1001",
       returnItems: [{ orderItemSeqId: "00001", returnQuantity: 1, returnReasonId: "RTN_SIZE_EXCHANGE" }],
       exchangeItems: [{ productId: "P1", quantity: 1 }],
+      fulfillmentType: "SHIPPED",
+      shipmentMethodTypeId: "STANDARD",
     });
     await store.fetchReturn(returnId);
     await store.retryExchangePush(returnId, { intervalMs: 0, maxAttempts: 6 });
     expect(store.current?.sync.shopify).toBe("synced");
+  });
+
+  it("loadShipmentMethods returns the service's shipment methods", async () => {
+    const store = useReturnsStore();
+    const methods = await store.loadShipmentMethods();
+    expect(methods.length).toBeGreaterThan(0);
+    expect(methods[0]).toHaveProperty("shipmentMethodTypeId");
   });
 });

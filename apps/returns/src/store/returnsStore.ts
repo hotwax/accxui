@@ -126,9 +126,8 @@ export const useReturnsStore = defineStore("returns", {
      * Complete an approved/received return. The OMS transition is immediate; the Shopify completion
      * (close) runs async, so poll it to completion just like approve polls the create-push.
      */
-    async completeReturn(returnId: string, opts: { intervalMs?: number; maxAttempts?: number } = {}, facilityId?: string) {
-      // For an exchange, facilityId is the chosen physical facility the replacement is fulfilled from.
-      await getReturnsService().completeReturn(returnId, facilityId);
+    async completeReturn(returnId: string, opts: { intervalMs?: number; maxAttempts?: number } = {}) {
+      await getReturnsService().completeReturn(returnId);
       return this.pollCompletion(returnId, opts);
     },
     /** Re-run a failed Shopify completion (CLOSE_FAILED), then poll until it settles. */
@@ -158,6 +157,10 @@ export const useReturnsStore = defineStore("returns", {
     /** Physical facilities an exchange can be fulfilled from (the Complete picker on the exchange page). */
     async loadFacilities() {
       return getReturnsService().listFacilities();
+    },
+    /** Shipment methods for the create-page exchange picker (shown for a shipped exchange). */
+    async loadShipmentMethods() {
+      return getReturnsService().listShipmentMethods();
     },
     async loadReasons() {
       return getReturnsService().listReturnReasons();
