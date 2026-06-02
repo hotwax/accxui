@@ -67,6 +67,15 @@ export interface AppeasementInput {
   items?: AppeasementItemInput[];  // present → lost-in-shipment shape; absent → shipping-refund shape
 }
 
+export type FulfillmentType = "IMMEDIATE" | "SHIPPED";
+
+/** A replacement line going out. unitPrice omitted → backend defaults to the product's price (even swap). */
+export interface ExchangeItemInput {
+  productId: string;
+  quantity: number;
+  unitPrice?: number;
+}
+
 export interface ReturnItemInput {
   orderItemSeqId: string;
   productId?: string; // display-only context; not submitted to the create endpoint
@@ -162,4 +171,13 @@ export interface CreateReturnInput {
   items: ReturnItemInput[];
   // Present only when the operator added an appeasement; co-creates a linked appeasement return.
   appeasement?: AppeasementInput;
+}
+
+export interface CreateExchangeInput {
+  orderId: string;
+  fulfillmentType: FulfillmentType;
+  returnItems: ReturnItemInput[];     // what comes back (same shape as a return line)
+  exchangeItems: ExchangeItemInput[]; // what goes out (mirrored from returnItems for same-product)
+  note?: string;
+  currencyUomId?: string;
 }

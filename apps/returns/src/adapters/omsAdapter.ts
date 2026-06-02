@@ -3,6 +3,7 @@ import { maargApiKey } from "@/util/maargAuth";
 import type { ReturnsService } from "@/services/ReturnsService";
 import type {
   AppeasementInput, AppeasementItemInput,
+  CreateExchangeInput, ExchangeItemInput, FulfillmentType,
   CreateReturnInput, OrderForReturn, PushOutcome, ReturnableLine, ReturnDetail, ReturnReason,
   ReturnSummary, ReturnType, SyncState, SyncTarget,
 } from "@/types/returns";
@@ -171,6 +172,31 @@ export function buildAppeasementCreateBody(orderId: string, a: AppeasementInput,
     ...(relatedReturnId ? { relatedReturnId } : {}),
     ...(a.items?.length ? { items: a.items } : {}),
     ...(a.amount != null ? { amount: a.amount } : {}),
+  };
+}
+
+/** Build the POST body for the customerExchange create call. unitPrice is omitted per item when absent
+ *  (backend defaults to the product price → even swap). Optional note/currencyUomId are omitted when empty. */
+export function buildExchangeCreateBody(input: CreateExchangeInput): {
+  orderId: string; fulfillmentType: FulfillmentType;
+  returnItems: Array<{ orderItemSeqId: string; returnQuantity: number; returnReasonId: string }>;
+  exchangeItems: ExchangeItemInput[]; note?: string; currencyUomId?: string;
+} {
+  return {
+    orderId: input.orderId,
+    fulfillmentType: input.fulfillmentType,
+    returnItems: input.returnItems.map((i) => ({
+      orderItemSeqId: i.orderItemSeqId,
+      returnQuantity: i.returnQuantity,
+      returnReasonId: i.returnReasonId,
+    })),
+    exchangeItems: input.exchangeItems.map((e) => ({
+      productId: e.productId,
+      quantity: e.quantity,
+      ...(e.unitPrice != null ? { unitPrice: e.unitPrice } : {}),
+    })),
+    ...(input.note ? { note: input.note } : {}),
+    ...(input.currencyUomId ? { currencyUomId: input.currencyUomId } : {}),
   };
 }
 

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { mapReturnDetail, mapOrderToReturnable, mapReturnType, APPEASEMENT_RETURN_TYPE_ID, buildAppeasementCreateBody } from "@/adapters/omsAdapter";
+import { mapReturnDetail, mapOrderToReturnable, mapReturnType, APPEASEMENT_RETURN_TYPE_ID, buildAppeasementCreateBody, buildExchangeCreateBody } from "@/adapters/omsAdapter";
 
 describe("mapReturnDetail", () => {
   it("maps a synced shopify-origin return (PUSH_OK + SHOPIFY_RTN_ID)", () => {
@@ -238,5 +238,34 @@ describe("buildAppeasementCreateBody", () => {
     const body = buildAppeasementCreateBody("DEMO-1001", { amount: 30, currencyUomId: "USD", reasonId: "APPEASE_GOODWILL", items: [{ orderItemSeqId: "00001", quantity: 1 }] }, "M1");
     expect(body.items).toEqual([{ orderItemSeqId: "00001", quantity: 1 }]);
     expect(body.amount).toBe(30);
+  });
+});
+
+describe("buildExchangeCreateBody", () => {
+  const base = {
+    orderId: "DEMO-1001",
+    fulfillmentType: "SHIPPED" as const,
+    returnItems: [{ orderItemSeqId: "00001", returnQuantity: 1, returnReasonId: "RTN_SIZE_EXCHANGE" }],
+    exchangeItems: [{ productId: "P1", quantity: 1 }],
+  };
+
+  it("sends orderId, fulfillmentType, returnItems (seqId/qty/reason only) and exchangeItems", () => {
+    const body = buildExchangeCreateBody({ ...base, currencyUomId: "USD" });
+    expect(body.orderId).toBe("DEMO-1001");
+    expect(body.fulfillmentType).toBe("SHIPPED");
+    expect(body.returnItems).toEqual([{ orderItemSeqId: "00001", returnQuantity: 1, returnReasonId: "RTN_SIZE_EXCHANGE" }]);
+    expect(body.exchangeItems).toEqual([{ productId: "P1", quantity: 1 }]);
+    expect(body.currencyUomId).toBe("USD");
+  });
+
+  it("omits unitPrice per exchange item when absent, includes it when present", () => {
+    const body = buildExchangeCreateBody({ ...base, exchangeItems: [{ productId: "P1", quantity: 2, unitPrice: 19.99 }] });
+    expect(body.exchangeItems[0]).toEqual({ productId: "P1", quantity: 2, unitPrice: 19.99 });
+  });
+
+  it("omits optional note/currencyUomId when not provided", () => {
+    const body = buildExchangeCreateBody(base);
+    expect("note" in body).toBe(false);
+    expect("currencyUomId" in body).toBe(false);
   });
 });
