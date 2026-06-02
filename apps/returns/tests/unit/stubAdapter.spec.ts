@@ -266,4 +266,30 @@ describe("stubAdapter", () => {
     // Still synced — a confirmed exchange is never spuriously un-synced.
     expect((await stubAdapter.getReturn(returnId)).sync.shopify).toBe("synced");
   });
+
+  it("the demo order carries a shipping address", async () => {
+    const order = await stubAdapter.getOrderForReturn("DEMO-1001");
+    expect(order.shippingAddress).toBeDefined();
+    expect(order.shippingAddress?.countryGeoId).toBe("USA");
+  });
+
+  it("lists countries and a country's states ([] for unknown)", async () => {
+    const countries = await stubAdapter.listCountries();
+    expect(countries.find((c) => c.geoId === "USA")).toBeDefined();
+    const states = await stubAdapter.listStates("USA");
+    expect(states.length).toBeGreaterThan(0);
+    expect(await stubAdapter.listStates("ZZZ")).toEqual([]);
+  });
+
+  it("stores the submitted shipping address on the exchange", async () => {
+    const addr = { address1: "9 New St", city: "Dallas", stateProvinceGeoId: "USA_TX", postalCode: "75201", countryGeoId: "USA" };
+    const { returnId } = await stubAdapter.createExchange({
+      orderId: "DEMO-1001",
+      returnItems: [{ orderItemSeqId: "00001", returnQuantity: 1, returnReasonId: "RTN_SIZE_EXCHANGE" }],
+      exchangeItems: [{ productId: "P1", quantity: 1 }],
+      fulfillmentType: "SHIPPED", shipmentMethodTypeId: "STANDARD", shippingAddress: addr,
+    });
+    const detail = await stubAdapter.getReturn(returnId);
+    expect(detail.exchange?.shippingAddress).toMatchObject({ address1: "9 New St", city: "Dallas" });
+  });
 });

@@ -68,6 +68,7 @@ export interface ExchangeDetail {
   orderStatusId?: string; // ORDER_COMPLETED (immediate) | ORDER_APPROVED (shipped, in fulfillment)
   items?: Array<{ productId: string; quantity: number; unitPrice?: number; itemDescription?: string }>;
   exchangeCreditAmount?: number; // 0 / absent = even swap
+  shippingAddress?: PostalAddress; // SHIPPED only — the replacement order's ship-to (stored from create)
 }
 
 /** A single lost order line picked for a lost-in-shipment appeasement. */

@@ -1,7 +1,7 @@
 import type { ReturnsService } from "@/services/ReturnsService";
 import type {
-  CreateExchangeInput, CreateReturnInput, Facility, FulfillmentType, OrderForReturn, ReplacementOrderDetail,
-  ReturnDetail, ReturnReason, ReturnSummary, ShipmentMethod, SyncState, SyncTarget,
+  CreateExchangeInput, CreateReturnInput, Facility, FulfillmentType, Geo, OrderForReturn,
+  ReplacementOrderDetail, ReturnDetail, ReturnReason, ReturnSummary, ShipmentMethod, SyncState, SyncTarget,
 } from "@/types/returns";
 
 interface StubReturn extends ReturnDetail {
@@ -16,6 +16,22 @@ const FACILITIES: Facility[] = [
   { facilityId: "STORE_MALL", facilityName: "Mall Store" },
   { facilityId: "WAREHOUSE_1", facilityName: "Central Warehouse" },
 ];
+
+const COUNTRIES: Geo[] = [
+  { geoId: "USA", geoName: "United States" },
+  { geoId: "CAN", geoName: "Canada" },
+];
+const STATES: Record<string, Geo[]> = {
+  USA: [
+    { geoId: "USA_TX", geoName: "Texas" },
+    { geoId: "USA_CA", geoName: "California" },
+    { geoId: "USA_NY", geoName: "New York" },
+  ],
+  CAN: [
+    { geoId: "CAN_ON", geoName: "Ontario" },
+    { geoId: "CAN_BC", geoName: "British Columbia" },
+  ],
+};
 
 const SHIPMENT_METHODS: ShipmentMethod[] = [
   { shipmentMethodTypeId: "STANDARD", description: "Standard Shipping" },
@@ -46,6 +62,10 @@ const ORDER: OrderForReturn = {
     { orderItemSeqId: "00001", productId: "P1", productName: "Classic Tee", orderedQty: 2, alreadyReturnedQty: 0, returnableQty: 2, unitPrice: 19.99 },
     { orderItemSeqId: "00002", productId: "P2", productName: "Denim Jacket", orderedQty: 1, alreadyReturnedQty: 0, returnableQty: 1, unitPrice: 49.0 },
   ],
+  shippingAddress: {
+    toName: "Demo Customer", address1: "500 Congress Ave", city: "Austin",
+    stateProvinceGeoId: "USA_TX", postalCode: "78701", countryGeoId: "USA", phone: "+1 512 555 0100",
+  },
 };
 
 let store: Map<string, StubReturn>;
@@ -183,7 +203,7 @@ export const stubAdapter: ReturnsService = {
     // Navigate to the standard return when there is one, else to the stand-alone appeasement.
     return { returnId: returnId || appeasementReturnId, appeasementReturnId };
   },
-  async createExchange({ orderId, returnItems, exchangeItems, fulfillmentType, shipmentMethodTypeId, facilityId }: CreateExchangeInput) {
+  async createExchange({ orderId, returnItems, exchangeItems, fulfillmentType, shipmentMethodTypeId, facilityId, shippingAddress }: CreateExchangeInput) {
     const now = "2026-05-29T12:00:00Z";
     const returnId = String(seq++);
     const replacementOrderId = `EXC${returnId}`;
@@ -215,6 +235,7 @@ export const stubAdapter: ReturnsService = {
           return { productId: e.productId, quantity: e.quantity, unitPrice: line?.unitPrice, itemDescription: line?.productName };
         }),
         exchangeCreditAmount: 0,
+        ...(shippingAddress ? { shippingAddress } : {}),
       },
       statuses: [{ statusId: "RETURN_REQUESTED", statusDate: now }, { statusId: returnStatus, statusDate: now }],
       externalIds: { shopify: null },
@@ -342,6 +363,12 @@ export const stubAdapter: ReturnsService = {
   },
   async listShipmentMethods() {
     return SHIPMENT_METHODS;
+  },
+  async listCountries() {
+    return COUNTRIES;
+  },
+  async listStates(countryGeoId: string) {
+    return STATES[countryGeoId] ?? [];
   },
   async listReturnReasons() {
     return REASONS;
