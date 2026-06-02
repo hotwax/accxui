@@ -276,6 +276,7 @@ async function setMode(m: "return" | "exchange") {
       shipmentMethods.value = methods.status === "fulfilled" ? methods.value : [];
       facilities.value = facs.status === "fulfilled" ? facs.value : [];
       countries.value = ctys.status === "fulfilled" ? ctys.value : [];
+      await prefillShippingAddress();
     }
   }
 }
@@ -387,14 +388,17 @@ const shippingAddressValid = computed(() =>
   !!shippingAddress.address1 && !!shippingAddress.city && !!shippingAddress.postalCode
     && !!shippingAddress.countryGeoId && (states.value.length === 0 || !!shippingAddress.stateProvinceGeoId));
 
+const exchangeValid = computed(() =>
+  hasItemsSelected.value && (exchangeFulfillment.value === "SHIPPED"
+    ? !!selectedShipmentMethodId.value && shippingAddressValid.value
+    : !!selectedFacilityId.value));
+
 // Submit needs at least one of: a standard return (selected items) OR an appeasement. A stand-alone
 // goodwill refund (customer keeps everything) is valid — the backend accepts an appeasement with no
 // accompanying item return.
 const canSubmit = computed(() =>
   mode.value === "exchange"
-    ? hasItemsSelected.value && (exchangeFulfillment.value === "SHIPPED"
-        ? !!selectedShipmentMethodId.value && shippingAddressValid.value
-        : !!selectedFacilityId.value)
+    ? exchangeValid.value
     : (hasItemsSelected.value || appeasementEnabled.value) && appeasementValid.value);
 
 async function lookupOrder() {
@@ -403,6 +407,9 @@ async function lookupOrder() {
   emitter.emit("presentLoader", { message: "Looking up order" });
   try {
     order.value = await store.loadOrder(orderId.value.trim());
+    exchangeFulfillment.value = "SHIPPED";
+    selectedShipmentMethodId.value = "";
+    selectedFacilityId.value = "";
     reasons.value = await store.loadReasons();
     // Appeasement reasons are optional context — a failure (e.g. the endpoint isn't live yet) must not
     // fail the whole lookup or block the standard return flow. The appeasement hint surfaces the gap.
@@ -411,7 +418,7 @@ async function lookupOrder() {
     } catch {
       appeasementReasons.value = [];
     }
-    await prefillShippingAddress();
+    if (fulfillmentOptionsLoaded.value) await prefillShippingAddress();
   } catch (e) {
     error.value = describeApiError(e, translate("Order not found"));
   } finally {
