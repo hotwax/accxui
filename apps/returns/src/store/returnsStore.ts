@@ -162,6 +162,14 @@ export const useReturnsStore = defineStore("returns", {
     async loadShipmentMethods() {
       return getReturnsService().listShipmentMethods();
     },
+    /** Countries for the create-page shipping-address dropdown. */
+    async loadCountries() {
+      return getReturnsService().listCountries();
+    },
+    /** States/provinces for a chosen country (empty when the country has none). */
+    async loadStates(countryGeoId: string) {
+      return getReturnsService().listStates(countryGeoId);
+    },
     async loadReasons() {
       return getReturnsService().listReturnReasons();
     },

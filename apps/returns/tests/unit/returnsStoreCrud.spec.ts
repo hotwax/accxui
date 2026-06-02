@@ -8,7 +8,8 @@ import { getReturnsService } from "@/services/ReturnsService";
 import { __resetStub, stubAdapter } from "@/adapters/stubAdapter";
 
 describe("returnsStore CRUD (stub adapter)", () => {
-  beforeEach(() => { setActivePinia(createPinia()); __resetStub(); });
+  let store: ReturnType<typeof useReturnsStore>;
+  beforeEach(() => { setActivePinia(createPinia()); __resetStub(); store = useReturnsStore(); });
 
   it("fetches the returns list", async () => {
     const store = useReturnsStore();
@@ -270,5 +271,12 @@ describe("returnsStore CRUD (stub adapter)", () => {
     const methods = await store.loadShipmentMethods();
     expect(methods.length).toBeGreaterThan(0);
     expect(methods[0]).toHaveProperty("shipmentMethodTypeId");
+  });
+
+  it("loadCountries and loadStates proxy the service", async () => {
+    const countries = await store.loadCountries();
+    expect(countries.length).toBeGreaterThan(0);
+    const states = await store.loadStates("USA");
+    expect(states.length).toBeGreaterThan(0);
   });
 });
