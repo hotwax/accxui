@@ -2,7 +2,7 @@ import { defineStore } from "pinia";
 import { logger } from "@common";
 import { getReturnsService } from "@/services/ReturnsService";
 import { resolveShopifyCloseState } from "@/util/syncState";
-import type { CompletionState, CreateReturnInput, ReturnDetail, ReturnSummary, SyncState, SyncTarget } from "@/types/returns";
+import type { CompletionState, CreateExchangeInput, CreateReturnInput, ReturnDetail, ReturnSummary, SyncState, SyncTarget } from "@/types/returns";
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
@@ -53,6 +53,15 @@ export const useReturnsStore = defineStore("returns", {
     async submitReturn(input: CreateReturnInput): Promise<string> {
       const { returnId } = await getReturnsService().createReturn(input);
       return returnId;
+    },
+    async submitExchange(input: CreateExchangeInput): Promise<string> {
+      const { returnId } = await getReturnsService().createExchange(input);
+      return returnId;
+    },
+    /** Re-run a failed/stuck exchange push (pushExchangeToShopify), then poll until it settles. */
+    async retryExchangePush(returnId: string, opts: { intervalMs?: number; maxAttempts?: number } = {}) {
+      await getReturnsService().retryExchangePush(returnId);
+      return this.pollSync(returnId, "shopify", opts);
     },
     /**
      * Approve a requested return. Approval is meant to trigger the OMS→Shopify push server-side, but that

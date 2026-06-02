@@ -191,4 +191,34 @@ describe("returnsStore CRUD (stub adapter)", () => {
     expect(detail.items[0].productName).toBe("Classic Tee");
     expect(detail.appeasement?.amount).toBeCloseTo(19.99, 2);
   });
+
+  it("submits an exchange and drives it to synced via approve+poll (PROC_OK)", async () => {
+    const store = useReturnsStore();
+    const returnId = await store.submitExchange({
+      orderId: "DEMO-1001", fulfillmentType: "SHIPPED",
+      returnItems: [{ orderItemSeqId: "00001", returnQuantity: 1, returnReasonId: "RTN_SIZE_EXCHANGE" }],
+      exchangeItems: [{ productId: "P1", quantity: 1 }],
+    });
+    await store.fetchReturn(returnId);
+    expect(store.current?.isExchange).toBe(true);
+    expect(store.current?.statusId).toBe("RETURN_REQUESTED");
+    expect(store.current?.sync.shopify).toBe("not_synced");
+
+    await store.approveReturn(returnId, { intervalMs: 0, maxAttempts: 6 });
+    expect(store.current?.statusId).toBe("RETURN_APPROVED");
+    expect(store.current?.sync.shopify).toBe("synced");
+    expect(store.current?.shopifySync?.processStatusId).toBe("PROC_OK");
+  });
+
+  it("retryExchangePush re-arms and polls a stuck exchange to synced", async () => {
+    const store = useReturnsStore();
+    const returnId = await store.submitExchange({
+      orderId: "DEMO-1001", fulfillmentType: "SHIPPED",
+      returnItems: [{ orderItemSeqId: "00001", returnQuantity: 1, returnReasonId: "RTN_SIZE_EXCHANGE" }],
+      exchangeItems: [{ productId: "P1", quantity: 1 }],
+    });
+    await store.fetchReturn(returnId);
+    await store.retryExchangePush(returnId, { intervalMs: 0, maxAttempts: 6 });
+    expect(store.current?.sync.shopify).toBe("synced");
+  });
 });
