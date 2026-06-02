@@ -64,6 +64,7 @@ export interface ExchangeDetail {
   replacementOrderId: string;
   orderName?: string;
   fulfillmentType?: FulfillmentType;
+  shipmentMethod?: string; // fulfillment method label (carried from create; shown on the replacement panel)
   orderStatusId?: string; // ORDER_COMPLETED (immediate) | ORDER_APPROVED (shipped, in fulfillment)
   items?: Array<{ productId: string; quantity: number; unitPrice?: number; itemDescription?: string }>;
   exchangeCreditAmount?: number; // 0 / absent = even swap
@@ -230,12 +231,21 @@ export interface CreateExchangeInput {
   exchangeItems: ExchangeItemInput[]; // what goes out (mirrored from returnItems for same-product)
   note?: string;
   currencyUomId?: string;
-  // No fulfillmentType: the replacement order is created at the _NA_ facility; how it's fulfilled is
-  // decided on the exchange's approval page (Approve = broker / Complete = fulfill from a chosen facility).
+  // Fulfillment is chosen at create time. SHIPPED brokers the replacement (ORDER_APPROVED); IMMEDIATE
+  // fulfills it from `facilityId` now (ORDER_COMPLETED). No separate approve step for an exchange.
+  fulfillmentType: FulfillmentType;
+  shipmentMethodTypeId?: string; // required (client-side) for SHIPPED; ignored server-side until backend threads it through
+  facilityId?: string;           // required for IMMEDIATE — origin facility the ship group is issued from
 }
 
 /** A physical facility the operator can fulfill an exchange from (the Complete picker). */
 export interface Facility {
   facilityId: string;
   facilityName: string;
+}
+
+/** A shipment method the operator can choose for a shipped exchange (the create-page method picker). */
+export interface ShipmentMethod {
+  shipmentMethodTypeId: string;
+  description: string;
 }
