@@ -24,6 +24,7 @@
                 <ion-label>
                   <p class="overline">{{ translate(formatStatus(r.statusId)) }}</p>
                   <ion-badge v-if="isAppeasement" color="tertiary" data-testid="detail-appeasement-badge">{{ translate("Appeasement") }}</ion-badge>
+                  <ion-badge v-if="isExchange" color="secondary" data-testid="detail-exchange-badge">{{ translate("Exchange") }}</ion-badge>
                   <h1>{{ r.orderName || r.orderId || `#${returnId}` }}</h1>
                   <p>{{ translate("Requested") }}: {{ formatDate(r.entryDate) }}</p>
                 </ion-label>
@@ -66,6 +67,29 @@
                 </ion-card-content>
               </ion-card>
 
+              <ion-card v-if="isExchange && r.exchange" data-testid="detail-exchange-card">
+                <ion-card-header>
+                  <ion-card-title>{{ translate("Exchange") }}</ion-card-title>
+                </ion-card-header>
+                <ion-card-content>
+                  <h2 data-testid="detail-exchange-order">{{ r.exchange.orderName || r.exchange.replacementOrderId }}</h2>
+                  <p v-if="r.exchange.orderName" class="muted">{{ r.exchange.replacementOrderId }}</p>
+                  <p>{{ r.exchange.fulfillmentType === 'IMMEDIATE' ? translate("Handed over in store") : translate("Shipped to customer") }}</p>
+                  <p class="muted">{{ r.exchange.orderStatusId === 'ORDER_COMPLETED' ? translate("Replacement completed") : translate("Replacement approved — in fulfillment") }}</p>
+                  <ion-list data-testid="detail-exchange-items">
+                    <ion-item v-for="(it, idx) in r.exchange.items" :key="idx" lines="none">
+                      <ion-label>
+                        <h3>{{ it.itemDescription || it.productId }}</h3>
+                        <p>{{ translate("Quantity") }}: {{ it.quantity }}</p>
+                      </ion-label>
+                    </ion-item>
+                  </ion-list>
+                  <p class="muted">{{ r.exchange.exchangeCreditAmount > 0
+                    ? `${translate('Refund difference owed')}: ${commonUtil.formatCurrency(r.exchange.exchangeCreditAmount, r.appeasement?.currencyUomId || 'USD')}`
+                    : translate("Even swap — no refund difference") }}</p>
+                </ion-card-content>
+              </ion-card>
+
               <ion-card v-if="canApprove || canComplete || canCancel">
                 <ion-card-header>
                   <ion-card-title>{{ translate("Actions") }}</ion-card-title>
@@ -96,7 +120,7 @@
                 <ion-card-content>
                   <ion-chip :color="syncColor(r.sync.shopify)">
                     <ion-spinner v-if="r.sync.shopify === 'pending'" name="dots" />
-                    <ion-label>{{ syncLabel(r.sync.shopify) }}</ion-label>
+                    <ion-label>{{ isExchange && r.sync.shopify === 'synced' ? translate("Exchange confirmed") : syncLabel(r.sync.shopify) }}</ion-label>
                   </ion-chip>
                   <p v-if="r.externalIds.shopify">{{ translate("Shopify return ID") }}: {{ r.externalIds.shopify }}</p>
 
@@ -188,6 +212,7 @@ const r = computed(() => store.current);
 // True once the loaded return matches this route (store.current may briefly hold a previously-viewed return).
 const loaded = computed(() => r.value?.returnId === props.returnId);
 const isAppeasement = computed(() => r.value?.type === "appeasement");
+const isExchange = computed(() => r.value?.isExchange === true);
 // An item-based (lost-in-shipment) appeasement carries real product line(s); an amount-only one does not.
 const isItemAppeasement = computed(() => isAppeasement.value && !!r.value?.items?.[0]?.productId);
 // Requested → Approve + Reject (+ Cancel). Approved → Cancel (+ Complete for normal returns). Received →
@@ -264,7 +289,9 @@ function goToReturn(id: string) {
 
 // Re-kick a failed Shopify push (approval already happened); the chip reflects the resulting state.
 function retryPush() {
-  return runAction("Pushing to Shopify", () => store.pushAndPoll(props.returnId, "shopify"), "Push to Shopify failed");
+  return isExchange.value
+    ? runAction("Pushing exchange to Shopify", () => store.retryExchangePush(props.returnId), "Push to Shopify failed")
+    : runAction("Pushing to Shopify", () => store.pushAndPoll(props.returnId, "shopify"), "Push to Shopify failed");
 }
 
 onIonViewWillEnter(async () => {

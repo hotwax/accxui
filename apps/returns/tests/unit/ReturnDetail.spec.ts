@@ -113,3 +113,38 @@ describe("ReturnDetail.vue (appeasement)", () => {
     expect(wrapper.find("[data-testid=detail-appeasement-items]").exists()).toBe(false);
   });
 });
+
+function exchangeDetail(): ReturnDetailType {
+  return {
+    returnId: "40001", type: "standard", orderId: "DEMO-1001", orderName: "#1001",
+    statusId: "RETURN_APPROVED", entryDate: "2026-05-29T12:00:00Z", origin: "pwa",
+    sync: { shopify: "pending" },
+    shopifySync: { pushStatusId: "PUSH_OK", processStatusId: "PROC_PENDING", shopifyReturnId: "gid://shopify/Return/1" },
+    isExchange: true,
+    exchange: {
+      replacementOrderId: "EXC40001", orderName: "#1001-EXC", fulfillmentType: "SHIPPED",
+      orderStatusId: "ORDER_APPROVED",
+      items: [{ productId: "P1", quantity: 1, unitPrice: 19.99, itemDescription: "Classic Tee" }],
+      exchangeCreditAmount: 0,
+    },
+    items: [{ orderItemSeqId: "00001", productId: "P1", productName: "Classic Tee", returnQuantity: 1, returnReasonId: "RTN_SIZE_EXCHANGE" }],
+    statuses: [{ statusId: "RETURN_REQUESTED", statusDate: "2026-05-29T12:00:00Z" }],
+    externalIds: { shopify: "gid://shopify/Return/1" },
+  };
+}
+
+describe("ReturnDetail.vue (exchange)", () => {
+  beforeEach(() => setActivePinia(createPinia()));
+
+  it("renders the exchange badge and the replacement-order card", async () => {
+    const store = useReturnsStore();
+    store.current = exchangeDetail();
+    const wrapper = mount(ReturnDetail, { props: { returnId: "40001" }, global: { stubs: { "ion-page": false } } });
+    await flushPromises();
+    const text = wrapper.text();
+    expect(text).toContain("Exchange");
+    expect(text).toContain("EXC40001");      // replacement order id
+    expect(text).toContain("Even swap");     // exchangeCreditAmount === 0 copy
+    expect(wrapper.find("[data-testid=detail-exchange-card]").exists()).toBe(true);
+  });
+});
