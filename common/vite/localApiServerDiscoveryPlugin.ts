@@ -9,7 +9,6 @@ interface LocalApiServer {
   signal: LocalApiServerSignal;
 }
 
-const DEFAULT_LOCAL_API_SERVER_PORTS = [8080, 8443, 8081, 8082];
 const LOCAL_API_SERVER_HOST = "localhost";
 const DISCOVERY_PATH = "/__accxui/local-api-servers";
 const REQUEST_TIMEOUT_MS = 700;
@@ -24,11 +23,7 @@ const parsePortList = (value?: string) => {
 };
 
 const getProbePorts = () => {
-  return [...new Set([
-    ...parsePortList(process.env.VITE_LOCAL_API_SERVER_PORTS),
-    ...parsePortList(process.env.VITE_LOCAL_MOQUI_PORTS),
-    ...DEFAULT_LOCAL_API_SERVER_PORTS
-  ])];
+  return parsePortList(process.env.VITE_LOCAL_API_SERVER_PORTS);
 };
 
 const fetchWithTimeout = async (url: string) => {

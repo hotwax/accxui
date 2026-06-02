@@ -246,6 +246,21 @@ const selectLocalApiServer = async (server: LocalApiServer) => {
 
   instanceUrl.value = server.oms;
   await setOms();
+
+  // Toggling the oms again so to login into the app instead of moving to the login view where users sees
+  // login process in action
+  // We can check if this behaviour needs to be improved, like let user move ahead to login screen or
+  // add a loader and do not toggle the UI, so that in backgroun the UI changes, but due to the loader
+  // user can't perform any operation there
+  toggleOmsInput();
+
+  const devUsername = import.meta.env.VITE_USERNAME;
+  const devPassword = import.meta.env.VITE_PASSWORD;
+  if (import.meta.env.DEV && devUsername && devPassword) {
+    username.value = devUsername;
+    password.value = devPassword;
+    await login();
+  }
 };
 
 const initialise = async () => {
