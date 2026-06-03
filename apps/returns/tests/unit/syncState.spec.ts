@@ -67,27 +67,32 @@ describe("resolveExchangeSyncState", () => {
     expect(resolveExchangeSyncState(undefined)).toBe("not_synced");
   });
   it("is synced only on PROC_OK (authoritative confirmed)", () => {
-    expect(resolveExchangeSyncState({ pushStatusId: "PUSH_OK", processStatusId: "PROC_OK" })).toBe("synced");
+    expect(resolveExchangeSyncState({ exchangePushStatusId: "PUSH_OK", exchangeProcessStatusId: "PROC_OK" })).toBe("synced");
   });
   it("is pending on PUSH_OK while the process step has not completed", () => {
-    expect(resolveExchangeSyncState({ pushStatusId: "PUSH_OK", processStatusId: "PROC_PENDING" })).toBe("pending");
+    expect(resolveExchangeSyncState({ exchangePushStatusId: "PUSH_OK", exchangeProcessStatusId: "PROC_PENDING" })).toBe("pending");
   });
   it("treats PUSH_OK with no process status as still pending (awaiting process)", () => {
-    expect(resolveExchangeSyncState({ pushStatusId: "PUSH_OK", processStatusId: null })).toBe("pending");
+    expect(resolveExchangeSyncState({ exchangePushStatusId: "PUSH_OK", exchangeProcessStatusId: null })).toBe("pending");
   });
   it("is pending on PUSH_PENDING", () => {
-    expect(resolveExchangeSyncState({ pushStatusId: "PUSH_PENDING" })).toBe("pending");
+    expect(resolveExchangeSyncState({ exchangePushStatusId: "PUSH_PENDING" })).toBe("pending");
   });
   it("is failed on PUSH_FAILED", () => {
-    expect(resolveExchangeSyncState({ pushStatusId: "PUSH_FAILED" })).toBe("failed");
+    expect(resolveExchangeSyncState({ exchangePushStatusId: "PUSH_FAILED" })).toBe("failed");
   });
   it("is failed on PROC_FAILED", () => {
-    expect(resolveExchangeSyncState({ pushStatusId: "PUSH_OK", processStatusId: "PROC_FAILED" })).toBe("failed");
+    expect(resolveExchangeSyncState({ exchangePushStatusId: "PUSH_OK", exchangeProcessStatusId: "PROC_FAILED" })).toBe("failed");
   });
-  it("is failed on PROC_FAILED even when pushStatusId is absent", () => {
-    expect(resolveExchangeSyncState({ processStatusId: "PROC_FAILED" })).toBe("failed");
+  it("is failed on PROC_FAILED even when exchangePushStatusId is absent", () => {
+    expect(resolveExchangeSyncState({ exchangeProcessStatusId: "PROC_FAILED" })).toBe("failed");
   });
   it("is not_synced when present but empty", () => {
-    expect(resolveExchangeSyncState({ pushStatusId: null, processStatusId: null })).toBe("not_synced");
+    expect(resolveExchangeSyncState({ exchangePushStatusId: null, exchangeProcessStatusId: null })).toBe("not_synced");
+  });
+  it("ignores the plain return-half push fields on an exchange (no phantom failed/synced)", () => {
+    // The return-half's pushStatusId/closePushStatusId must NOT leak into the exchange's collapsed state.
+    expect(resolveExchangeSyncState({ pushStatusId: "PUSH_FAILED", exchangePushStatusId: "PUSH_OK", exchangeProcessStatusId: "PROC_PENDING" })).toBe("pending");
+    expect(resolveExchangeSyncState({ pushStatusId: "PUSH_OK", closePushStatusId: "CLOSE_OK" })).toBe("not_synced");
   });
 });

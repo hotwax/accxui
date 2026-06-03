@@ -79,24 +79,27 @@ export function resolveShopifyCloseState(shopifySync: ShopifySync | null | undef
 }
 
 /**
- * Collapse the backend `shopifySync` into a SyncState for an EXCHANGE. The exchange create-push is two
- * Shopify steps at approve-time: returnCreate (PUSH_*) then returnProcess (PROC_*). PROC_OK is the
- * authoritative "confirmed" — a created-but-not-yet-processed exchange (PUSH_OK only) is still pending.
- * - null                         → not_synced
- * - PROC_OK                      → synced (authoritative)
- * - PROC_FAILED / PUSH_FAILED    → failed (surface processErrorMessage / pushErrorMessage)
- * - PROC_PENDING / PUSH_PENDING  → pending
- * - PUSH_OK (awaiting process)   → pending
- * - else                         → not_synced
+ * Collapse the backend `shopifySync` into a SyncState for an EXCHANGE. Reads ONLY the exchange-namespaced
+ * fields (exchangePushStatusId / exchangeProcessStatusId) — never the plain pushStatusId, which on an
+ * exchange carries the return-half push and would surface a phantom PUSH_FAILED. The exchange create-push
+ * is two Shopify steps: returnCreate (exchangePushStatusId) then returnProcess (exchangeProcessStatusId).
+ * PROC_OK is the authoritative "confirmed" — a created-but-not-yet-processed exchange (PUSH_OK only) is
+ * still pending. Exchanges never refund/close, so PROC_OK is the terminal success.
+ * - null                                  → not_synced
+ * - exchangeProcessStatusId PROC_OK        → synced (authoritative)
+ * - PROC_FAILED / exchangePush PUSH_FAILED → failed (surface exchangeProcessErrorMessage / exchangePushErrorMessage)
+ * - PROC_PENDING / PUSH_PENDING            → pending
+ * - exchangePush PUSH_OK (awaiting proc)   → pending
+ * - else                                   → not_synced
  */
 export function resolveExchangeSyncState(shopifySync: ShopifySync | null | undefined): SyncState {
   if (!shopifySync) return "not_synced";
-  if (shopifySync.processStatusId === "PROC_OK") return "synced";
-  if (shopifySync.processStatusId === "PROC_FAILED" || shopifySync.pushStatusId === "PUSH_FAILED") return "failed";
+  if (shopifySync.exchangeProcessStatusId === "PROC_OK") return "synced";
+  if (shopifySync.exchangeProcessStatusId === "PROC_FAILED" || shopifySync.exchangePushStatusId === "PUSH_FAILED") return "failed";
   if (
-    shopifySync.processStatusId === "PROC_PENDING" ||
-    shopifySync.pushStatusId === "PUSH_PENDING" ||
-    shopifySync.pushStatusId === "PUSH_OK"
+    shopifySync.exchangeProcessStatusId === "PROC_PENDING" ||
+    shopifySync.exchangePushStatusId === "PUSH_PENDING" ||
+    shopifySync.exchangePushStatusId === "PUSH_OK"
   ) return "pending";
   return "not_synced";
 }

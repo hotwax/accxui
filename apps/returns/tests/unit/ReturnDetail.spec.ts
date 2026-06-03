@@ -119,7 +119,7 @@ function exchangeDetail(): ReturnDetailType {
     returnId: "40001", type: "standard", orderId: "DEMO-1001", orderName: "#1001",
     statusId: "RETURN_APPROVED", entryDate: "2026-05-29T12:00:00Z", origin: "pwa",
     sync: { shopify: "pending" },
-    shopifySync: { pushStatusId: "PUSH_OK", processStatusId: "PROC_PENDING", shopifyReturnId: "gid://shopify/Return/1" },
+    shopifySync: { exchangePushStatusId: "PUSH_OK", exchangeProcessStatusId: "PROC_PENDING", shopifyReturnId: "gid://shopify/Return/1" },
     isExchange: true,
     exchange: {
       replacementOrderId: "EXC40001", orderName: "#1001-EXC", fulfillmentType: "SHIPPED",

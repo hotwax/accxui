@@ -210,7 +210,7 @@ describe("returnsStore CRUD (stub adapter)", () => {
 
     await store.pollSync(returnId, "shopify", { intervalMs: 0, maxAttempts: 6 });
     expect(store.current?.sync.shopify).toBe("synced");
-    expect(store.current?.shopifySync?.processStatusId).toBe("PROC_OK");
+    expect(store.current?.shopifySync?.exchangeProcessStatusId).toBe("PROC_OK");
   });
 
   it("exchange push never fires the plain pushToShopify (only polls the auto exchange push)", async () => {
@@ -230,7 +230,7 @@ describe("returnsStore CRUD (stub adapter)", () => {
     expect(pushSpy).not.toHaveBeenCalled();
     // The automatic exchange push (driven by polling) settles to synced (PROC_OK).
     expect(store.current?.sync.shopify).toBe("synced");
-    expect(store.current?.shopifySync?.processStatusId).toBe("PROC_OK");
+    expect(store.current?.shopifySync?.exchangeProcessStatusId).toBe("PROC_OK");
     pushSpy.mockRestore();
   });
 

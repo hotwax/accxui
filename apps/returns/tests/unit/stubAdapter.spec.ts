@@ -201,7 +201,7 @@ describe("stubAdapter", () => {
     sync = await stubAdapter.getSyncStatus(returnId);      // step 2: PROC_OK
     expect(sync.shopify).toBe("synced");
     const d = await stubAdapter.getReturn(returnId);
-    expect(d.shopifySync?.processStatusId).toBe("PROC_OK");
+    expect(d.shopifySync?.exchangeProcessStatusId).toBe("PROC_OK");
   });
 
   it("retryExchangePush re-arms a stuck exchange from PROC_PENDING back through PROC_OK", async () => {
@@ -217,7 +217,7 @@ describe("stubAdapter", () => {
     await stubAdapter.retryExchangePush(returnId);
     expect((await stubAdapter.getSyncStatus(returnId)).shopify).toBe("pending"); // step 1 re-runs
     expect((await stubAdapter.getSyncStatus(returnId)).shopify).toBe("synced");  // step 2 confirms
-    expect((await stubAdapter.getReturn(returnId)).shopifySync?.processStatusId).toBe("PROC_OK");
+    expect((await stubAdapter.getReturn(returnId)).shopifySync?.exchangeProcessStatusId).toBe("PROC_OK");
   });
 
   it("marks the exchange return-half isExchange on the list summary", async () => {

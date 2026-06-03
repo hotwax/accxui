@@ -129,9 +129,10 @@
                   </p>
                   <p v-else-if="canApprove" class="muted">{{ translate("Syncs to Shopify automatically when approved.") }}</p>
 
-                  <!-- Approval drives the push; a failed push is recoverable, so let staff re-kick it. -->
+                  <!-- Approval drives the push; a failed push is recoverable, so let staff re-kick it.
+                       An exchange's failure rides the exchange-namespaced fields, never the plain push field. -->
                   <template v-if="r.sync.shopify === 'failed'">
-                    <p v-if="r.shopifySync?.pushErrorMessage" class="error">{{ r.shopifySync.pushErrorMessage }}</p>
+                    <p v-if="pushErrorMessage" class="error">{{ pushErrorMessage }}</p>
                     <ion-button expand="block" color="danger" :disabled="busy" @click="retryPush" data-testid="detail-retry-btn">
                       {{ translate("Retry") }}
                     </ion-button>
@@ -222,9 +223,15 @@ const canApprove = computed(() => r.value?.statusId === "RETURN_REQUESTED");
 const canCancel = computed(() => r.value?.statusId === "RETURN_REQUESTED" || r.value?.statusId === "RETURN_APPROVED");
 const canComplete = computed(() => !isAppeasement.value && (r.value?.statusId === "RETURN_APPROVED" || r.value?.statusId === "RETURN_RECEIVED"));
 const isCompleted = computed(() => r.value?.statusId === "RETURN_COMPLETED");
-// Collapsed Shopify completion state — only meaningful for a normal return once it's RETURN_COMPLETED.
-// An appeasement has no Shopify return to close, so it has no completion state (the refund sync chip stands).
-const closeState = computed(() => (isCompleted.value && !isAppeasement.value ? resolveShopifyCloseState(r.value?.shopifySync) : null));
+// Collapsed Shopify completion state — only meaningful for a NORMAL return once it's RETURN_COMPLETED.
+// Neither an appeasement (no Shopify return to close) nor an exchange (terminal at exchangeProcessStatusId
+// == PROC_OK, surfaced by the sync chip — no separate close step) has a completion state.
+const closeState = computed(() => (isCompleted.value && !isAppeasement.value && !isExchange.value ? resolveShopifyCloseState(r.value?.shopifySync) : null));
+// The failed-push error message, read from the type-correct fields: exchange-namespaced for an exchange,
+// the plain push field for a normal return / appeasement.
+const pushErrorMessage = computed(() => (isExchange.value
+  ? r.value?.shopifySync?.exchangeProcessErrorMessage || r.value?.shopifySync?.exchangePushErrorMessage
+  : r.value?.shopifySync?.pushErrorMessage));
 // A return cancelled in the OMS but still linked in Shopify (synced stays true; Shopify status → CANCELED).
 const cancelledInShopify = computed(() => r.value?.statusId === "RETURN_CANCELLED" && r.value?.sync.shopify === "synced");
 

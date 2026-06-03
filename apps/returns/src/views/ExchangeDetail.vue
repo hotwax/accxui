@@ -61,30 +61,13 @@
                 <p v-if="r.externalIds.shopify">{{ translate("Shopify return ID") }}: {{ r.externalIds.shopify }}</p>
                 <!-- A failed exchange push is recoverable via the exchange retry endpoint. -->
                 <template v-if="r.sync.shopify === 'failed'">
-                  <p v-if="r.shopifySync?.processErrorMessage || r.shopifySync?.pushErrorMessage" class="error">
-                    {{ r.shopifySync.processErrorMessage || r.shopifySync.pushErrorMessage }}
+                  <p v-if="r.shopifySync?.exchangeProcessErrorMessage || r.shopifySync?.exchangePushErrorMessage" class="error">
+                    {{ r.shopifySync.exchangeProcessErrorMessage || r.shopifySync.exchangePushErrorMessage }}
                   </p>
                   <ion-button expand="block" color="danger" :disabled="busy" @click="retryPush" data-testid="exchange-retry-btn">
                     {{ translate("Retry") }}
                   </ion-button>
                 </template>
-              </ion-card-content>
-            </ion-card>
-
-            <ion-card v-if="isCompleted && closeState">
-              <ion-card-header>
-                <ion-card-title>{{ translate("Completion") }}</ion-card-title>
-              </ion-card-header>
-              <ion-card-content>
-                <ion-chip :color="completionColor(closeState)" data-testid="exchange-completion-chip">
-                  <ion-spinner v-if="closeState === 'pending'" name="dots" />
-                  <ion-label>{{ completionLabel(closeState) }}</ion-label>
-                </ion-chip>
-                <p v-if="closeState === 'pending'" class="muted">{{ translate("Closing the return in Shopify…") }}</p>
-                <p v-if="closeState === 'failed' && r.shopifySync?.closePushErrorMessage" class="error">{{ r.shopifySync.closePushErrorMessage }}</p>
-                <ion-button v-if="closeState === 'failed'" expand="block" color="danger" :disabled="busy" @click="retryComplete" data-testid="exchange-retry-complete-btn">
-                  {{ translate("Retry") }}
-                </ion-button>
               </ion-card-content>
             </ion-card>
 
@@ -147,7 +130,7 @@ import { useReturnsStore } from "@/store/returnsStore";
 import { describeApiError } from "@/util/errorMessage";
 import { formatStatus, formatReason } from "@/util/labels";
 import { formatDate } from "@/util/dates";
-import { completionColor, completionLabel, resolveShopifyCloseState, syncColor, syncLabel } from "@/util/syncState";
+import { syncColor, syncLabel } from "@/util/syncState";
 import type { ReplacementOrderDetail } from "@/types/returns";
 
 const props = defineProps<{ returnId: string }>();
@@ -164,9 +147,6 @@ const loaded = computed(() => r.value?.returnId === props.returnId);
 const isExchange = computed(() => r.value?.isExchange === true);
 const exchangeCredit = computed(() => r.value?.exchange?.exchangeCreditAmount ?? 0);
 
-const isCompleted = computed(() => r.value?.statusId === "RETURN_COMPLETED");
-const closeState = computed(() => (isCompleted.value ? resolveShopifyCloseState(r.value?.shopifySync) : null));
-
 async function runAction(message: string, action: () => Promise<unknown>, failMessage: string) {
   error.value = "";
   busy.value = true;
@@ -181,9 +161,6 @@ async function runAction(message: string, action: () => Promise<unknown>, failMe
   }
 }
 
-function retryComplete() {
-  return runAction("Completing in Shopify", () => store.retryComplete(props.returnId), "Failed to retry completion");
-}
 // An exchange's push is recovered via the exchange-specific endpoint (pushExchangeToShopify), never the plain one.
 function retryPush() {
   return runAction("Pushing exchange to Shopify", () => store.retryExchangePush(props.returnId), "Push to Shopify failed");
@@ -213,14 +190,12 @@ async function _enter() {
   try {
     await store.fetchReturn(props.returnId);
     await loadReplacement();
-    // A freshly-created exchange loads "pending" — poll the create-push (PROC) to completion.
+    // A freshly-created exchange loads "pending" — poll the create-push (returnCreate → returnProcess) to
+    // completion. PROC_OK (exchangeProcessStatusId) is terminal; exchanges never close/refund, so there is
+    // no separate completion poll.
     if (store.current?.sync.shopify === "pending") {
       busy.value = true;
       try { await store.pollSync(props.returnId, "shopify"); } finally { busy.value = false; }
-    }
-    if (isCompleted.value && closeState.value === "pending") {
-      busy.value = true;
-      try { await store.pollCompletion(props.returnId); } finally { busy.value = false; }
     }
   } catch (e) {
     error.value = describeApiError(e, translate("Failed to load exchange"));

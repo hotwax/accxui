@@ -239,12 +239,12 @@ export const stubAdapter: ReturnsService = {
       },
       statuses: [{ statusId: "RETURN_REQUESTED", statusDate: now }, { statusId: returnStatus, statusDate: now }],
       externalIds: { shopify: null },
-      // Seed shopifyReturnId + CLOSE_PENDING for immediate so getReturn can advance the close once the push lands.
-      shopifySync: immediate
-        ? { synced: false, pushStatusId: "PUSH_PENDING", shopifyReturnId: `gid://shopify/Return/${replacementOrderId}`, closePushStatusId: "CLOSE_PENDING" }
-        : { synced: false, pushStatusId: "PUSH_PENDING" },
+      // The exchange create-push (returnCreate → returnProcess) fires at create — arm it on the
+      // exchange-namespaced field so the detail polls it to PROC_OK. Exchanges never close/refund, so no
+      // close is seeded even for immediate (the return-half is RETURN_COMPLETED but there is no Shopify close).
+      shopifySync: { synced: false, exchangePushStatusId: "PUSH_PENDING" },
       pushAttempted: true, pollsUntilSynced: 0,
-      closeAttempted: immediate, pollsUntilClosed: immediate ? 1 : 0,
+      closeAttempted: false, pollsUntilClosed: 0,
     });
     void facilityId; // the chosen facility is the issuance origin server-side; not modeled further in the stub
     return { returnId, replacementOrderId };
@@ -258,7 +258,7 @@ export const stubAdapter: ReturnsService = {
     // Idempotent resume: re-arm the push so getSyncStatus re-progresses, clearing any error.
     r.pushAttempted = true;
     r.sync = { shopify: "pending" };
-    r.shopifySync = { ...(r.shopifySync ?? {}), pushStatusId: "PUSH_PENDING", processStatusId: null, processErrorMessage: null };
+    r.shopifySync = { ...(r.shopifySync ?? {}), exchangePushStatusId: "PUSH_PENDING", exchangeProcessStatusId: null, exchangeProcessErrorMessage: null };
   },
 
   async approveReturn(returnId) {
@@ -390,14 +390,14 @@ export const stubAdapter: ReturnsService = {
     if (!r) throw new Error("Return not found");
     if (r.isExchange && r.pushAttempted && r.sync.shopify !== "synced") {
       const ss = r.shopifySync ?? {};
-      if (ss.processStatusId === "PROC_PENDING") {
-        // step 2 completes
-        r.shopifySync = { ...ss, processStatusId: "PROC_OK" };
+      if (ss.exchangeProcessStatusId === "PROC_PENDING") {
+        // step 2 (returnProcess) completes → PROC_OK is the terminal "exchange confirmed"
+        r.shopifySync = { ...ss, exchangeProcessStatusId: "PROC_OK" };
         r.sync = { shopify: "synced" };
         r.externalIds = { shopify: ss.shopifyReturnId ?? "gid://shopify/Return/EXC999" };
       } else {
-        // step 1: returnCreate done, process now pending
-        r.shopifySync = { ...ss, pushStatusId: "PUSH_OK", processStatusId: "PROC_PENDING", shopifyReturnId: ss.shopifyReturnId ?? "gid://shopify/Return/EXC999" };
+        // step 1: returnCreate done, returnProcess now pending
+        r.shopifySync = { ...ss, exchangePushStatusId: "PUSH_OK", exchangeProcessStatusId: "PROC_PENDING", shopifyReturnId: ss.shopifyReturnId ?? "gid://shopify/Return/EXC999" };
         r.sync = { shopify: "pending" };
       }
       return r.sync;

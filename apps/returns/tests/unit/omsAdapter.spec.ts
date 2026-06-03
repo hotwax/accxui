@@ -219,7 +219,7 @@ describe("exchange mapping", () => {
         items: [{ productId: "P1", quantity: 1, unitPrice: 19.99, itemDescription: "Classic Tee" }],
         exchangeCreditAmount: 0,
       },
-      shopifySync: { pushStatusId: "PUSH_OK", processStatusId: "PROC_PENDING", shopifyReturnId: "gid://shopify/Return/1" },
+      shopifySync: { exchangePushStatusId: "PUSH_OK", exchangeProcessStatusId: "PROC_PENDING", shopifyReturnId: "gid://shopify/Return/1" },
     });
     expect(d.isExchange).toBe(true);
     expect(d.exchange?.replacementOrderId).toBe("EXC100100");
@@ -234,7 +234,7 @@ describe("exchange mapping", () => {
       returnDetail: { returnId: "M51", statusId: "RETURN_APPROVED", entryDate: 1 },
       items: [], isExchange: true,
       exchange: { replacementOrderId: "EXC2", fulfillmentType: "IMMEDIATE", orderStatusId: "ORDER_COMPLETED", items: [], exchangeCreditAmount: 0 },
-      shopifySync: { pushStatusId: "PUSH_OK", processStatusId: "PROC_OK", shopifyReturnId: "gid://shopify/Return/2" },
+      shopifySync: { exchangePushStatusId: "PUSH_OK", exchangeProcessStatusId: "PROC_OK", shopifyReturnId: "gid://shopify/Return/2" },
     });
     expect(d.sync.shopify).toBe("synced");
   });

@@ -17,9 +17,15 @@ export interface ShopifySync {
   pushErrorMessage?: string | null; // present when pushStatusId == PUSH_FAILED
   closePushStatusId?: string | null;     // completion-push: CLOSE_OK | CLOSE_PENDING | CLOSE_FAILED | null
   closePushErrorMessage?: string | null; // present when closePushStatusId == CLOSE_FAILED
-  // Exchange create-push step 2 (returnProcess). PROC_OK is the authoritative "exchange confirmed".
-  processStatusId?: string | null;     // PROC_OK | PROC_PENDING | PROC_FAILED | null
-  processErrorMessage?: string | null; // present when processStatusId == PROC_FAILED
+  // Exchange status lives in its OWN namespaced fields (read these when isExchange, NEVER the plain
+  // pushStatusId/closePushStatusId — those carry the return-half's push and surface a phantom PUSH_FAILED
+  // on an exchange). The exchange create-push is two Shopify steps: returnCreate (exchangePushStatusId)
+  // then returnProcess (exchangeProcessStatusId). exchangeProcessStatusId == PROC_OK is the authoritative
+  // "exchange confirmed" — exchanges never refund/close, so there is no exchange close step.
+  exchangePushStatusId?: string | null;        // step 1 returnCreate: PUSH_OK | PUSH_PENDING | PUSH_FAILED | null
+  exchangePushErrorMessage?: string | null;    // present when exchangePushStatusId == PUSH_FAILED
+  exchangeProcessStatusId?: string | null;     // step 2 returnProcess: PROC_OK | PROC_PENDING | PROC_FAILED | null
+  exchangeProcessErrorMessage?: string | null; // present when exchangeProcessStatusId == PROC_FAILED
   // The backend marks an exchange HERE (return-half linked to a replacement order), not at the top level.
   isExchange?: boolean | null;
   replacementOrderId?: string | null;  // the outgoing replacement ("exchange") order id
