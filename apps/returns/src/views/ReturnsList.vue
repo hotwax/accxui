@@ -29,7 +29,7 @@
             data-testid="returns-search-input"
             :placeholder="translate('Search returns')"
             :value="store.query.searchTerm"
-            @ionInput="store.query.searchTerm = $event.target.value"
+            @ionInput="store.query.searchTerm = $event.target.value ?? ''"
           />
         </section>
 
