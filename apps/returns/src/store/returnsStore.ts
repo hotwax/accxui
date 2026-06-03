@@ -64,28 +64,45 @@ export const useReturnsStore = defineStore("returns", {
       return this.pollSync(returnId, "shopify", opts);
     },
     /**
-     * Approve a requested return. Approval triggers the OMS→Shopify push server-side; for a plain return
-     * that push can wedge, so if it didn't fire we kick it from the client (the plain `pushToShopify` is
-     * idempotent), then poll the in-flight push to completion.
+     * Approve a requested return. Approval triggers the OMS→Shopify push server-side, and that push is
+     * ASYNC — so the return still reads `not_synced` the instant we re-fetch, before the server push has
+     * claimed its slot (not_synced → pending). The client kick is only a *fallback* for environments where
+     * the server-side push SECA never fires (e.g. dev with the post-commit SECA skipped). To keep it a true
+     * fallback we give the server push a brief grace window to start: poll a few short cycles and kick the
+     * plain `pushToShopify` ONLY if the state is still `not_synced` afterwards. When the SECA does fire the
+     * client sees `pending` quickly and never kicks, so the two pushes can't race over the same returnId.
      *
-     * Exchanges are the exception: the approve SECA fully owns the *exchange* push (returnCreate WITH the
-     * replacement line items, then returnProcess), and it runs async — so the return still reads not_synced
-     * the instant we re-fetch. We must NOT react to that gap by kicking `pushToTarget`: that calls the plain
-     * `pushToShopify`, which omits the exchange items and races the automatic exchange push over the same
-     * returnable units, producing a phantom "invalid quantity" PUSH_FAILED on an exchange that actually
-     * succeeded. For an exchange we only poll; a genuinely-failed exchange is recovered via the type-correct
-     * Retry (retryExchangePush → pushExchangeToShopify).
+     * Exchanges are excluded entirely: the approve SECA fully owns the *exchange* push (returnCreate WITH the
+     * replacement line items, then returnProcess). The plain `pushToShopify` omits the exchange items and
+     * would race the automatic exchange push over the same returnable units, producing a phantom "invalid
+     * quantity" PUSH_FAILED on an exchange that actually succeeded. For an exchange we only poll; a
+     * genuinely-failed exchange is recovered via the type-correct Retry (retryExchangePush).
+     *
+     * A `failed` state after the grace window is NOT auto-kicked either: a genuine prior failure is better
+     * recovered via the explicit Retry button than a silent auto-retry.
      */
-    async approveReturn(returnId: string, opts: { intervalMs?: number; maxAttempts?: number } = {}) {
+    async approveReturn(returnId: string, opts: { intervalMs?: number; maxAttempts?: number; graceMs?: number; graceTries?: number } = {}) {
       await getReturnsService().approveReturn(returnId);
-      await this.fetchReturn(returnId);
+
+      // Give the async server-side push a beat to claim the slot (not_synced → pending) before deciding
+      // whether to kick the client fallback. A few short polls; defaults tunable via opts (0 in tests).
+      const graceMs = opts.graceMs ?? 1500;
+      const graceTries = opts.graceTries ?? 3;
+      let sync: SyncState | undefined;
+      for (let i = 0; i < graceTries; i++) {
+        await this.fetchReturn(returnId);
+        sync = this.current?.sync.shopify;
+        if (sync !== "not_synced") break; // server push started (pending) / already synced / failed
+        if (i < graceTries - 1) await sleep(graceMs);
+      }
+
       const isAppeasement = this.current?.type === "appeasement";
       const isExchange = this.current?.isExchange === true;
-      let sync = this.current?.sync.shopify;
       if (sync !== "synced") {
-        // Plain return only: not pending means the backend didn't start a push (still not_synced, or a prior
-        // attempt failed) → kick it. Never for an exchange — see the doc comment above.
-        if (!isExchange && (sync === "not_synced" || sync === "failed")) {
+        // Fallback ONLY when the server push never started (still not_synced after the grace window). Never
+        // for an exchange (its push path is different and must not be kicked via pushToShopify), and never
+        // for `failed` (use the explicit Retry) — see the doc comment above.
+        if (!isExchange && sync === "not_synced") {
           await getReturnsService().pushToTarget(returnId, "shopify");
         }
         sync = await this.pollSync(returnId, "shopify", opts);
