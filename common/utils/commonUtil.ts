@@ -871,17 +871,21 @@ const parseDateTimeValue = (value: any): DateTime | null => {
     return dt.isValid ? dt : null
   }
   const norm = value.replace(/^[A-Za-z]{3},\s*/, '')
-  const candidates = [
-    DateTime.fromFormat(value, "yyyy-MM-dd'T'HH:mm:ssZZ"),
-    DateTime.fromFormat(value, 'yyyy-MM-dd HH:mm:ss.SSS'),
-    DateTime.fromSQL(value),
-    DateTime.fromISO(value),
-    DateTime.fromRFC2822(value),
-    DateTime.fromHTTP(value),
-    DateTime.fromFormat(norm, 'dd LLL yyyy HH:mm:ss ZZZ'),
-    DateTime.fromFormat(norm, 'dd LLL yyyy HH:mm:ss z'),
+  const parsers = [
+    () => DateTime.fromISO(value),
+    () => DateTime.fromSQL(value),
+    () => DateTime.fromFormat(value, "yyyy-MM-dd'T'HH:mm:ssZZ"),
+    () => DateTime.fromFormat(value, 'yyyy-MM-dd HH:mm:ss.SSS'),
+    () => DateTime.fromRFC2822(value),
+    () => DateTime.fromHTTP(value),
+    () => DateTime.fromFormat(norm, 'dd LLL yyyy HH:mm:ss ZZZ'),
+    () => DateTime.fromFormat(norm, 'dd LLL yyyy HH:mm:ss z'),
   ]
-  return candidates.find(c => c.isValid) ?? null
+  for (const parse of parsers) {
+    const dt = parse()
+    if (dt.isValid) return dt
+  }
+  return null
 }
 
 /**
@@ -894,7 +898,7 @@ const parseDateTimeValue = (value: any): DateTime | null => {
 const formatDateTimeValue = (value: any, format?: string): string => {
   if (!value) return ''
   const dt = parseDateTimeValue(value)
-  if (!dt || !dt.isValid) return ''
+  if (!dt) return ''
   return format ? dt.toFormat(format) : dt.toLocaleString(DateTime.DATETIME_MED)
 }
 
