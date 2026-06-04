@@ -12,6 +12,7 @@ jobs:
     runs-on: ubuntu-latest
 
     strategy:
+      fail-fast: false
       matrix:
         app: ["launchpad", "fulfillment", "bopis", "receiving", "job-manager", "order-routing", "inventory-count", "available-to-promise", "transfers", "facilities", "users", "company", "preorder"]
 
