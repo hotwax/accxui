@@ -1,5 +1,8 @@
 import imagePreview from './directives/imagePreview'
 import DxpShopifyImg from "./components/DxpShopifyImg.vue"
+import RadioFacetGroup from "./components/RadioFacetGroup.vue"
+import StatCard from "./components/StatCard.vue"
+import Sparkline from "./components/Sparkline.vue"
 import Login from "./components/Login.vue"
 import ShopifyLogin from "./components/ShopifyLogin.vue"
 import ShopifyAppInstall from "./components/ShopifyAppInstall.vue"
@@ -36,6 +39,9 @@ export {
   initialiseConfig,
   logger,
   Login,
+  RadioFacetGroup,
+  Sparkline,
+  StatCard,
   ShopifyLogin,
   ShopifyAppInstall,
   moduleFederationUtil,
