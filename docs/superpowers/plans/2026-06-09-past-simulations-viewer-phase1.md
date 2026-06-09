@@ -232,7 +232,8 @@ const hdr = (id: string, createdDate: string, statusId = "COMPLETE") =>
 // list set/get roundtrip, scoped by productStoreId.
 {
   const s = mem();
-  Cache.setList("STORE", [hdr("A", "2026-06-09T10:00:00Z"), hdr("B", "2026-06-09T09:00:00Z")], 0, s);
+  // cachedAt must be recent: getList prunes entries older than 30 days, and epoch-0 is always stale.
+  Cache.setList("STORE", [hdr("A", "2026-06-09T10:00:00Z"), hdr("B", "2026-06-09T09:00:00Z")], Date.now(), s);
   const got = Cache.getList("STORE", Date.now(), s);
   assert.strictEqual(got.length, 2, "roundtrip 2 headers");
   assert.strictEqual(Cache.getList("OTHER", Date.now(), s).length, 0, "other store bucket empty");
@@ -242,16 +243,17 @@ const hdr = (id: string, createdDate: string, statusId = "COMPLETE") =>
 {
   const s = mem();
   const many = Array.from({ length: 60 }, (_, i) => hdr(`S${i}`, `2026-06-09T${String(i % 24).padStart(2, "0")}:00:00Z`));
-  Cache.setList("STORE", many, 0, s);
+  Cache.setList("STORE", many, Date.now(), s);
   assert.strictEqual(Cache.getList("STORE", Date.now(), s).length, 50, "capped at 50");
 }
 
 // detail LRU put/get; eviction past 25 (least-recently-read goes first).
 {
   const s = mem();
-  for (let i = 0; i < 25; i++) Cache.putDetail(`D${i}`, { header: hdr(`D${i}`, "2026-06-09T10:00:00Z"), raw: { simulationId: `D${i}` }, cachedAt: 1000 }, s);
+  const now = Date.now();   // recent cachedAt so the prune doesn't fire — this block tests LRU eviction
+  for (let i = 0; i < 25; i++) Cache.putDetail(`D${i}`, { header: hdr(`D${i}`, "2026-06-09T10:00:00Z"), raw: { simulationId: `D${i}` }, cachedAt: now }, s);
   Cache.getDetail("D0", Date.now(), s);                // touch D0 so it's most-recent
-  Cache.putDetail("D25", { header: hdr("D25", "2026-06-09T10:00:00Z"), raw: {}, cachedAt: 1000 }, s); // evicts LRU (D1)
+  Cache.putDetail("D25", { header: hdr("D25", "2026-06-09T10:00:00Z"), raw: {}, cachedAt: now }, s); // evicts LRU (D1)
   assert.ok(Cache.getDetail("D0", Date.now(), s), "D0 survives (recently read)");
   assert.strictEqual(Cache.getDetail("D1", Date.now(), s), null, "D1 evicted");
 }
@@ -276,7 +278,7 @@ const hdr = (id: string, createdDate: string, statusId = "COMPLETE") =>
 // null storage is a no-op (SSR / unavailable).
 {
   assert.deepStrictEqual(Cache.getList("STORE", Date.now(), null), [], "null storage -> []");
-  Cache.setList("STORE", [hdr("A", "2026-06-09T10:00:00Z")], 0, null); // must not throw
+  Cache.setList("STORE", [hdr("A", "2026-06-09T10:00:00Z")], Date.now(), null); // must not throw
 }
 
 console.log("SimulationHistoryCache tests passed");
