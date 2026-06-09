@@ -45,21 +45,22 @@ Maps the R2 detail response (header + `variants[]` from the backend request) int
 
 ```ts
 // tests/persistedSimulationAdapter.test.ts
+// Backend R2 shape (confirmed): { simulation: {header}, variants: [...] }. JSON fields arrive
+// already PARSED (variant.diff is an object); the raw *Json strings are ignored.
 import assert from "assert";
 import { persistedSimulationAdapter } from "../src/util/persistedSimulationAdapter";
 
-// VARIATION run: baseline + one variant; diffJson as a JSON string.
+// VARIATION run: baseline + one variant; diff is a parsed object.
 {
   const raw = {
-    simulationId: "SIM_1", runType: "VARIATION", statusId: "COMPLETE",
-    partial: "N", simulationRan: "Y",
-    attemptedItemCount: 100, brokeredItemCount: 80, queuedItemCount: 20,
+    simulation: { simulationId: "SIM_1", runType: "VARIATION", statusId: "COMPLETE",
+      partial: "N", simulationRan: "Y", createdDate: 1780984319839 },
     variants: [
       { variantSeqId: 0, label: "baseline", isBaseline: "Y", failed: "N",
-        attemptedItemCount: 100, brokeredItemCount: 80, queuedItemCount: 20, diffJson: null },
+        attemptedItemCount: 100, brokeredItemCount: 80, queuedItemCount: 20 },
       { variantSeqId: 1, label: "Tighter distance", isBaseline: "N", failed: "N",
         attemptedItemCount: 100, brokeredItemCount: 90, queuedItemCount: 10,
-        diffJson: '{"routingBrokeredDelta":10}' },
+        diff: { routingBrokeredDelta: 10 } },
     ],
   };
   const out = persistedSimulationAdapter(raw);
@@ -67,25 +68,25 @@ import { persistedSimulationAdapter } from "../src/util/persistedSimulationAdapt
   assert.strictEqual(out.variants.length, 1, "one non-baseline variant");
   assert.strictEqual(out.variants[0].label, "Tighter distance");
   assert.deepStrictEqual(out.variants[0].groupRun, { brokeredItemCount: 90, attemptedItemCount: 100, queuedItemCount: 10, outcomes: null });
-  assert.deepStrictEqual(out.variants[0].diff, { routingBrokeredDelta: 10 }, "diffJson string parsed");
+  assert.deepStrictEqual(out.variants[0].diff, { routingBrokeredDelta: 10 }, "parsed diff object used");
   assert.strictEqual(out.variants[0].failed, false);
   assert.strictEqual(out.partial, false);
   assert.strictEqual(out.simulationRan, true);
 }
 
-// diffJson already an object (backend may return parsed) — accepted as-is.
+// Robustness: a raw diffJson string is still parsed if `diff` is absent (defensive fallback).
 {
-  const raw = { runType: "VARIATION", statusId: "COMPLETE", partial: "N", simulationRan: "Y",
+  const raw = { simulation: { runType: "VARIATION", statusId: "COMPLETE", partial: "N", simulationRan: "Y" },
     variants: [
       { variantSeqId: 0, isBaseline: "Y", failed: "N", brokeredItemCount: 1, attemptedItemCount: 1, queuedItemCount: 0 },
-      { variantSeqId: 1, label: "V", isBaseline: "N", failed: "N", brokeredItemCount: 1, attemptedItemCount: 1, queuedItemCount: 0, diffJson: { routingBrokeredDelta: 0 } },
+      { variantSeqId: 1, label: "V", isBaseline: "N", failed: "N", brokeredItemCount: 1, attemptedItemCount: 1, queuedItemCount: 0, diffJson: '{"routingBrokeredDelta":0}' },
     ] };
-  assert.deepStrictEqual(persistedSimulationAdapter(raw).variants[0].diff, { routingBrokeredDelta: 0 }, "diffJson object passthrough");
+  assert.deepStrictEqual(persistedSimulationAdapter(raw).variants[0].diff, { routingBrokeredDelta: 0 }, "diffJson string fallback parsed");
 }
 
 // SINGLE run: only synthetic baseline → variants empty, baseline from it.
 {
-  const raw = { runType: "SINGLE", statusId: "COMPLETE", partial: "N", simulationRan: "Y",
+  const raw = { simulation: { runType: "SINGLE", statusId: "COMPLETE", partial: "N", simulationRan: "Y" },
     variants: [{ variantSeqId: 0, isBaseline: "Y", failed: "N", brokeredItemCount: 5, attemptedItemCount: 6, queuedItemCount: 1 }] };
   const out = persistedSimulationAdapter(raw);
   assert.deepStrictEqual(out.baseline, { brokeredItemCount: 5, attemptedItemCount: 6, queuedItemCount: 1, outcomes: null });
@@ -94,7 +95,7 @@ import { persistedSimulationAdapter } from "../src/util/persistedSimulationAdapt
 
 // partial = header.partial OR any variant.failed; failed flag mapped; failureReason carried.
 {
-  const raw = { runType: "VARIATION", statusId: "COMPLETE", partial: "N", simulationRan: "Y",
+  const raw = { simulation: { runType: "VARIATION", statusId: "COMPLETE", partial: "N", simulationRan: "Y" },
     variants: [
       { variantSeqId: 0, isBaseline: "Y", failed: "N", brokeredItemCount: 0, attemptedItemCount: 0, queuedItemCount: 0 },
       { variantSeqId: 1, label: "Boom", isBaseline: "N", failed: "Y", failureReason: "timeout", brokeredItemCount: 0, attemptedItemCount: 0, queuedItemCount: 0 },
@@ -105,13 +106,16 @@ import { persistedSimulationAdapter } from "../src/util/persistedSimulationAdapt
   assert.strictEqual(out.variants[0].failureReason, "timeout");
 }
 
-// missing/null counts default to 0; simulationRan=N honored; corrupt diffJson → undefined diff (no throw).
+// missing/null counts default to 0; simulationRan=N honored; unknown id (simulation:null) → empty.
 {
-  const raw = { runType: "SINGLE", statusId: "COMPLETE", partial: "N", simulationRan: "N",
-    variants: [{ variantSeqId: 0, isBaseline: "Y", failed: "N", diffJson: "{not json" }] };
+  const raw = { simulation: { runType: "SINGLE", statusId: "COMPLETE", partial: "N", simulationRan: "N" },
+    variants: [{ variantSeqId: 0, isBaseline: "Y", failed: "N" }] };
   const out = persistedSimulationAdapter(raw);
   assert.deepStrictEqual(out.baseline, { brokeredItemCount: 0, attemptedItemCount: 0, queuedItemCount: 0, outcomes: null });
   assert.strictEqual(out.simulationRan, false);
+
+  const empty = persistedSimulationAdapter({ simulation: null, variants: [] });
+  assert.deepStrictEqual(empty.variants, [], "unknown id → no variants");
 }
 
 console.log("persistedSimulationAdapter tests passed");
@@ -126,12 +130,13 @@ Expected: FAIL — `Cannot find module '../src/util/persistedSimulationAdapter'`
 
 ```ts
 // src/util/persistedSimulationAdapter.ts
-// Maps the persisted past-simulation detail (backend R2: header + variants[]) into the
-// { baseline, variants, partial, simulationRan } shape SimulationResults.vue / toRows() render.
-// Pure — no runtime imports, safe under `npx tsx`. The single seam absorbing persisted-vs-live
-// differences (chiefly diffJson string-vs-object). NOTE: persisted variants carry counts but no
-// `outcomes` object, so outcomes is null here; the richer outcome-metric panels degrade to their
-// empty state until backend aggregates (Phase 2) supply them.
+// Maps the persisted past-simulation detail (backend R2: { simulation:{header}, variants:[] })
+// into the { baseline, variants, partial, simulationRan } shape SimulationResults.vue / toRows()
+// render. Pure — no runtime imports, safe under `npx tsx`. The single seam absorbing
+// persisted-vs-live differences. NOTE: per the confirmed contract, JSON fields arrive PARSED
+// (variant.diff is an object); a raw diffJson string is parsed only as a defensive fallback.
+// Persisted variants carry counts but no `outcomes` object, so outcomes is null here; the richer
+// outcome-metric panels degrade to their empty state until backend aggregates (R5/Phase 2) feed them.
 
 const yes = (v: any): boolean => v === "Y" || v === true;
 const num = (v: any): number => (typeof v === "number" && Number.isFinite(v) ? v : 0);
@@ -160,22 +165,23 @@ export interface AdaptedResults {
 }
 
 export function persistedSimulationAdapter(raw: any): AdaptedResults {
+  const header = raw?.simulation ?? raw ?? {};   // R2 nests the header under `simulation`
   const all = Array.isArray(raw?.variants) ? raw.variants : [];
   const baselineVariant = all.find((v: any) => yes(v?.isBaseline)) ?? null;
   const nonBaseline = all.filter((v: any) => !yes(v?.isBaseline));
 
   const anyFailed = all.some((v: any) => yes(v?.failed));
   return {
-    baseline: baselineVariant ? counts(baselineVariant) : counts(raw),
+    baseline: baselineVariant ? counts(baselineVariant) : counts(header),
     variants: nonBaseline.map((v: any) => ({
       label: v?.label ?? "",
       groupRun: counts(v),
-      diff: parseJson(v?.diffJson),
+      diff: v?.diff ?? parseJson(v?.diffJson),   // prefer the parsed `diff`; fall back to raw string
       failed: yes(v?.failed),
       ...(v?.failureReason ? { failureReason: v.failureReason } : {}),
     })),
-    partial: yes(raw?.partial) || anyFailed,
-    simulationRan: raw?.simulationRan !== "N" && raw?.simulationRan !== false,
+    partial: yes(header?.partial) || anyFailed,
+    simulationRan: header?.simulationRan !== "N" && header?.simulationRan !== false,
   };
 }
 ```
@@ -301,7 +307,7 @@ export interface PastSimHeader {
   runType?: string; statusId?: string;
   attemptedItemCount?: number; brokeredItemCount?: number; queuedItemCount?: number;
   durationMs?: number; sampleSize?: number; sampleCap?: number;
-  simulationRan?: any; partial?: any; createdDate?: string; createdByUser?: string;
+  simulationRan?: any; partial?: any; createdDate?: string | number; createdByUser?: string;
 }
 export interface DetailEntry { header: PastSimHeader; raw: any; cachedAt: number; }
 
@@ -324,7 +330,11 @@ function readJson<T>(storage: StorageLike, key: string, fallback: T): T {
 function writeJson(storage: StorageLike, key: string, value: any): void {
   try { storage.setItem(key, JSON.stringify(value)); } catch (e) { console.error("[SimulationHistoryCache] write failed", key, e); }
 }
-const ts = (d?: string): number => { const t = d ? Date.parse(d) : NaN; return Number.isNaN(t) ? 0 : t; };
+// createdDate is epoch millis (Long) per the confirmed contract, but tolerate ISO strings too.
+const ts = (d?: string | number): number => {
+  if (typeof d === "number") return Number.isFinite(d) ? d : 0;
+  const t = d ? Date.parse(d) : NaN; return Number.isNaN(t) ? 0 : t;
+};
 
 interface ListBucket { headers: PastSimHeader[]; cachedAt: number; }
 
@@ -487,8 +497,9 @@ export async function fetchPastSimulations(f: PastSimulationsFilters): Promise<{
   const { url, params } = pastSimulationsQuery(f);
   const resp: any = await api({ url, method: "GET", baseURL: simApiBaseUrl(), params });
   if (commonUtil.hasError(resp)) throw new Error(`Failed to load past simulations: ${JSON.stringify(resp?.data)?.slice(0, 300)}`);
-  const headers = Array.isArray(resp.data) ? resp.data : (resp.data?.brokeringSimulations ?? resp.data?.results ?? []);
-  const total = Number(resp.data?.totalCount ?? resp.data?.count ?? headers.length);
+  // Confirmed contract: { simulationList: [...headers], totalCount }.
+  const headers = resp.data?.simulationList ?? (Array.isArray(resp.data) ? resp.data : []);
+  const total = Number(resp.data?.totalCount ?? headers.length);
   return { headers, total };
 }
 
@@ -510,13 +521,14 @@ export async function fetchPastSimulation(simulationId: string): Promise<any> {
 // until backend R1/R2 ship. Never imported on production paths (dynamic import gated by useMock()).
 import type { PastSimulationsFilters } from "../services/SimulationService";
 
+// createdDate is epoch millis (Long), matching the real contract.
 const HEADERS = [
   { simulationId: "SIM_1001", routingGroupId: "GRP_NYC", productStoreId: "STORE", runType: "VARIATION", statusId: "COMPLETE",
     attemptedItemCount: 100, brokeredItemCount: 90, queuedItemCount: 10, durationMs: 184000, sampleSize: 100, sampleCap: 500,
-    simulationRan: "Y", partial: "N", createdDate: "2026-06-09T10:15:00Z", createdByUser: "aditi.patel" },
+    simulationRan: "Y", partial: "N", createdDate: 1780999300000, createdByUser: "aditi.patel" },
   { simulationId: "SIM_1000", routingGroupId: "GRP_NYC", productStoreId: "STORE", runType: "SINGLE", statusId: "COMPLETE",
     attemptedItemCount: 80, brokeredItemCount: 64, queuedItemCount: 16, durationMs: 90000, sampleSize: 80, sampleCap: 500,
-    simulationRan: "Y", partial: "N", createdDate: "2026-06-08T17:00:00Z", createdByUser: "aditi.patel" },
+    simulationRan: "Y", partial: "N", createdDate: 1780930800000, createdByUser: "aditi.patel" },
 ];
 
 export async function mockPastSimulations(f: PastSimulationsFilters): Promise<{ headers: any[]; total: number }> {
@@ -524,20 +536,23 @@ export async function mockPastSimulations(f: PastSimulationsFilters): Promise<{ 
   if (f.routingGroupId) rows = rows.filter((h) => h.routingGroupId === f.routingGroupId);
   if (f.statusId) rows = rows.filter((h) => h.statusId === f.statusId);
   if (f.runType) rows = rows.filter((h) => h.runType === f.runType);
-  return { headers: rows, total: rows.length };
+  return { headers: rows, total: rows.length };   // service-level shape to the store
 }
 
+// Real R2 shape: { simulation: {header}, variants: [...] } with parsed `diff`.
 export async function mockPastSimulation(simulationId: string): Promise<any> {
   const header = HEADERS.find((h) => h.simulationId === simulationId) ?? HEADERS[0];
   return {
-    ...header,
+    simulation: header,
     variants: [
       { variantSeqId: 0, label: "baseline", isBaseline: "Y", failed: "N",
-        attemptedItemCount: header.attemptedItemCount, brokeredItemCount: header.brokeredItemCount, queuedItemCount: header.queuedItemCount, diffJson: null },
+        attemptedItemCount: header.attemptedItemCount, brokeredItemCount: header.brokeredItemCount, queuedItemCount: header.queuedItemCount,
+        parameterOverrides: {}, routingDeltas: [] },
       ...(header.runType === "VARIATION" ? [{
         variantSeqId: 1, label: "Tighter distance", isBaseline: "N", failed: "N",
         attemptedItemCount: 100, brokeredItemCount: 95, queuedItemCount: 5,
-        diffJson: '{"routingBrokeredDelta":5}',
+        diff: { routingBrokeredDelta: 5, finalReasonTransitions: {}, facilityAllocationDelta: {} },
+        parameterOverrides: {}, routingDeltas: [],
       }] : []),
     ],
   };
@@ -633,8 +648,10 @@ describe("pastSimulationStore", () => {
 
   it("loadDetail serves cached terminal run without refetch, fetches on miss", async () => {
     const s = usePastSimulationStore();
-    fetchPastSimulation.mockResolvedValueOnce({ simulationId: "A", statusId: "COMPLETE", runType: "SINGLE", partial: "N", simulationRan: "Y",
-      variants: [{ variantSeqId: 0, isBaseline: "Y", failed: "N", brokeredItemCount: 1, attemptedItemCount: 1, queuedItemCount: 0 }] });
+    fetchPastSimulation.mockResolvedValueOnce({
+      simulation: { simulationId: "A", statusId: "COMPLETE", runType: "SINGLE", partial: "N", simulationRan: "Y" },
+      variants: [{ variantSeqId: 0, isBaseline: "Y", failed: "N", brokeredItemCount: 1, attemptedItemCount: 1, queuedItemCount: 0 }],
+    });
     const d1 = await s.loadDetail("A");
     expect(d1.baseline.brokeredItemCount).toBe(1);
     expect(fetchPastSimulation).toHaveBeenCalledTimes(1);
@@ -723,11 +740,12 @@ export const usePastSimulationStore = defineStore("pastSimulation", {
       }
       this.detailLoading = true;
       try {
-        const raw = await fetchPastSimulation(simulationId);
+        const raw = await fetchPastSimulation(simulationId);   // R2: { simulation:{header}, variants:[] }
+        const header = raw?.simulation ?? raw;
         const adapted = persistedSimulationAdapter(raw);
         this.detailRawById[simulationId] = raw; this.detailById[simulationId] = adapted;
-        if (TERMINAL.has(String(raw?.statusId))) {
-          Cache.putDetail(simulationId, { header: raw, raw, cachedAt: Date.now() });
+        if (TERMINAL.has(String(header?.statusId))) {
+          Cache.putDetail(simulationId, { header, raw, cachedAt: Date.now() });
         }
         return adapted;
       } catch (e: any) {
@@ -1061,14 +1079,21 @@ git commit -m "feat(sim): deep-link a fresh run to its saved record (lastSimulat
 - [ ] Flip `VITE_SIM_USE_MOCK` off once backend R1/R2 are live in the target environment; only
   `SimulationService` behavior changes.
 
-## Open items to confirm with backend (carry from the backend request)
+## Contract status & remaining gap
 
-1. R1/R2 response envelope (array vs `{ brokeringSimulations, totalCount }`) and pagination param
-   names — `fetchPastSimulations` currently tolerates a few shapes; pin once confirmed.
-2. `diffJson` string vs object — adapter handles both; no change needed either way.
-3. **`outcomes` in R2** — persisted variants carry counts but no `outcomes` object, so the richer
-   outcome-metric panels (expedited/stockout/fulfillment-mix/composite) render empty for past runs
-   in Phase 1. If those should populate, the backend must include per-variant `outcomes` in R2 (add
-   to the backend request) or it waits for Phase 2 aggregates (R5). Count-based scorecard + diff
-   work today.
-4. `productStoreId` scoping/visibility (request open question #3).
+The backend shipped and verified R1–R5 — see
+`docs/superpowers/specs/2026-06-09-past-simulations-read-api-frontend-integration.md` (authoritative).
+Resolved vs the original assumptions, and already reflected in the code above:
+- **R1 envelope** = `{ simulationList, totalCount }`; **R2 envelope** = `{ simulation:{header}, variants:[] }`.
+- **JSON fields arrive parsed** (`diff`, `parameterOverrides`, `routingDeltas`, `runOptions`, `config`) — bind to those, not the `*Json` strings (adapter keeps a defensive string fallback).
+- **`createdDate` is epoch millis (Long)** — cache `ts()` and list rendering handle numeric epoch.
+- **Pagination** `pageIndex`/`pageSize` (+ `totalCount`); **R3** already returns `simulationId` on poll completion.
+
+**Remaining gap — `outcomes` (Phase 1 limitation, not a blocker):** persisted variants carry counts
++ `diff` but no `outcomes` object, so the richer outcome-metric panels (expedited / stockout /
+fulfillment-mix / composite) render empty for past runs. The count-based scorecard + diff work today.
+To populate the rich panels, either ask the backend to add per-variant `outcomes` to R2, or derive
+them from R5 aggregates in Phase 2. Decide before Task 6 if rich panels are required for Phase 1.
+
+**Confirm before flipping off the mock:** the new routes are verified locally but **not yet on the
+UAT host** — confirm availability per environment, then set `VITE_SIM_USE_MOCK="false"`.

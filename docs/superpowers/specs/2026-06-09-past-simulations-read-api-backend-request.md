@@ -6,6 +6,13 @@
 **Backend owner / component:** `sim-routing` (depends on `order-routing`)
 **Blocks:** PWA "Past Simulations Viewer" (spec `2026-05-27-past-simulations-viewer-design.md`), Phase 1.
 
+> **✅ FULFILLED (2026-06-09).** Backend shipped R1–R5; authoritative confirmed contract:
+> `2026-06-09-past-simulations-read-api-frontend-integration.md`. Notable confirmations: R1 →
+> `{ simulationList, totalCount }`; R2 → `{ simulation:{header}, variants:[] }`; JSON fields return
+> **parsed**; `createdDate` is epoch millis. Open question #2 (JSON string vs object) → **parsed**.
+> One follow-up not in scope of the original request: per-variant `outcomes` is absent from R2 (FE
+> rich panels degrade in Phase 1).
+
 ---
 
 ## 1. Why

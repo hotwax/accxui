@@ -238,17 +238,27 @@ mock to live when backend R1/R2 ship — only the service module changes.
 
 ---
 
+## Contract status (confirmed 2026-06-09)
+
+Backend shipped R1–R5; authoritative shapes in
+`2026-06-09-past-simulations-read-api-frontend-integration.md`. Resolved:
+- R1 = `{ simulationList, totalCount }`; R2 = `{ simulation:{header}, variants:[] }` (nested).
+- JSON fields return **parsed** (`diff`, `parameterOverrides`, `routingDeltas`, `runOptions`,
+  `config`) — bind to those, not the `*Json` strings.
+- `createdDate` = epoch millis (Long); `pageIndex`/`pageSize` + `totalCount`; R3 already returns
+  `simulationId` on poll completion.
+
 ## Open questions / assumptions
 
-1. **Backend R1/R2 shapes** — assumed per the backend request; confirm field names, pagination
-   params, and total-count before wiring `SimulationService` (request open questions #1, #6).
-2. **`diffJson` shape** — string vs object; the adapter handles both but pins to the confirmed one
-   (request open question #2).
-3. **Scope** — list filters by current `productStoreId`; confirm org-wide vs per-user visibility
-   (request open question #3). The cache key is per `productStoreId`, so a store switch uses a
-   separate cache bucket.
-4. **`createdByUser` display** — header carries the login id; showing a friendly name may need a
-   later lookup (not Phase 1).
+1. **`outcomes` not in R2** — persisted variants carry counts + `diff` only, so the richer
+   outcome-metric panels render empty for past runs in Phase 1 (count scorecard + diff work). Add
+   per-variant `outcomes` to R2, or feed them from R5 aggregates in Phase 2, if rich panels are
+   required for Phase 1.
+2. **Scope** — list filters by current `productStoreId` (may be null on older rows); confirm
+   org-wide vs per-user visibility. Cache key is per `productStoreId` (store switch = separate bucket).
+3. **`createdByUser` display** — header carries the login id; a friendly name may need a later
+   lookup (not Phase 1).
+4. **Environment** — routes verified locally, not yet on UAT; build/test on the mock until they land.
 5. **Batched runs** — a submit can spawn multiple jobs, each with its own `simulationId`; the
    deep-link uses the first completed batch's id, the list shows all. Revisit if a single combined
    record is wanted.
