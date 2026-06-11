@@ -44,7 +44,8 @@ graph TD
         
         subgraph "Common Library (@common)"
             Core["Core (remoteApi, i18n)"]
-            Composables["Composables (useSolrSearch, validation)"]
+            Services["Services (solr)"]
+            Composables["Composables (validation)"]
             Utils["Utils (commonUtil, cookieHelper)"]
             Stores["Shared Stores (notifications)"]
             Theme["Theming (theme.css, settings.css)"]
@@ -100,8 +101,9 @@ sequenceDiagram
 - **Internationalization (`i18n.ts`)**:
   - Multi-language support with `vue-i18n`.
   - Reusable `translate` function and locale switching helpers.
+- **Services**:
+  - `solr`: Native Moqui `execute#SolrQuery` client (`executeSolrQuery`, `solrDocs`, `solrTotal`, `solrGroups`, `escapeSolrValue`) for backend-supported searching and filtering.
 - **Composables**:
-  - `useSolrSearch`: Pattern for efficient searching and filtering.
   - `useFormValidation`: Schema-based validation using `Yup` and `VeeValidate`.
 - **Utilities & Helpers**:
   - `commonUtil`: Generic utilities for error analysis and showing toasts.
