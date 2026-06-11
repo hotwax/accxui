@@ -66,6 +66,16 @@ describe('executeSolrQuery — request mapping', () => {
     expect(arg.data.params).toEqual({})
     expect(arg.data.collection).toBeUndefined()
   })
+
+  it('defaults query to {} when invoked with no arguments', async () => {
+    resolveApiWith({ response: { numFound: 0, start: 0, docs: [] } })
+
+    await executeSolrQuery()
+
+    const arg = mockApi.mock.calls[0][0]
+    expect(arg.data.query).toBe('*:*')
+    expect(arg.data.params).toEqual({})
+  })
 })
 
 describe('executeSolrQuery — response unwrap', () => {
@@ -99,6 +109,15 @@ describe('executeSolrQuery — response unwrap', () => {
 
     await expect(executeSolrQuery({ query: '*:*' })).rejects.toEqual({ errorCode: 'BAD', _ERROR_MESSAGE_: 'nope' })
   })
+
+  it('returns an empty object when the transport resolves with a falsy response', async () => {
+    mockApi.mockResolvedValueOnce(undefined)
+
+    const res = await executeSolrQuery({ query: '*:*' })
+    expect(res).toEqual({})
+    // hasError must not be consulted on a falsy response.
+    expect(mockHasError).not.toHaveBeenCalled()
+  })
 })
 
 describe('readers', () => {
@@ -130,5 +149,11 @@ describe('escapeSolrValue', () => {
     expect(escapeSolrValue('Facility (A)')).toBe('Facility \\(A\\)')
     expect(escapeSolrValue('a:b/c')).toBe('a\\:b\\/c')
     expect(escapeSolrValue('plain')).toBe('plain')
+  })
+
+  it('returns an empty string for falsy input instead of "null"/"undefined"', () => {
+    expect(escapeSolrValue('')).toBe('')
+    expect(escapeSolrValue(undefined as unknown as string)).toBe('')
+    expect(escapeSolrValue(null as unknown as string)).toBe('')
   })
 })

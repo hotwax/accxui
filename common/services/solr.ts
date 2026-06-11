@@ -32,7 +32,7 @@ export interface SolrResponse {
   [key: string]: any
 }
 
-function toRequestData(query: SolrQuery) {
+function toRequestData(query: SolrQuery = {}) {
   const params: Record<string, unknown> = { ...(query.params ?? {}) }
 
   if (query.limit !== undefined) params.rows = query.limit
@@ -51,13 +51,15 @@ function toRequestData(query: SolrQuery) {
 
 /** POST a native Solr query. Resolves with the standard Solr response body; rejects on
  *  transport or Moqui error. */
-export async function executeSolrQuery(query: SolrQuery): Promise<SolrResponse> {
+export async function executeSolrQuery(query: SolrQuery = {}): Promise<SolrResponse> {
   const response = await api({
     url: 'admin/search/query',
     method: 'post',
     data: toRequestData(query)
   }) as any
 
+  // Fail gracefully if the transport resolves with a falsy/empty response.
+  if (!response) return {}
   if (commonUtil.hasError(response)) return Promise.reject(response.data)
 
   // admin/search/query wraps the Solr body under data.response; fall back to data itself
@@ -85,5 +87,7 @@ const SOLR_SPECIALS = /[+\-&|!(){}[\]^"~*?:\\/]/g
 
 /** Escape Solr query special characters in a user-supplied value. */
 export function escapeSolrValue(value: string): string {
+  // Avoid escaping/querying the literal strings 'null'/'undefined' for falsy input.
+  if (!value) return ''
   return String(value).replace(SOLR_SPECIALS, '\\$&')
 }
