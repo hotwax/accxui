@@ -271,12 +271,28 @@ enum OPERATOR {
 }
 
 
+// New API wraps everything under response{}; normalize to the old flat shape.
+function normalizeSearchResponse(resp: any): any {
+  const inner = resp?.data?.response;
+  if (inner?.responseHeader) {
+    resp.data.responseHeader = inner.responseHeader;
+    if (inner.response) {
+      resp.data.response = inner.response;
+    } else if (inner.grouped) {
+      resp.data.grouped = inner.grouped;
+      delete resp.data.response;
+    }
+  }
+  return resp;
+}
+
 async function runSolrQuery(payload: any): Promise<any> {
-  return await api({
-    url: "admin/runSolrQuery",
+  const resp = await api({
+    url: "admin/search/query",
     method: "post",
-    data: payload
+    data: payload.json
   }) as any;
+  return normalizeSearchResponse(resp);
 }
 
 async function searchProducts(params: { keyword?: string, sort?: string, qf?: string, viewSize?: number, viewIndex?: number, filters?: any }): Promise<any> {
@@ -354,11 +370,11 @@ async function searchProducts(params: { keyword?: string, sort?: string, qf?: st
   }
 
   try {
-    const resp = await api({
-      url: "admin/runSolrQuery",
+    const resp = normalizeSearchResponse(await api({
+      url: "admin/search/query",
       method: "post",
-      data: payload
-    }) as any;
+      data: payload.json
+    }) as any);
 
     if (resp.status == 200 && !commonUtil.hasError(resp) && resp.data?.response?.numFound > 0) {
 
