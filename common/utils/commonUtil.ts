@@ -1,7 +1,7 @@
 import { toastController } from "@ionic/vue";
 import { DateTime } from "luxon";
 import { cookieHelper } from "../helpers/cookieHelper";
-import { translate } from "../core/i18n";
+import { i18n, translate } from "../core/i18n";
 // Capacitor Plugins import removed for compatibility
 import { saveAs } from 'file-saver';
 import Papa from 'papaparse';
@@ -622,8 +622,28 @@ const currentSymbol: any = {
 }
 
 const formatCurrency = (amount: any, code: string) => {
-  const symbol = currentSymbol[code] || code || ""
-  return `${symbol}${amount != null ? Number(amount).toFixed(2) : '0.00'}`
+  let locale = 'en-US';
+  try {
+    if (i18n && i18n.global) {
+      locale = i18n.global.locale.value || i18n.global.locale || 'en-US';
+    } else if (typeof navigator !== 'undefined') {
+      locale = navigator.language || 'en-US';
+    }
+  } catch (e) {
+    if (typeof navigator !== 'undefined') {
+      locale = navigator.language || 'en-US';
+    }
+  }
+
+  try {
+    return new Intl.NumberFormat(locale, {
+      style: 'currency',
+      currency: code || 'USD'
+    }).format(amount != null ? Number(amount) : 0);
+  } catch (e) {
+    const symbol = currentSymbol[code] || code || "";
+    return `${symbol}${amount != null ? Number(amount).toFixed(2) : '0.00'}`;
+  }
 }
 
 const getColorByDesc = (desc: string) => ({
