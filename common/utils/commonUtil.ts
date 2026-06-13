@@ -406,6 +406,10 @@ const getToken = () => {
   return getEmbeddedAppStoreSafe().getToken || cookieHelper().get("token")
 }
 
+const getApiKey = () => {
+  return cookieHelper().get("api_key")
+}
+
 const getTokenExpiration = () => {
   return getEmbeddedAppStoreSafe().getTokenExpiration || cookieHelper().get("expirationTime")
 }
@@ -909,6 +913,7 @@ export const commonUtil = {
   getStatusColor,
   getTelecomCountryCode,
   getTime,
+  getApiKey,
   getToken,
   getTokenExpiration,
   goToOms,

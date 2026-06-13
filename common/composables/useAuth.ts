@@ -14,6 +14,7 @@ const loginOption = ref<LoginOption>({})
 export const omsRef = ref("")
 const token = ref(cookieHelper().get("token") || "")
 const expirationTime = ref(cookieHelper().get("expirationTime") || "")
+const apiKey = ref(cookieHelper().get("api_key") || "")
 
 export function useAuth() {
   const getDuration = (expirationTime?: any) => {
@@ -22,10 +23,18 @@ export function useAuth() {
   }
 
 
-  const updateToken = (newToken: any, newExpirationTime: any) => {
+  const updateToken = (newToken: any, newExpirationTime: any, newApiKey?: any) => {
     const duration = getDuration(newExpirationTime);
     cookieHelper().set("token", newToken, duration)
     cookieHelper().set("expirationTime", newExpirationTime, duration)
+    if (newApiKey !== undefined) {
+      if (newApiKey) {
+        cookieHelper().set("api_key", newApiKey, duration)
+      } else {
+        cookieHelper().remove("api_key")
+      }
+      apiKey.value = newApiKey
+    }
     token.value = newToken
     expirationTime.value = newExpirationTime
   }
@@ -42,9 +51,10 @@ export function useAuth() {
   const clearAuth = () => {
     cookieHelper().remove("token");
     cookieHelper().remove("expirationTime");
+    cookieHelper().remove("api_key");
     cookieHelper().remove("maarg");
     cookieHelper().remove("userId");
-    updateToken("", "")
+    updateToken("", "", "")
     updateOMS("")
     updateUserId("")
   }
@@ -79,6 +89,7 @@ export function useAuth() {
   const login = async (username?: string, password?: string, token?: string, expirationTime?: string) => {
     let omsToken = token
     let expiresAt = expirationTime
+    let loginKey
     try {
       if(!omsToken && username && password) {
         const resp = await api({
@@ -98,16 +109,17 @@ export function useAuth() {
           commonUtil.showToast(translate("Sorry, your username or password is incorrect. Please try again."));
           logger.error("error", resp.data._ERROR_MESSAGE_);
           updateUserId("")
-          updateToken("", "")
+          updateToken("", "", "")
 
           return Promise.reject(new Error(resp.data._ERROR_MESSAGE_));
         }
 
         omsToken = resp.data.token
         expiresAt = resp.data.expirationTime
+        loginKey = commonUtil.isMoqui() ? (resp.data.api_key || "") : undefined
       }
 
-      updateToken(omsToken, expiresAt)
+      updateToken(omsToken, expiresAt, loginKey)
 
       if(accxuiConfig.value.postLogin) {
         await accxuiConfig.value.postLogin();
@@ -117,7 +129,7 @@ export function useAuth() {
         return;
       }
 
-      updateToken("", "")
+      updateToken("", "", "")
       accxuiConfig.value.oms = "",
       accxuiConfig.value.current = {}
 
@@ -162,7 +174,7 @@ export function useAuth() {
     }
 
     if(!payload?.invalidAppContext && !commonUtil.isAppEmbedded()) {
-      updateToken("", "")
+      updateToken("", "", "")
       updateUserId("")
     } else {
       commonUtil.showToast(translate("Session expired. Refreshing..."))

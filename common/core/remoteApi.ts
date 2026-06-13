@@ -7,6 +7,8 @@ import { useAuth } from '../composables/useAuth';
 
 const requestInterceptor = async (config: any) => {
   const token = commonUtil.getToken();
+  const apiKey = commonUtil.getApiKey();
+  config.headers = config.headers || {};
 
   // The following are the endpoints needs to bypass the auth check and when this calls are made we will assume
   // that we are always relogin with the new credentials present in cookies.
@@ -25,7 +27,10 @@ const requestInterceptor = async (config: any) => {
     return Promise.reject(new Error("INVALID_APP_CONTEXT"));
   }
 
-  if (token) {
+  if (apiKey && commonUtil.isMoqui()) {
+    config.headers["api_key"] = apiKey;
+    config.headers['Content-Type'] = 'application/json';
+  } else if (token) {
     config.headers["Authorization"] = "Bearer " + token;
     config.headers['Content-Type'] = 'application/json';
   }
