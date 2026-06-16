@@ -65,7 +65,7 @@
     "@vitejs/plugin-vue": "catalog:",
     "@vue/eslint-config-typescript": "^12.0.0",
     "@vue/test-utils": "^2.4.6",
-    "chrome-ide-trace": "0.1.1",
+    "chrome-ide-trace": "catalog:",
     "eslint": "catalog:",
     "eslint-import-resolver-typescript": "^4.4.4",
     "eslint-plugin-import": "^2.32.0",

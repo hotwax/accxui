@@ -54,6 +54,7 @@ catalog:
   "vue-tsc": "2.1.10"
   "@vitejs/plugin-legacy": "5.0.0"
   "@vitejs/plugin-vue": "4.6.2"
+  "chrome-ide-trace": "0.1.1"
 
 catalogs:
   ionic7:
