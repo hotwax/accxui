@@ -211,10 +211,10 @@ export default [
       //   "optionalDependencies": false,
       //   "peerDependencies": false
       // }],
-      "import/order": ["error", {
-        "groups": ["builtin", "external", "internal", "parent", "sibling", "index"],
-        "alphabetize": { "order": "asc", "caseInsensitive": true }
-      }],
+      // Disabled: eslint-plugin-import@2.32.0's import/order calls sourceCode.getTokenOrCommentBefore,
+      // which was removed in ESLint 10 and crashes the whole lint run. Re-enable after migrating to
+      // eslint-plugin-import-x (the maintained, flat-config/ESLint-10-compatible fork).
+      "import/order": "off",
       "import/newline-after-import": ["error", { "count": 1 }],
       "import/no-cycle": ["error", { "maxDepth": 1 }],
       "import/no-self-import": ["error"],
