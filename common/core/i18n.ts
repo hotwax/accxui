@@ -5,13 +5,8 @@ let translate: any
 
 function findBestLocale(supportedLocales: string[]): string | null {
   for (const locale of navigator.languages) {
-    const normLocale = locale.toLowerCase();
-    const exactMatch = supportedLocales.find(s => s.toLowerCase() === normLocale);
+    const exactMatch = supportedLocales.find(s => s.toLowerCase() === locale.toLowerCase());
     if (exactMatch) return exactMatch;
-
-    const baseLang = normLocale.split('-')[0];
-    const prefixMatch = supportedLocales.find(s => s.split('-')[0].toLowerCase() === baseLang);
-    if (prefixMatch) return prefixMatch;
   }
   return null;
 }
