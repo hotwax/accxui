@@ -275,12 +275,13 @@ const initialise = async () => {
     if(route.query?.token && route.query?.oms) {
       // This array is maintaining list of apps those are moqui first, we are maintaining this to have support
       // to run the accxui apps with old login launchpad redirect flow
-      const maargApps = ["atp", "company", "order-routing", "inventorycount", "bopis", "transfers", "localhost"]
+      const maargApps = ["atp", "company", "order-routing", "inventorycount", "bopis", "transfers", "localhost", "products"]
       const { host } = new URL(window.location.href)
       // Need to consider the info received in query as valid and thus need to clear the auth state
       clearAuth()
       const { oms, omsRedirectionUrl } = route.query as any
-      if(maargApps.some(app => host.includes(app))) {
+      // TODO: Previous condition was maargApps.some(app => host.includes(app)), need to identify to make this work with old launchpad redirection flow
+      if(commonUtil.isMoqui()) {
         updateOMS(omsRedirectionUrl)
         accxuiConfig.value.oms = omsRedirectionUrl
       } else {

@@ -91,7 +91,7 @@ export function useAuth() {
             "USERNAME": username,
             "PASSWORD": password
           },
-          baseURL: commonUtil.getOmsURL()
+          baseURL: commonUtil.isMoqui() ? commonUtil.getMaargURL() : commonUtil.getOmsURL()
         });
 
         if(commonUtil.hasError(resp)) {
@@ -146,11 +146,17 @@ export function useAuth() {
       }
 
       try {
-        let resp = await api({
-          url: commonUtil.isMoqui() ? "admin/logout" : "logout",
-          method: commonUtil.isMoqui() ? "POST" : "GET",
+        const payload = commonUtil.isMoqui() ? {
+          url: "admin/logout",
+          method: "POST",
+          baseURL: commonUtil.getMaargURL()
+        } : {
+          url: "logout",
+          method: "GET",
           baseURL: commonUtil.getOmsURL()
-        }) as any;
+        }
+
+        let resp = await api(payload) as any;
         resp = JSON.parse(resp.data.startsWith("//") ? resp.data.replace("//", "") : resp.data);
 
         if(resp?.logoutAuthType == "SAML2SSO") {
@@ -198,7 +204,7 @@ export function useAuth() {
       const resp = await api({
         url: commonUtil.isMoqui() ? "admin/checkLoginOptions" : "checkLoginOptions",
         method: "GET",
-        baseURL: commonUtil.getOmsURL()
+        baseURL: commonUtil.isMoqui() ? commonUtil.getMaargURL() : commonUtil.getOmsURL()
       });
       if(!commonUtil.hasError(resp)) {
         loginOption.value = resp.data
