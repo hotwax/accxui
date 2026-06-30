@@ -1,0 +1,47 @@
+on:
+  workflow_call:
+    secrets:
+      envPAT:
+        required: true
+
+jobs:
+  update-prs:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Update all open PRs targeting main
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.envPAT }}
+          script: |
+            const { data: pullRequests } = await github.rest.pulls.list({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              base: 'main',
+              per_page: 100,
+            });
+
+            if (pullRequests.length === 0) {
+              console.log('No open PRs targeting main.');
+              return;
+            }
+
+            for (const pr of pullRequests) {
+              console.log(`Updating PR #${pr.number}: ${pr.title}`);
+              try {
+                await github.rest.pulls.updateBranch({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  pull_number: pr.number,
+                });
+                console.log(`PR #${pr.number} updated successfully.`);
+              } catch (err) {
+                // A 422 means the branch is already up to date — not an error
+                if (err.status === 422) {
+                  console.log(`PR #${pr.number} is already up to date.`);
+                } else {
+                  console.error(`Failed to update PR #${pr.number}: ${err.message}`);
+                }
+              }
+            }
