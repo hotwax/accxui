@@ -854,6 +854,56 @@ const formatDateTime = (dateStr: string, format?: string | null, endOfDay = fals
   return format ? final.toFormat(format) : final.toFormat("yyyy-MM-dd HH:mm:ss.SSS");
 }
 
+/**
+ * Parses any date/time value returned by Moqui or OFBiz into a Luxon DateTime.
+ * Handles: Luxon DateTime passthrough, epoch milliseconds (number or numeric string),
+ * ISO 8601, SQL timestamp, RFC 2822, HTTP date, and common custom format strings.
+ * Returns null when the value is empty or cannot be parsed.
+ */
+const parseDateTimeValue = (value: any): DateTime | null => {
+  if (!value) return null
+  if (DateTime.isDateTime(value)) return value as DateTime
+  if (typeof value === 'number') {
+    const dt = DateTime.fromMillis(value)
+    return dt.isValid ? dt : null
+  }
+  if (typeof value !== 'string') return null
+  if (/^\d+$/.test(value)) {
+    const dt = DateTime.fromMillis(Number(value))
+    return dt.isValid ? dt : null
+  }
+  const norm = value.replace(/^[A-Za-z]{3},\s*/, '')
+  const parsers = [
+    () => DateTime.fromISO(value),
+    () => DateTime.fromSQL(value),
+    () => DateTime.fromFormat(value, "yyyy-MM-dd'T'HH:mm:ssZZ"),
+    () => DateTime.fromFormat(value, 'yyyy-MM-dd HH:mm:ss.SSS'),
+    () => DateTime.fromRFC2822(value),
+    () => DateTime.fromHTTP(value),
+    () => DateTime.fromFormat(norm, 'dd LLL yyyy HH:mm:ss ZZZ'),
+    () => DateTime.fromFormat(norm, 'dd LLL yyyy HH:mm:ss z'),
+  ]
+  for (const parse of parsers) {
+    const dt = parse()
+    if (dt.isValid) return dt
+  }
+  return null
+}
+
+/**
+ * General-purpose display formatter. Parses any date/time value with
+ * parseDateTimeValue and formats it for display. Default output is
+ * DateTime.DATETIME_MED locale string (e.g. "Jun 4, 2026, 10:30 AM").
+ * Named formatDateTimeValue to distinguish from the existing formatDateTime
+ * which is an ISO date-range helper with a different signature.
+ */
+const formatDateTimeValue = (value: any, format?: string): string => {
+  if (!value) return ''
+  const dt = parseDateTimeValue(value)
+  if (!dt) return ''
+  return format ? dt.toFormat(format) : dt.toLocaleString(DateTime.DATETIME_MED)
+}
+
 function getDateTimeWithOrdinalSuffix(time: any) {
   if (!time) return "-";
   const dateTime = DateTime.fromMillis(time);
@@ -884,6 +934,8 @@ export const commonUtil = {
   formatCurrency,
   formatDate,
   formatDateTime,
+  formatDateTimeValue,
+  parseDateTimeValue,
   formatPhoneNumber,
   formatUtcDate,
   generateInternalId,
