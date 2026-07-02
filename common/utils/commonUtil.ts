@@ -876,10 +876,19 @@ const isMoqui = () => {
   return import.meta.env.VITE_OMS_TYPE === "MOQUI"
 }
 
+function dedupeFacilities(facilities: any[]) {
+  const dedupedFacilities = new Map<string, any>();
+  facilities.forEach((facility: any) => {
+    if (facility?.facilityId && !dedupedFacilities.has(facility.facilityId)) dedupedFacilities.set(facility.facilityId, facility);
+  });
+  return Array.from(dedupedFacilities.values()).sort((a, b) => (a.facilityName || a.facilityId).localeCompare(b.facilityName || b.facilityId));
+}
+
 export const commonUtil = {
   isAppEmbedded,
   isMoqui,
   copyToClipboard,
+  dedupeFacilities,
   downloadCsv,
   formatCurrency,
   formatDate,
