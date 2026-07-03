@@ -6,6 +6,9 @@ import Sparkline from "./components/Sparkline.vue"
 import Login from "./components/Login.vue"
 import ShopifyLogin from "./components/ShopifyLogin.vue"
 import ShopifyAppInstall from "./components/ShopifyAppInstall.vue"
+import FastTravel from "./components/FastTravel.vue"
+import { useFastTravel } from './composables/useFastTravel'
+import { getFastTravelApps, getFastTravelApp, buildAppUrl } from './utils/fastTravelRegistry'
 import emitter from './core/emitter'
 import { commonUtil } from './utils/commonUtil'
 import { useSolrSearch } from './composables/useSolrSearch'
@@ -44,6 +47,11 @@ export {
   StatCard,
   ShopifyLogin,
   ShopifyAppInstall,
+  FastTravel,
+  useFastTravel,
+  getFastTravelApps,
+  getFastTravelApp,
+  buildAppUrl,
   moduleFederationUtil,
   useSolrSearch,
   useShopify,
