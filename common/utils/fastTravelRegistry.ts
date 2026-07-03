@@ -2,8 +2,11 @@ import {
   appsOutline,
   shuffleOutline,
   bagCheckOutline,
+  businessOutline,
   fileTrayFullOutline,
+  pricetagsOutline,
   swapHorizontalOutline,
+  timerOutline,
   clipboardOutline
 } from "ionicons/icons";
 
@@ -36,19 +39,29 @@ function cleanUrl(value: any): string {
 const URLS = {
   launchpad: cleanUrl(import.meta.env.VITE_LAUNCHPAD_URL),
   orderManager: cleanUrl(import.meta.env.VITE_ORDER_MANAGER_URL),
+  orderRouting: cleanUrl(import.meta.env.VITE_ORDER_ROUTING_URL),
+  jobManager: cleanUrl(import.meta.env.VITE_JOB_MANAGER_URL),
+  company: cleanUrl(import.meta.env.VITE_COMPANY_URL),
+  products: cleanUrl(import.meta.env.VITE_PRODUCTS_URL),
   preorder: cleanUrl(import.meta.env.VITE_PREORDER_URL),
   transfers: cleanUrl(import.meta.env.VITE_TRANSFERS_URL),
-  cycleCount: cleanUrl(import.meta.env.VITE_CYCLE_COUNT_URL),
-  orderRouting: cleanUrl(import.meta.env.VITE_ORDER_ROUTING_URL)
+  cycleCount: cleanUrl(import.meta.env.VITE_CYCLE_COUNT_URL)
 };
 
+// Palette order: the admin apps that mount Fast Travel first, then deep-link-only targets.
+// preorder / transfers / cycle-count stay registered because order-routing's inventory-history
+// deep links call buildAppUrl() with those ids (and its .env ships their URL keys); no app in
+// this suite mounts the palette for them.
 const APPS: FastTravelApp[] = [
   { id: "launchpad",    name: "Launchpad",     description: "All apps & switch instance", icon: appsOutline,           color: "dark",      baseUrl: URLS.launchpad },
   { id: "order-manager", name: "Order Manager", description: "Orders, returns & fulfillment", icon: bagCheckOutline,      color: "primary",   baseUrl: URLS.orderManager },
+  { id: "order-routing", name: "Order Routing", description: "Brokering & sourcing rules",  icon: shuffleOutline,        color: "warning",   baseUrl: URLS.orderRouting },
+  { id: "job-manager",  name: "Job Manager",   description: "Schedule & monitor jobs",    icon: timerOutline,          color: "danger",    baseUrl: URLS.jobManager },
+  { id: "company",      name: "Company",       description: "Product stores, facilities & setup", icon: businessOutline, color: "medium",   baseUrl: URLS.company },
+  { id: "products",     name: "Products",      description: "Catalog & product data",     icon: pricetagsOutline,      color: "tertiary",  baseUrl: URLS.products },
   { id: "preorder",     name: "PreOrder",      description: "Purchase orders & inbound",  icon: fileTrayFullOutline,   color: "secondary", baseUrl: URLS.preorder },
   { id: "transfers",    name: "Transfers",     description: "Transfer orders between facilities", icon: swapHorizontalOutline, color: "tertiary", baseUrl: URLS.transfers },
-  { id: "cycle-count",  name: "Cycle Count",   description: "Counts & inventory variance", icon: clipboardOutline,      color: "success",   baseUrl: URLS.cycleCount },
-  { id: "order-routing", name: "Order Routing", description: "Brokering & sourcing rules",  icon: shuffleOutline,        color: "warning",   baseUrl: URLS.orderRouting }
+  { id: "cycle-count",  name: "Cycle Count",   description: "Counts & inventory variance", icon: clipboardOutline,      color: "success",   baseUrl: URLS.cycleCount }
 ];
 
 export function getFastTravelApps(): FastTravelApp[] {
