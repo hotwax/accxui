@@ -406,6 +406,11 @@ const getToken = () => {
   return getEmbeddedAppStoreSafe().getToken || cookieHelper().get("token")
 }
 
+// Moqui/Maarg authenticates API requests via the api_key (login-key) header, not Authorization.
+const getApiKey = () => {
+  return getEmbeddedAppStoreSafe().getApiKey || cookieHelper().get("api_key")
+}
+
 const getTokenExpiration = () => {
   return getEmbeddedAppStoreSafe().getTokenExpiration || cookieHelper().get("expirationTime")
 }
@@ -923,6 +928,7 @@ export const commonUtil = {
   getTelecomCountryCode,
   getTime,
   getToken,
+  getApiKey,
   getTokenExpiration,
   goToOms,
   handleDateTimeInput,

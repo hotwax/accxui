@@ -38,3 +38,5 @@ logs/
 
 apps/
 .gstack/
+/output/
+/.playwright-cli/

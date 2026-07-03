@@ -14,6 +14,7 @@ const loginOption = ref<LoginOption>({})
 export const omsRef = ref("")
 const token = ref(cookieHelper().get("token") || "")
 const expirationTime = ref(cookieHelper().get("expirationTime") || "")
+const apiKey = ref(cookieHelper().get("api_key") || "")
 
 export function useAuth() {
   const getDuration = (expirationTime?: any) => {
@@ -30,6 +31,17 @@ export function useAuth() {
     expirationTime.value = newExpirationTime
   }
 
+  const updateApiKey = (newApiKey: any, newExpirationTime?: any) => {
+    if (!newApiKey) {
+      cookieHelper().remove("api_key")
+      apiKey.value = ""
+      return
+    }
+
+    cookieHelper().set("api_key", newApiKey, getDuration(newExpirationTime))
+    apiKey.value = newApiKey
+  }
+
   const updateOMS = (oms: any) => {
     cookieHelper().set("oms", oms, getDuration())
     omsRef.value = oms
@@ -42,9 +54,11 @@ export function useAuth() {
   const clearAuth = () => {
     cookieHelper().remove("token");
     cookieHelper().remove("expirationTime");
+    cookieHelper().remove("api_key");
     cookieHelper().remove("maarg");
     cookieHelper().remove("userId");
     updateToken("", "")
+    updateApiKey("")
     updateOMS("")
     updateUserId("")
   }
@@ -79,6 +93,7 @@ export function useAuth() {
   const login = async (username?: string, password?: string, token?: string, expirationTime?: string) => {
     let omsToken = token
     let expiresAt = expirationTime
+    let moquiApiKey = cookieHelper().get("api_key")
     try {
       if(!omsToken && username && password) {
         const resp = await api({
@@ -105,9 +120,11 @@ export function useAuth() {
 
         omsToken = resp.data.token
         expiresAt = resp.data.expirationTime
+        moquiApiKey = resp.data.api_key
       }
 
       updateToken(omsToken, expiresAt)
+      updateApiKey(moquiApiKey, expiresAt)
 
       if(accxuiConfig.value.postLogin) {
         await accxuiConfig.value.postLogin();
@@ -118,6 +135,7 @@ export function useAuth() {
       }
 
       updateToken("", "")
+      updateApiKey("")
       accxuiConfig.value.oms = "",
       accxuiConfig.value.current = {}
 

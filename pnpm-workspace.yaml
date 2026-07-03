@@ -1,5 +1,25 @@
 packages:
-  - 'apps/*'
+  - 'apps/available-to-promise'
+  - 'apps/bopis'
+  - 'apps/company'
+  - 'apps/fulfillment'
+  - 'apps/job-manager'
+  - 'apps/order-manager'
+  - 'apps/order-routing'
+  - 'apps/products'
+  - 'apps/receiving'
+  - 'apps/returns'
+  - 'apps/shared-transition-demo'
+
+allowBuilds:
+  core-js: set this to true or false
+  cypress: set this to true or false
+  esbuild: set this to true or false
+  protobufjs: set this to true or false
+  sharp: set this to true or false
+  unrs-resolver: set this to true or false
+  vue-demi: set this to true or false
+  yorkie: set this to true or false
 
 catalog:
   "vue": "3.5.30"
