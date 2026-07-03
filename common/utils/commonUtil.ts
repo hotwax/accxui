@@ -468,6 +468,10 @@ const statusColor = {
   // CYCLE COUNT
   "CYCLE_CNT_CREATED": "medium",
   "CYCLE_CNT_IN_PRGS": "primary",
+  // JOB RUNS
+  "FAILED": "danger",
+  "RUNNING": "warning",
+  "SUCCESSFUL": "success"
 } as Record<string, string>
 
 const getStatusColor = (statusId: string) => {
