@@ -1,9 +1,9 @@
 <template>
-  <img :src="imageUrl" />
+  <img :src="imageUrl">
 </template>
-  
+
 <script setup lang="ts">
-import { onMounted, onUpdated, ref } from "vue";
+import { computed, ref, watch } from "vue";
 import defaultImgUrl from "../assets/images/defaultImage.png"
 
 const props = defineProps(['src', 'size']);
@@ -18,9 +18,18 @@ const checkIfImageExists = (src: string) => {
   })
 };
 
+const isShopifyCdnUrl = computed(() => {
+  if(!props.src) return false
+  try {
+    return new URL(props.src).hostname === "cdn.shopify.com"
+  } catch {
+    return false
+  }
+})
+
 const prepareImgUrl = (src: string, size?: string) => {
   // return original size if no size is given
-  if (!size) return src
+  if (!size || !isShopifyCdnUrl.value) return src
 
   // remove any current image size then add the new image size
   return src
@@ -31,17 +40,12 @@ const prepareImgUrl = (src: string, size?: string) => {
 };
 
 const setImageUrl = () => {
+  imageUrl.value = defaultImgUrl
   if (props.src) {
     const src: string = prepareImgUrl(props.src, props.size)
     checkIfImageExists(src).then(() => imageUrl.value = src).catch(err => console.error("checkIfImageExists", err))
   }
 };
 
-onMounted(() => {
-  setImageUrl();
-});
-
-onUpdated(() => {
-  setImageUrl();
-});
+watch(() => [props.src, props.size], setImageUrl, { immediate: true });
 </script>
