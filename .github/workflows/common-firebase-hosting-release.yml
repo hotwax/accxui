@@ -13,6 +13,10 @@ on:
       firebaseProject:
         default: 'default'
         type: string
+      accxuiVersion:
+        description: 'Tag/version of accxui to build against'
+        default: 'main'
+        type: string
     secrets:
       envPAT:
         required: true
@@ -33,6 +37,7 @@ jobs:
         with:
           repository: hotwax/accxui
           path: .
+          ref: ${{ inputs.accxuiVersion }}
 
       - name: Checkout app in apps/
         uses: actions/checkout@v4
@@ -101,10 +106,8 @@ jobs:
       - name: "Fetch release tag"
         run: |
           echo "LABEL=$(git describe --tags `git rev-list --tags --max-count=1`)" >> $GITHUB_ENV
-        working-directory: apps/${{ inputs.appDir }}
-  
+
       - name: "Create label"
         run: gh label create "release-${{ env.LABEL }}" --color FF7F7E
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        working-directory: apps/${{ inputs.appDir }}
