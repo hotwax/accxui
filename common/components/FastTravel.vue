@@ -12,7 +12,7 @@
           :value="state.query"
           :placeholder="translate('Jump to app…')"
           autocomplete="off"
-          spellcheck="false"
+          :spellcheck="false"
           @ionInput="setQuery($event.detail.value || '')"
           class="ion-no-padding"
         />
