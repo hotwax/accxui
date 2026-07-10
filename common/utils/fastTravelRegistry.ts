@@ -17,9 +17,9 @@ import {
  * palette (Cmd/Ctrl+K launcher) and by any feature that deep-links into another app (e.g. the
  * Inventory history rows linking a movement to its owning order / transfer / cycle count).
  *
- * App metadata (name, icon, colour) is static; base URLs come from env so each deployment points
- * at its own instances. An app with no configured URL stays in the registry but is non-navigable
- * (the palette dims it; buildAppUrl returns null) so the feature degrades gracefully.
+ * App metadata and production URLs are static so each app that imports AccxUI gets the same suite
+ * targets without duplicating sibling app URLs in every app's env file. Env values are still honored
+ * as optional deployment/local overrides.
  */
 
 export interface FastTravelApp {
@@ -35,22 +35,26 @@ function cleanUrl(value: any): string {
   return value ? String(value).trim().replace(/\/+$/, "") : "";
 }
 
+function configuredUrl(value: any, fallback: string): string {
+  return cleanUrl(value) || fallback;
+}
+
 // Static env reads (Vite inlines import.meta.env.VITE_* only for literal keys, never dynamic).
 const URLS = {
-  launchpad: cleanUrl(import.meta.env.VITE_LAUNCHPAD_URL),
-  orderManager: cleanUrl(import.meta.env.VITE_ORDER_MANAGER_URL),
-  orderRouting: cleanUrl(import.meta.env.VITE_ORDER_ROUTING_URL),
-  jobManager: cleanUrl(import.meta.env.VITE_JOB_MANAGER_URL),
-  company: cleanUrl(import.meta.env.VITE_COMPANY_URL),
-  products: cleanUrl(import.meta.env.VITE_PRODUCTS_URL),
-  preorder: cleanUrl(import.meta.env.VITE_PREORDER_URL),
-  transfers: cleanUrl(import.meta.env.VITE_TRANSFERS_URL),
-  cycleCount: cleanUrl(import.meta.env.VITE_CYCLE_COUNT_URL)
+  launchpad: configuredUrl(import.meta.env.VITE_LAUNCHPAD_URL, "https://launchpad.hotwax.io"),
+  orderManager: configuredUrl(import.meta.env.VITE_ORDER_MANAGER_URL, "https://order-manager.hotwax.io"),
+  orderRouting: configuredUrl(import.meta.env.VITE_ORDER_ROUTING_URL, "https://order-routing.hotwax.io"),
+  jobManager: configuredUrl(import.meta.env.VITE_JOB_MANAGER_URL, "https://job-manager.hotwax.io"),
+  company: configuredUrl(import.meta.env.VITE_COMPANY_URL, "https://company.hotwax.io"),
+  products: configuredUrl(import.meta.env.VITE_PRODUCTS_URL, "https://products.hotwax.io"),
+  preorder: configuredUrl(import.meta.env.VITE_PREORDER_URL, "https://preorder.hotwax.io"),
+  transfers: configuredUrl(import.meta.env.VITE_TRANSFERS_URL, "https://transfers.hotwax.io"),
+  cycleCount: configuredUrl(import.meta.env.VITE_CYCLE_COUNT_URL, "https://inventorycount.hotwax.io")
 };
 
 // Palette order: the admin apps that mount Fast Travel first, then deep-link-only targets.
 // preorder / transfers / cycle-count stay registered because order-routing's inventory-history
-// deep links call buildAppUrl() with those ids (and its .env ships their URL keys); no app in
+// deep links call buildAppUrl() with those ids; no app in
 // this suite mounts the palette for them.
 const APPS: FastTravelApp[] = [
   { id: "launchpad",    name: "Launchpad",     description: "All apps & switch instance", icon: appsOutline,           color: "dark",      baseUrl: URLS.launchpad },
