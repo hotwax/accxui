@@ -204,7 +204,7 @@ export function useAuth() {
       const resp = await api({
         url: commonUtil.isMoqui() ? "admin/checkLoginOptions" : "checkLoginOptions",
         method: "GET",
-        baseURL: commonUtil.isMoqui() ? commonUtil.getMaargURL() : commonUtil.getOmsURL()
+        baseURL: commonUtil.getOmsURL()
       });
       if(!commonUtil.hasError(resp)) {
         loginOption.value = resp.data
