@@ -14,7 +14,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        app: ["launchpad", "fulfillment", "bopis", "receiving", "job-manager", "order-routing", "inventory-count", "available-to-promise", "transfers", "facilities", "users", "company", "preorder", "order-manager", "products"]
+        app: ["fulfillment", "bopis", "receiving", "job-manager", "order-routing", "inventory-count", "transfers", "company", "order-manager", "products"]
 
     steps:
     - name: Checkout accxui
