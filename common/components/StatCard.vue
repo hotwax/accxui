@@ -29,7 +29,6 @@
 
 <script lang="ts" setup>
 import { IonCard, IonCardContent } from '@ionic/vue';
-import { defineProps } from 'vue';
 
 defineProps({
   // Overline label shown above the stat (e.g. "Open Orders").
