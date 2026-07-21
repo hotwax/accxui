@@ -4,7 +4,7 @@ import js from "@eslint/js";
 import pluginVue from "eslint-plugin-vue";
 import vueParser from "vue-eslint-parser";
 import * as espree from "espree";
-import eslintPluginImport from "eslint-plugin-import";
+import eslintPluginImport from "eslint-plugin-import-x";
 import stylistic from "@stylistic/eslint-plugin";
 import typescriptEslint from "@typescript-eslint/eslint-plugin";
 import typescriptParser from "@typescript-eslint/parser";
@@ -78,7 +78,7 @@ export default [
       },
     },
     plugins: {
-      import: eslintPluginImport,
+      "import-x": eslintPluginImport,
       "@stylistic": stylistic,
       "local": {
         rules: {
@@ -107,7 +107,7 @@ export default [
       }
     },
     settings: {
-      "import/resolver": {
+      "import-x/resolver": {
         typescript: true,
         node: {
           extensions: [".js", ".mjs", ".cjs", ".json", ".vue", ".ts"]
@@ -201,9 +201,9 @@ export default [
         "ignoreMemberSort": false,
         "memberSyntaxSortOrder": ["none", "all", "multiple", "single"]
       }],
-      "import/no-unresolved": ["error", { "commonjs": true, "caseSensitive": true }],
-      "import/no-duplicates": ["error"],
-      // "import/no-extraneous-dependencies": ["error", {
+      "import-x/no-unresolved": ["error", { "commonjs": true, "caseSensitive": true }],
+      "import-x/no-duplicates": ["error"],
+      // "import-x/no-extraneous-dependencies": ["error", {
       //   "devDependencies": [
       //     "**/test/**", "**/__tests__/**", "**/*.test.*",
       //     "**/scripts/**", "**/webpack.config.*", "**/rollup.config.*"
@@ -211,14 +211,14 @@ export default [
       //   "optionalDependencies": false,
       //   "peerDependencies": false
       // }],
-      "import/order": ["error", {
+      "import-x/order": ["error", {
         "groups": ["builtin", "external", "internal", "parent", "sibling", "index"],
         "alphabetize": { "order": "asc", "caseInsensitive": true }
       }],
-      "import/newline-after-import": ["error", { "count": 1 }],
-      "import/no-cycle": ["error", { "maxDepth": 1 }],
-      "import/no-self-import": ["error"],
-      "import/no-useless-path-segments": ["error", { "noUselessIndex": true }],
+      "import-x/newline-after-import": ["error", { "count": 1 }],
+      "import-x/no-cycle": ["error", { "maxDepth": 1 }],
+      "import-x/no-self-import": ["error"],
+      "import-x/no-useless-path-segments": ["error", { "noUselessIndex": true }],
       "@typescript-eslint/no-explicit-any": "off",
       "local/i18n-check-keys": "error",
     }
