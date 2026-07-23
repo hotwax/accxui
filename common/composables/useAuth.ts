@@ -12,6 +12,9 @@ interface LoginOption {
 
 const loginOption = ref<LoginOption>({})
 export const omsRef = ref("")
+// Which backend fetchLoginOptions() actually found the entered OMS to be — kept in sync so
+// login() hits the matching URL instead of assuming the static VITE_OMS_TYPE build flag.
+const isMoquiOmsRef = ref(commonUtil.isMoqui())
 const token = ref(cookieHelper().get("token") || "")
 const expirationTime = ref(cookieHelper().get("expirationTime") || "")
 
@@ -82,16 +85,16 @@ export function useAuth() {
     try {
       if(!omsToken && username && password) {
         const resp = await api({
-          url: commonUtil.isMoqui() ? "admin/login" : "login",
+          url: isMoquiOmsRef.value ? "admin/login" : "login",
           method: "post",
-          data: commonUtil.isMoqui() ? {
+          data: isMoquiOmsRef.value ? {
             "username": username,
             "password": password
           } : {
             "USERNAME": username,
             "PASSWORD": password
           },
-          baseURL: commonUtil.isMoqui() ? commonUtil.getMaargURL() : commonUtil.getOmsURL()
+          baseURL: isMoquiOmsRef.value ? commonUtil.getMaargURL() : commonUtil.getOmsURL(false)
         });
 
         if(commonUtil.hasError(resp)) {
@@ -148,14 +151,14 @@ export function useAuth() {
       }
 
       try {
-        const payload = commonUtil.isMoqui() ? {
+        const payload = isMoquiOmsRef.value ? {
           url: "admin/logout",
           method: "POST",
           baseURL: commonUtil.getMaargURL()
         } : {
           url: "logout",
           method: "GET",
-          baseURL: commonUtil.getOmsURL()
+          baseURL: commonUtil.getOmsURL(false)
         }
 
         let resp = await api(payload) as any;
@@ -203,17 +206,44 @@ export function useAuth() {
   const fetchLoginOptions = async () => {
     loginOption.value = {}
     try {
-      const resp = await api({
-        url: commonUtil.isMoqui() ? "admin/checkLoginOptions" : "checkLoginOptions",
-        method: "GET",
-        baseURL: commonUtil.getOmsURL()
-      });
+      let resp;
+      let isMoquiOms = commonUtil.isMoqui();
+
+      if(isMoquiOms) {
+        // App is built strictly for Moqui — no OFBiz endpoint to try first.
+        resp = await api({
+          url: "admin/checkLoginOptions",
+          method: "GET",
+          baseURL: commonUtil.getOmsURL(true)
+        });
+      } else {
+        try {
+          // Try the entered OMS as an OFBiz instance first (default when VITE_OMS_TYPE is unset).
+          resp = await api({
+            url: "checkLoginOptions",
+            method: "GET",
+            baseURL: commonUtil.getOmsURL(false)
+          });
+          if(commonUtil.hasError(resp)) throw new Error(resp.data._ERROR_MESSAGE_);
+        } catch (ofbizError) {
+          //If OFBiz checkLoginOptions faild considering that this is the Moqui only setup and making call to moqui checkLoginOptions
+          isMoquiOms = true;
+          resp = await api({
+            url: "admin/checkLoginOptions",
+            method: "GET",
+            baseURL: commonUtil.getOmsURL(true)
+          });
+        }
+      }
+
+      isMoquiOmsRef.value = isMoquiOms
+
       if(!commonUtil.hasError(resp)) {
         loginOption.value = resp.data
         if (resp.data.maargInstanceUrl) {
           // OFBiz deployment: OFBiz tells the PWA where its Moqui instance is
           cookieHelper().set("maarg", resp.data.maargInstanceUrl, getDuration())
-        } else if (commonUtil.isMoqui()) {
+        } else if (isMoquiOms) {
           // Moqui-only deployment: the OMS IS the maarg.
           // Strip any /rest/s1/... path suffix so getMaargURL() can append /rest/s1/ itself.
           // e.g. "http://localhost:8080" → maarg="http://localhost:8080" → getMaargURL()="http://localhost:8080/rest/s1/"
