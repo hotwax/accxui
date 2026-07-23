@@ -118,13 +118,15 @@ export function useAuth() {
       }
 
       updateToken("", "")
-      accxuiConfig.value.oms = "",
       accxuiConfig.value.current = {}
 
-      commonUtil.showToast(translate("Something went wrong while login. Please contact administrator."));
+      // Moqui login returns a non-2xx status (e.g. bad credentials), so axios rejects
+      // before `hasError()` can inspect the body - surface that message here instead.
+      const loginErrorMessage = err?.response?.data?.errors;
+      commonUtil.showToast(loginErrorMessage ? translate(loginErrorMessage) : translate("Something went wrong while login. Please contact administrator."));
       logger.error("error: ", err.toString());
 
-      return Promise.reject(err instanceof Object ? err : new Error(err));
+      return Promise.reject(loginErrorMessage ? new Error(loginErrorMessage) : (err instanceof Object ? err : new Error(err)));
     }
   }
 
