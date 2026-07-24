@@ -11,6 +11,7 @@ export interface Config {
   postLogout: () => Promise<void>;
   preLogout: () => Promise<void>; // runs only in case when its manual logout and not unauth or invalid app context
   postLogin: () => Promise<void>;
+  updateAppVersion?: (version: string) => void; // persists the app version configured for this deployment
   router: any;
 }
 

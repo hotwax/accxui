@@ -3,6 +3,7 @@ import { DateTime } from "luxon";
 import { computed, ref } from "vue";
 import emitter from "../core/emitter";
 import { accxuiConfig } from "../core/configRegistry";
+import { getCanonicalPath } from "../utils/appVersionUtil";
 
 interface LoginOption {
   loginAuthType?: string,
@@ -260,9 +261,45 @@ export function useAuth() {
     }
   };
 
+  const fetchAppVersion = async () => {
+    try {
+      const resp = await api({
+        url: "admin/apps/BOPIS/appVersions",
+        method: "GET",
+        params: {
+          environmentTypeId: import.meta.env.VITE_APP_ENVIRONMENT_TYPE_ID || "AppEnvDev"
+        }
+      });
+
+      if(commonUtil.hasError(resp)) return;
+
+      // The appVersions endpoint returns a bare array of CommerceAppAndDeployment records
+      // (e.g. [{ appId, environmentTypeId, currentVersion, ... }]); some list endpoints wrap
+      // results in a `docs` envelope, so handle both shapes.
+      const appVersions = Array.isArray(resp.data) ? resp.data : resp.data?.docs;
+      const configuredVersion = appVersions?.[0]?.currentVersion;
+
+      // Nothing configured for this environment — leave the app on its current path.
+      if(!configuredVersion) return;
+
+      if(accxuiConfig.value.updateAppVersion) {
+        accxuiConfig.value.updateAppVersion(configuredVersion);
+      }
+
+      // Redirect the Login page onto the versioned URL if it isn't already there.
+      const canonicalPath = getCanonicalPath(configuredVersion, window.location.pathname);
+      if(canonicalPath) {
+        window.location.replace(canonicalPath);
+      }
+    } catch (error) {
+      logger.error(error);
+    }
+  };
+
   return {
     loginOption,
     fetchLoginOptions,
+    fetchAppVersion,
     login,
     logout,
     clearAuth,
