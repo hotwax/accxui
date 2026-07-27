@@ -3,7 +3,6 @@ import { DateTime } from "luxon";
 import { computed, ref } from "vue";
 import emitter from "../core/emitter";
 import { accxuiConfig } from "../core/configRegistry";
-import { getCanonicalPath } from "../utils/appVersionUtil";
 
 interface LoginOption {
   loginAuthType?: string,
@@ -273,9 +272,6 @@ export function useAuth() {
 
       if(commonUtil.hasError(resp)) return;
 
-      // The appVersions endpoint returns a bare array of CommerceAppAndDeployment records
-      // (e.g. [{ appId, environmentTypeId, currentVersion, ... }]); some list endpoints wrap
-      // results in a `docs` envelope, so handle both shapes.
       const appVersions = Array.isArray(resp.data) ? resp.data : resp.data?.docs;
       const configuredVersion = appVersions?.[0]?.currentVersion;
 
@@ -284,12 +280,6 @@ export function useAuth() {
 
       if(accxuiConfig.value.updateAppVersion) {
         accxuiConfig.value.updateAppVersion(configuredVersion);
-      }
-
-      // Redirect the Login page onto the versioned URL if it isn't already there.
-      const canonicalPath = getCanonicalPath(configuredVersion, window.location.pathname);
-      if(canonicalPath) {
-        window.location.replace(canonicalPath);
       }
     } catch (error) {
       logger.error(error);
