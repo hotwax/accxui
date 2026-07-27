@@ -3,6 +3,7 @@ import { DateTime } from "luxon";
 import { computed, ref } from "vue";
 import emitter from "../core/emitter";
 import { accxuiConfig } from "../core/configRegistry";
+import { getCanonicalPath } from "../utils/appVersionUtil";
 
 interface LoginOption {
   loginAuthType?: string,
@@ -179,6 +180,12 @@ export function useAuth() {
       commonUtil.showToast(translate("Session expired. Refreshing..."))
     }
 
+    // appVersion is deployment config (which build this deployment is pinned to), not session state,
+    // and has no cookie to fall back on — postLogout()'s store reset clears it. Capture it before the
+    // reset and restore it after, so the router guard and fetchAppVersion keep agreeing across a logout
+    // instead of ping-ponging /login <-> /vX.Y.Z/login. Re-resolved on the next login regardless.
+    const appVersion = accxuiConfig.value.appVersion
+
     if(accxuiConfig.value.postLogout) {
       try {
         await accxuiConfig.value.postLogout();
@@ -190,6 +197,7 @@ export function useAuth() {
     // Reset oms in app's state, as we are clearing app's state on logout, but do not clear oms cookie
     // this causes an issue on relogin to the same instance without moving to the oms page
     accxuiConfig.value.oms = cookieHelper().get("oms") as string
+    accxuiConfig.value.appVersion = appVersion
     localStorage.removeItem("requestedPagePath")
 
     if (commonUtil.isAppEmbedded()) {
@@ -263,6 +271,22 @@ export function useAuth() {
     }
   };
 
+  // Enforce the canonical URL for the resolved appVersion (accxuiConfig, so it's app-agnostic): redirect
+  // when the current URL isn't canonical, preserving path/query/hash. Returns true when a redirect was
+  // issued so a router guard can cancel the in-flight navigation. No-op while appVersion is undefined
+  // (not resolved yet — acting would risk a premature/looping redirect) or already canonical. Shared by
+  // the router guard (every navigation) and fetchAppVersion (right after it resolves the version).
+  const checkAppVersionRedirect = () => {
+    const configuredVersion = accxuiConfig.value.appVersion;
+    if(configuredVersion === undefined) return false;
+
+    const canonicalPath = getCanonicalPath(configuredVersion, window.location.pathname);
+    if(canonicalPath === null) return false;
+
+    window.location.replace(`${canonicalPath}${window.location.search}${window.location.hash}`);
+    return true;
+  };
+
   const fetchAppVersion = async () => {
     try {
       const resp = await api({
@@ -278,12 +302,9 @@ export function useAuth() {
       const appVersions = Array.isArray(resp.data) ? resp.data : resp.data?.docs;
       const configuredVersion = appVersions?.[0]?.currentVersion;
 
-      // Nothing configured for this environment — leave the app on its current path.
-      if(!configuredVersion) return;
-
-      if(accxuiConfig.value.updateAppVersion) {
-        accxuiConfig.value.updateAppVersion(configuredVersion);
-      }
+      // Persist the OMS's answer, then move the Login page onto that version's canonical URL.
+      accxuiConfig.value.appVersion = configuredVersion || "";
+      checkAppVersionRedirect();
     } catch (error) {
       logger.error(error);
     }
@@ -293,6 +314,7 @@ export function useAuth() {
     loginOption,
     fetchLoginOptions,
     fetchAppVersion,
+    checkAppVersionRedirect,
     login,
     logout,
     clearAuth,

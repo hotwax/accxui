@@ -5,13 +5,15 @@ export interface Config {
   current: any;
   permissions?: any[];
   oms: string;
+  // The app version this deployment is pinned to (mirrors the app's useUserStore().appVersion via a
+  // getter/setter). undefined = not resolved yet, "" = no version configured, "vX.Y.Z" = pinned.
+  appVersion?: string;
 
   // Actions
   $reset?: () => void;
   postLogout: () => Promise<void>;
   preLogout: () => Promise<void>; // runs only in case when its manual logout and not unauth or invalid app context
   postLogin: () => Promise<void>;
-  updateAppVersion?: (version: string) => void; // persists the app version configured for this deployment
   router: any;
 }
 
