@@ -187,6 +187,9 @@ export function useAuth() {
       }
     }
 
+    // Reset oms in app's state, as we are clearing app's state on logout, but do not clear oms cookie
+    // this causes an issue on relogin to the same instance without moving to the oms page
+    accxuiConfig.value.oms = cookieHelper().get("oms") as string
     localStorage.removeItem("requestedPagePath")
 
     if (commonUtil.isAppEmbedded()) {
