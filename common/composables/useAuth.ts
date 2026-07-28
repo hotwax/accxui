@@ -293,7 +293,8 @@ export function useAuth() {
         url: "admin/apps/BOPIS/appVersions",
         method: "GET",
         params: {
-          environmentTypeId: import.meta.env.VITE_APP_ENVIRONMENT_TYPE_ID || "AppEnvDev"
+          appId: import.meta.env.VITE_APP_ID,
+          environmentTypeId: import.meta.env.VITE_APP_ENVIRONMENT_TYPE_ID
         }
       });
 
