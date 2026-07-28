@@ -601,6 +601,27 @@ const isValidPassword = (password: string) => {
   return passwordPattern.test(password);
 }
 
+// Matches semver with optional -prerelease and +build metadata,
+// plus an optional leading "v"/"V" prefix (e.g. "v1.2.3-rc.1+build.5").
+const SEMANTIC_VERSION_PATTERN = /^[vV]?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$/;
+
+// Checks whether the passed value is a valid semver string.
+const isValidVersion = (value: any): boolean => {
+  return typeof value === "string" && SEMANTIC_VERSION_PATTERN.test(value.trim());
+}
+
+// Checks whether currentVersion is greater than or equal to the requiredVersion,
+// Any -prerelease / +build metadata is stripped and ignored, so 1.0.0 and 1.0.0-rc.1 compare as equal.
+const isVersionGreaterOrEqual = (requiredVersion: string, currentVersion: string): boolean => {
+  if (!isValidVersion(requiredVersion) || !isValidVersion(currentVersion)) return false;
+  const parse = (version: string) => version.trim().replace(/^[vV]/, "").split(/[-+]/)[0].split(".").map(Number);
+  const [requiredMajor, requiredMinor, requiredPatch] = parse(requiredVersion);
+  const [currentMajor, currentMinor, currentPatch] = parse(currentVersion);
+  if (currentMajor !== requiredMajor) return currentMajor > requiredMajor;
+  if (currentMinor !== requiredMinor) return currentMinor > requiredMinor;
+  return currentPatch >= requiredPatch;
+}
+
 const isValidDeliveryDays = (deliveryDays: any) => {
   // Regular expression pattern for a valid delivery days
   // Allow only positive integers (no decimals, no zero, no negative)
@@ -987,6 +1008,8 @@ export const commonUtil = {
   isValidDeliveryDays,
   isValidEmail,
   isValidPassword,
+  isValidVersion,
+  isVersionGreaterOrEqual,
   jsonParse,
   jsonToCsv,
   parseBooleanSetting,
