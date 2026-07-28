@@ -287,6 +287,7 @@ const initialise = async () => {
       accxuiConfig.value.oms = target;
 
       await fetchLoginOptions()
+      await fetchAppVersion();
       await login(route.query)
       return;
     }
