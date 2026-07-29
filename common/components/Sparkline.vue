@@ -9,6 +9,9 @@
       :viewBox="`0 0 100 ${height}`"
       width="100%"
       :height="height"
+      :role="ariaLabel ? 'img' : undefined"
+      :aria-label="ariaLabel || undefined"
+      :aria-hidden="ariaLabel ? undefined : 'true'"
       :stroke="`var(--ion-color-${color})`"
       :stroke-width="strokeWidth"
       fill="none"
@@ -40,6 +43,12 @@ const props = defineProps({
   height: {
     type: Number,
     default: 30
+  },
+  // Names informative trends at the SVG itself. Unnamed instances are treated
+  // as decorative so they do not expose an anonymous image to assistive tech.
+  ariaLabel: {
+    type: String,
+    default: ''
   }
 });
 
