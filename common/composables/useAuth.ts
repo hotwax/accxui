@@ -289,12 +289,15 @@ export function useAuth() {
 
   const fetchAppVersion = async () => {
     try {
+      // appId (endpoint path) and environmentTypeId come from the single multi-version config object
+      // (VITE_APP_VERSION_CONFIG), so they match this deployment's app rather than being hardcoded.
+      const { appId, environmentTypeId } = JSON.parse(import.meta.env.VITE_APP_VERSION_CONFIG);
       const resp = await api({
-        url: "admin/apps/BOPIS/appVersions",
+        url: `admin/apps/${appId}/appVersions`,
         method: "GET",
         params: {
-          appId: import.meta.env.VITE_APP_ID,
-          environmentTypeId: import.meta.env.VITE_APP_ENVIRONMENT_TYPE_ID
+          appId,
+          environmentTypeId
         }
       });
 

@@ -33,8 +33,8 @@ tenant should be on.
 ## 2. Scope
 ### 2.1 In Scope
 - URL structure and Firebase Hosting rewrite strategy for serving many versions from one site.
-- Build-time changes (Vite `base`/`outDir` driven by `VITE_APP_BUILD`) that make a build self-contained
-  under a version prefix.
+- Build-time changes (Vite `base`/`outDir` driven by `VITE_APP_VERSION_CONFIG.buildVersion`) that make a
+  build self-contained under a version prefix.
 - Resolving the version from the OMS on the Login page and canonicalizing the URL.
 - The client-side canonicalization + redirect logic and where it runs.
 - A manual build/deploy flow that *adds* a version instead of replacing the site (an automated,
@@ -46,10 +46,14 @@ tenant should be on.
 - Percentage-based canary/blue-green splitting (version selection is deterministic per tenant).
 
 ## 3. Background / Context
-- **Vite** `base` is driven by `VITE_APP_BUILD` ([`apps/bopis/vite.config.ts`](../apps/bopis/vite.config.ts)):
-  `base: appBuild ? '/${appBuild}/' : '/'`, `outDir: appBuild ? 'dist/${appBuild}' : 'dist'`. So a plain
-  `vite build` produces the root bootstrap at `dist/`, and `VITE_APP_BUILD=v5.0.0 vite build` produces
-  `dist/v5.0.0/`.
+- **All multi-version config lives in one env var**, `VITE_APP_VERSION_CONFIG`, a JSON string of
+  `{ appId, environmentTypeId, buildVersion }`. It's assumed to always be a valid object and is
+  `JSON.parse`d inline at each use site: `vite.config` reads `buildVersion` at build time (via `loadEnv`),
+  and `useAuth.fetchAppVersion` reads `appId`/`environmentTypeId` at runtime (via `import.meta.env`).
+- **Vite** `base`/`outDir` are driven by `buildVersion` ([`apps/bopis/vite.config.ts`](../apps/bopis/vite.config.ts)):
+  `const appBuild = JSON.parse(env.VITE_APP_VERSION_CONFIG).buildVersion`,
+  `base: appBuild ? '/${appBuild}/' : '/'`, `outDir: appBuild ? 'dist/${appBuild}' : 'dist'`. So an empty
+  `buildVersion` produces the root bootstrap at `dist/`, and `buildVersion: "v5.0.0"` produces `dist/v5.0.0/`.
 - **Router** uses `createWebHistory(import.meta.env.BASE_URL)` ([`apps/bopis/src/router/index.ts`](../apps/bopis/src/router/index.ts)).
   A build-time constant is fine here **because each bundle is only ever served from the path matching its
   own `base`** — the root bootstrap (`base '/'`) serves unversioned URLs via the catch-all, and each
@@ -115,18 +119,18 @@ flowchart TD
 The version is resolved by a dedicated OMS endpoint, **not** by a `checkLoginOptions` contract change
 (that was the original proposal). [`useAuth.ts#fetchAppVersion`](../common/composables/useAuth.ts):
 ```jsonc
-// GET admin/apps/BOPIS/appVersions?environmentTypeId=AppEnvUAT
+// GET admin/apps/{appId}/appVersions?appId={appId}&environmentTypeId=AppEnvUAT
 [ { "currentVersion": "v5.0.0", ... } ]   // configured; take [0].currentVersion
 []                                        // no version configured for this environment
 ```
-- `environmentTypeId` comes from `import.meta.env.VITE_APP_ENVIRONMENT_TYPE_ID` (default `"AppEnvDev"`).
+- `appId` (both the URL path segment and a query param) and `environmentTypeId` come from
+  `JSON.parse(import.meta.env.VITE_APP_VERSION_CONFIG)` — i.e. the single config object, not a hardcoded
+  value.
 - The response is treated as an array (or `resp.data.docs`); `appVersions?.[0]?.currentVersion` is the
   configured version. An empty list `[]` (a normal success, `hasError` false) means **no version
   configured**.
 - The endpoint is on the request interceptor's no-auth allowlist (`"appVersions"` in
   [`remoteApi.ts`](../common/core/remoteApi.ts)), so it can run pre-authentication on the Login page.
-- **Known limitation**: the app id in the URL is hardcoded `BOPIS`; parameterizing it per app is
-  outstanding.
 
 ### 4.3 Resolution, State, and Canonicalization
 **Three states of `appVersion`** (`string | undefined`), and the distinction is load-bearing:
@@ -191,8 +195,8 @@ state) and `fetchAppVersion` (trusts the OMS) disagree and ping-pong `/login ↔
 own `postLogout()` therefore just `$reset()`.
 
 ### 4.4 Build & Firebase Hosting
-**Per version** (`VITE_APP_BUILD=vX.Y.Z`): Vite `base: '/vX.Y.Z/'`, output nested at `dist/vX.Y.Z/`.
-**Root bootstrap** (no `VITE_APP_BUILD`): `base: '/'`, output `dist/index.html`.
+**Per version** (`buildVersion: "vX.Y.Z"`): Vite `base: '/vX.Y.Z/'`, output nested at `dist/vX.Y.Z/`.
+**Root bootstrap** (empty `buildVersion`): `base: '/'`, output `dist/index.html`.
 
 **`firebase.json` rewrites** — version-specific entries first, catch-all last (Firebase is
 first-match-wins), catch-all → the **root bootstrap** ([`apps/bopis/firebase.json`](../apps/bopis/firebase.json)):
@@ -213,9 +217,9 @@ original proposal excluded `dev`; that opt-in gate is not implemented in the shi
 Firebase Hosting has no partial-release concept: `firebase deploy` makes the entire local `dist/` the
 new release. So the full multi-version tree must be present under `dist/` before deploying. **There is
 no automated pipeline yet** — this is done by hand:
-1. Set `VITE_APP_BUILD=vX.Y.Z` in `apps/bopis/.env` and run the build → Vite's nested `outDir` lands it
-   at `dist/vX.Y.Z/`.
-2. Build the **root bootstrap** with `VITE_APP_BUILD` unset (empty) → `dist/index.html`.
+1. Set `"buildVersion": "vX.Y.Z"` in `VITE_APP_VERSION_CONFIG` in `apps/bopis/.env` and run the build →
+   Vite's nested `outDir` lands it at `dist/vX.Y.Z/`.
+2. Build the **root bootstrap** with `buildVersion` empty (`""`) → `dist/index.html`.
 3. Repeat step 1 for every version that should stay live, so all retained `dist/vX.Y.Z/` folders (plus
    the root bootstrap) coexist under `dist/`.
 4. Hand-maintain `firebase.json`'s `rewrites` to list each retained version, catch-all last → the root
@@ -259,13 +263,13 @@ only after confirming by hand that no tenant is still pinned to it (§8).
 1. Shared `common/` pieces (inert until `appVersion` resolves): `appVersionUtil.getCanonicalPath`,
    `useAuth.checkAppVersionRedirect`/`fetchAppVersion`, the `accxuiConfig` `appVersion` getter/setter,
    the logout preserve.
-2. Per-app wiring: `main.ts` getter/setter, the router guard one-liner, `VITE_APP_BUILD` build config,
-   `firebase.json` version rewrites.
+2. Per-app wiring: `main.ts` getter/setter, the router guard one-liner, the `VITE_APP_VERSION_CONFIG`
+   env var + `vite.config` `buildVersion` wiring, `firebase.json` version rewrites.
 3. **Rebuild and redeploy every retained version folder** (and the root bootstrap) whenever this logic
    changes — each version folder is an immutable snapshot running its own baked-in code, so a guard
    change only takes effect for versions rebuilt after it (§8).
-4. Build/deploy versions manually for now (§4.5): set `VITE_APP_BUILD` per version, build the root
-   bootstrap, keep `firebase.json` rewrites in sync, deploy. Automating this is deferred.
+4. Build/deploy versions manually for now (§4.5): set `buildVersion` in `VITE_APP_VERSION_CONFIG` per
+   version, build the root bootstrap, keep `firebase.json` rewrites in sync, deploy. Automating this is deferred.
 5. **Backward compatibility**: until the OMS returns a version, `appVersions` yields `[]` → `appVersion=""`
    → everything runs at root, identical to today.
 
@@ -290,4 +294,7 @@ only after confirming by hand that no tenant is still pinned to it (§8).
 - **Mid-session re-pin** isn't seen until the next Login-page `fetchAppVersion` (eventually consistent).
 - **Version strings aren't format-validated on the client** beyond the `vX.Y.Z` regex in
   `getVersionedPathInfo`; a malformed OMS value that isn't `vX.Y.Z`-shaped looks unversioned to the guard.
-- **App id hardcoded `BOPIS`** in the `appVersions` URL (§4.2).
+- **Config is a JSON string in one env var** (`VITE_APP_VERSION_CONFIG`), assumed to always be a valid
+  object and `JSON.parse`d inline with no fallback. A malformed or missing value therefore **throws** — at
+  build time (`vite.config`) it fails the build; at runtime (`fetchAppVersion`) it's caught by the
+  surrounding `try/catch` and logged, leaving `appVersion` unresolved. There's no schema check.
