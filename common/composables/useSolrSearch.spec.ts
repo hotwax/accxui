@@ -1,14 +1,29 @@
-import { describe, it, expect } from 'vitest';
+import { beforeEach, describe, it, expect, vi } from 'vitest';
+import api from '../core/remoteApi';
 import { useSolrSearch } from './useSolrSearch';
 
-const { prepareOrderLookupQuery } = useSolrSearch();
+vi.mock('../core/remoteApi', () => ({
+  default: vi.fn()
+}));
+
+vi.mock('../utils/commonUtil', () => ({
+  commonUtil: {
+    isMoqui: vi.fn(() => true)
+  }
+}));
+
+const { prepareOrderLookupQuery, runSolrQuery } = useSolrSearch();
+
+beforeEach(() => {
+  vi.mocked(api).mockReset();
+});
 
 describe('prepareOrderLookupQuery', () => {
   it('should have default filters and params', () => {
     const query = {};
     const payload = prepareOrderLookupQuery(query);
     expect(payload.json.filter).toEqual(["docType: ORDER", "orderTypeId: SALES_ORDER"]);
-    expect(payload.json.params.q.op).toBe("AND");
+    expect(payload.json.params["q.op"]).toBe("AND");
     expect(payload.json.query).toBe("*:*");
   });
 
@@ -69,5 +84,100 @@ describe('prepareOrderLookupQuery', () => {
     const query3 = { date: 'custom', fromDate: '2023-01-01T12:00:00Z' };
     const payload3 = prepareOrderLookupQuery(query3);
     expect(payload3.json.filter).toContain('{!tag=orderLookupFilter}orderDate: [2023-01-01T00:00:00Z TO *]');
+  });
+});
+
+describe('runSolrQuery', () => {
+  const payload = {
+    json: {
+      query: '*:*'
+    }
+  };
+
+  it('preserves facets when normalizing a wrapped document response', async () => {
+    const responseHeader = { status: 0, QTime: 1 };
+    const response = { numFound: 1, start: 0, docs: [{ orderId: '10000' }] };
+    const facets = {
+      count: 1,
+      facilityIdFacet: {
+        buckets: [{ val: '_NA_', count: 1 }]
+      }
+    };
+    vi.mocked(api).mockResolvedValue({
+      data: {
+        response: {
+          responseHeader,
+          response,
+          facets
+        }
+      }
+    });
+
+    const result = await runSolrQuery(payload);
+
+    expect(api).toHaveBeenCalledWith({
+      url: 'admin/search/query',
+      method: 'post',
+      data: payload.json
+    });
+    expect(result.data.responseHeader).toBe(responseHeader);
+    expect(result.data.response).toBe(response);
+    expect(result.data.facets).toBe(facets);
+  });
+
+  it('preserves facets when normalizing a wrapped grouped response', async () => {
+    const responseHeader = { status: 0, QTime: 1 };
+    const grouped = {
+      orderId: {
+        matches: 1,
+        ngroups: 1,
+        groups: []
+      }
+    };
+    const facets = {
+      count: 1,
+      statusIdFacet: {
+        buckets: [{ val: 'ORDER_APPROVED', count: 1 }]
+      }
+    };
+    vi.mocked(api).mockResolvedValue({
+      data: {
+        response: {
+          responseHeader,
+          grouped,
+          facets
+        }
+      }
+    });
+
+    const result = await runSolrQuery(payload);
+
+    expect(result.data.responseHeader).toBe(responseHeader);
+    expect(result.data.grouped).toBe(grouped);
+    expect(result.data.facets).toBe(facets);
+    expect(result.data).not.toHaveProperty('response');
+  });
+
+  it('leaves an already-flat response unchanged', async () => {
+    const response = {
+      data: {
+        responseHeader: { status: 0, QTime: 1 },
+        response: {
+          numFound: 1,
+          start: 0,
+          docs: [{ orderId: '10000' }]
+        },
+        facets: {
+          count: 1
+        }
+      }
+    };
+    const original = structuredClone(response);
+    vi.mocked(api).mockResolvedValue(response);
+
+    const result = await runSolrQuery(payload);
+
+    expect(result).toBe(response);
+    expect(result).toEqual(original);
   });
 });
