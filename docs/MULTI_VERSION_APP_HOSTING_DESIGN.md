@@ -41,7 +41,9 @@ tenant should be on.
   additive pipeline is deferred — §4.5).
 
 ### 2.2 Out of Scope
-- The admin UI/workflow for setting the OMS's `CommerceAppDeployment.currentVersion` (§4.2).
+- The admin UI/workflow for setting the OMS's `CommerceAppDeployment.currentVersion` (§4.2). This is
+  provided by the **company** app, which has the UI for managing app versions; it is out of scope for
+  this document (which covers only how a served app resolves and honors that configured version).
 - Native mobile (Capacitor) versioning.
 - Percentage-based canary/blue-green splitting (version selection is deterministic per tenant).
 
@@ -297,4 +299,10 @@ only after confirming by hand that no tenant is still pinned to it (§8).
 - **Config is a JSON string in one env var** (`VITE_APP_VERSION_CONFIG`), assumed to always be a valid
   object and `JSON.parse`d inline with no fallback. A malformed or missing value therefore **throws** — at
   build time (`vite.config`) it fails the build; at runtime (`fetchAppVersion`) it's caught by the
-  surrounding `try/catch` and logged, leaving `appVersion` unresolved. There's no schema check.
+  surrounding `try/catch`, which resolves `appVersion` to `""` (run at root) and logs the error. There's
+  no schema check.
+- **`fetchAppVersion` fails safe to root.** If the `appVersions` call errors — the endpoint isn't
+  available on this OMS (`hasError` response), the request throws, or the config JSON is unparseable —
+  `appVersion` is set to `""` (resolved: no version) so the app runs unversioned at root instead of
+  staying `undefined`/unresolved. A consequence: a *transient* OMS error also falls back to root for that
+  session rather than honoring a previously pinned version.

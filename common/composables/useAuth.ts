@@ -301,8 +301,6 @@ export function useAuth() {
         }
       });
 
-      if(commonUtil.hasError(resp)) return;
-
       const appVersions = Array.isArray(resp.data) ? resp.data : resp.data?.docs;
       const configuredVersion = appVersions?.[0]?.currentVersion;
 
@@ -310,6 +308,10 @@ export function useAuth() {
       accxuiConfig.value.appVersion = configuredVersion || "";
       checkAppVersionRedirect();
     } catch (error) {
+      // The call failed outright (endpoint unreachable/absent, or the config JSON was unparseable).
+      // Resolve to "" so the app runs unversioned at root instead of staying unresolved.
+      accxuiConfig.value.appVersion = "";
+      checkAppVersionRedirect();
       logger.error(error);
     }
   };
