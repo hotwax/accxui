@@ -613,7 +613,9 @@ const isValidVersion = (value: any): boolean => {
 // Checks whether currentVersion is greater than or equal to the requiredVersion,
 // Any -prerelease / +build metadata is stripped and ignored, so 1.0.0 and 1.0.0-rc.1 compare as equal.
 const isVersionGreaterOrEqual = (requiredVersion: string, currentVersion: string): boolean => {
-  if (!isValidVersion(requiredVersion) || !isValidVersion(currentVersion)) return false;
+  // If no compatibility requirement is configured or current version is not available or invalid
+  // (assuming that the server is on some branch), allow access by default
+  if (!isValidVersion(requiredVersion) || !isValidVersion(currentVersion)) return true;
   const parse = (version: string) => version.trim().replace(/^[vV]/, "").split(/[-+]/)[0].split(".").map(Number);
   const [requiredMajor, requiredMinor, requiredPatch] = parse(requiredVersion);
   const [currentMajor, currentMinor, currentPatch] = parse(currentVersion);
