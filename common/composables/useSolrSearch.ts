@@ -276,6 +276,9 @@ function normalizeSearchResponse(resp: any): any {
   const inner = resp?.data?.response;
   if (inner?.responseHeader) {
     resp.data.responseHeader = inner.responseHeader;
+    if (Object.prototype.hasOwnProperty.call(inner, "facets")) {
+      resp.data.facets = inner.facets;
+    }
     if (inner.response) {
       resp.data.response = inner.response;
     } else if (inner.grouped) {
@@ -411,4 +414,4 @@ export function useSolrSearch() {
     runSolrQuery,
     searchProducts
   }
-} 
+}
