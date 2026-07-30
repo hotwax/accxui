@@ -4,8 +4,7 @@ on:
       config-path:
         required: true
         type: string
-      app:
-        description: 'The name of the app to clone into apps/, org/repo'
+      app: # The name of the app to clone into apps/, org/repo
         required: true
         type: string
       appDir:
@@ -18,11 +17,6 @@ on:
         description: 'Tag/version of accxui to build against'
         default: 'main'
         type: string
-      maxVersions:
-        description: 'How many minor versions to keep live (latest patch of each minor, across all majors)'
-        default: 1
-        type: number
-
     secrets:
       envPAT:
         required: true
@@ -32,7 +26,6 @@ on:
         required: false
       VITE_FIREBASE_VAPID_KEY:
         required: false
-
 jobs:
   build_and_deploy:
     runs-on: ubuntu-latest
@@ -51,317 +44,70 @@ jobs:
         with:
           repository: ${{ inputs.app }}
           path: apps/${{ inputs.appDir }}
-          fetch-depth: 0
-          fetch-tags: true
 
       - name: Install pnpm
         uses: pnpm/action-setup@v4
         with:
           version: 9
           run_install: false
+      
+      - name: Checkout to latest release tag
+        run: |
+          git checkout $(git describe --tags `git rev-list --tags --max-count=1`)
+        working-directory: apps/${{ inputs.appDir }}
 
       - name: Use Node.js v22
         uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: pnpm
+          cache: 'pnpm'
 
+      - name: Install Dependencies
+        run: pnpm install
 
-      # Rule:
-      # 1. From all vMAJOR.MINOR.PATCH tags
-      # 2. Keep latest patch of each MAJOR.MINOR
-      # 3. Keep last maxVersions minor releases across all majors
-      #
-      # Example:
-      # v1.1.3 v1.2.1 v1.3.0 v1.4.2 v1.5.1 v2.0.0 v2.1.0
-      #
-      # maxVersions=5:
-      # v1.3.0 v1.4.2 v1.5.1 v2.0.0 v2.1.0
-
-      - name: Select versions to deploy
-        id: versions
+      - name: Generate .env file
+        run: cp .env.example .env
         working-directory: apps/${{ inputs.appDir }}
-        env:
-          MAX_VERSIONS: ${{ inputs.maxVersions }}
+
+      - name: Set Firebase and VAPID Config
         run: |
-          set -euo pipefail
-
-          mapfile -t sorted < <(
-            git tag -l |
-            grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' |
-            sort -V
-          )
-
-          if [ ${#sorted[@]} -eq 0 ]; then
-            echo "::error::No release tags found"
-            exit 1
+          if [[ -n "$VITE_FIREBASE_CONFIG" ]]; then
+            sed -i "s|^VITE_FIREBASE_CONFIG=.*|VITE_FIREBASE_CONFIG=$VITE_FIREBASE_CONFIG|g" .env
+            sed -i "s|^VITE_FIREBASE_VAPID_KEY=.*|VITE_FIREBASE_VAPID_KEY='$VITE_FIREBASE_VAPID_KEY'|g" .env
+            sed -i "s|const firebaseConfig =.*|const firebaseConfig = $VITE_FIREBASE_CONFIG|g" public/firebase-messaging-sw.js
           fi
-
-
-          declare -A latest_patch
-          minor_order=()
-
-          for tag in "${sorted[@]}"; do
-            minor="${tag%.*}"
-
-            if [ -z "${latest_patch[$minor]:-}" ]; then
-              minor_order+=("$minor")
-            fi
-
-            latest_patch[$minor]=$tag
-          done
-
-
-          collapsed=()
-
-          for minor in "${minor_order[@]}"; do
-            collapsed+=("${latest_patch[$minor]}")
-          done
-
-
-          start=$(( ${#collapsed[@]} - MAX_VERSIONS ))
-
-          if [ "$start" -lt 0 ]; then
-            start=0
-          fi
-
-          selected=( "${collapsed[@]:$start}" )
-
-
-          echo "Available releases:"
-          printf '%s\n' "${collapsed[@]}"
-
-          echo "Selected releases:"
-          printf '%s\n' "${selected[@]}"
-
-
-          {
-            echo "versions<<EOF"
-            printf "%s\n" "${selected[@]}"
-            echo "EOF"
-          } >> "$GITHUB_OUTPUT"
-
-
-          echo "latest=${selected[-1]}" >> "$GITHUB_OUTPUT"
-
-
-
-      - name: Install Firebase CLI
-        run: npm install -g firebase-tools
-
-
-      - name: Build root bootstrap + selected versions
-        working-directory: apps/${{ inputs.appDir }}
         env:
-          VERSIONS: ${{ steps.versions.outputs.versions }}
-          LATEST: ${{ steps.versions.outputs.latest }}
           VITE_FIREBASE_CONFIG: ${{ secrets.VITE_FIREBASE_CONFIG }}
           VITE_FIREBASE_VAPID_KEY: ${{ secrets.VITE_FIREBASE_VAPID_KEY }}
-
-        run: |
-          set -euo pipefail
-
-
-          # Always start clean.
-          # Prevent old version folders from being deployed.
-          rm -rf dist
-          mkdir -p dist
-
-
-          # Strip one matching pair of surrounding quotes from a secret, so every consumer below gets
-          # raw JSON: the .env line (dotenv would strip them, the service worker's plain JS would not,
-          # and it needs an object literal rather than a quoted string).
-          strip_quotes() {
-            local v="$1"
-            case "$v" in
-              "'"*"'") v="${v#\'}"; v="${v%\'}" ;;
-              '"'*'"') v="${v#\"}"; v="${v%\"}" ;;
-            esac
-            printf '%s' "$v"
-          }
-          VITE_FIREBASE_CONFIG="$(strip_quotes "${VITE_FIREBASE_CONFIG:-}")"
-          VITE_FIREBASE_VAPID_KEY="$(strip_quotes "${VITE_FIREBASE_VAPID_KEY:-}")"
-
-
-          prepare_env() {
-            cp .env.example .env
-
-            node -e '
-              const fs = require("fs");
-
-              const version = process.argv[1];
-
-              let env = fs.readFileSync(".env", "utf8");
-
-              env = env.replace(
-                /^VITE_APP_VERSION_CONFIG=(.*)$/m,
-                (_, json) => {
-                  const config = JSON.parse(json);
-                  config.environmentTypeId = "AppEnvUAT";
-                  config.buildVersion = version;
-
-                  return "VITE_APP_VERSION_CONFIG=" +
-                    JSON.stringify(config);
-                }
-              );
-
-              fs.writeFileSync(".env", env);
-            ' "$1"
-
-
-            if [ -n "${VITE_FIREBASE_CONFIG:-}" ]; then
-
-              sed -i \
-                "s|^VITE_FIREBASE_CONFIG=.*|VITE_FIREBASE_CONFIG=$VITE_FIREBASE_CONFIG|g" \
-                .env
-
-              sed -i \
-                "s|^VITE_FIREBASE_VAPID_KEY=.*|VITE_FIREBASE_VAPID_KEY='$VITE_FIREBASE_VAPID_KEY'|g" \
-                .env
-
-              # The messaging service worker is plain JS in public/ — it can't read import.meta.env,
-              # so its inlined config is patched here too. Only some apps ship one.
-              if [ -f public/firebase-messaging-sw.js ]; then
-                sed -i \
-                  "s|const firebaseConfig =.*|const firebaseConfig = $VITE_FIREBASE_CONFIG|g" \
-                  public/firebase-messaging-sw.js
-              fi
-
-            fi
-          }
-
-
-          build_at() {
-
-            TAG=$1
-            VERSION=$2
-
-            echo "Building $TAG -> $VERSION"
-
-            git clean -fd
-
-            git checkout --quiet -f "$TAG"
-
-            pnpm install
-
-            prepare_env "$VERSION"
-
-            # Build with the VITE_*-prefixed secrets out of the environment. Vite harvests every
-            # VITE_*-prefixed process.env key and prioritizes it OVER .env (with no dotenv quote
-            # stripping), which would override what prepare_env just wrote. Unsetting inside a
-            # subshell keeps the values available for the remaining iterations of the loop.
-            (
-              unset VITE_FIREBASE_CONFIG VITE_FIREBASE_VAPID_KEY
-              pnpm --filter ${{ inputs.appDir }} build
-            )
-          }
-
-
-
-          # Build latest version at root
-          build_at "$LATEST" ""
-
-
-          # Build historical versions
-          while read -r version; do
-
-            build_at "$version" "$version"
-
-          done <<< "$VERSIONS"
-
-
-
-          echo "Generated dist:"
-          find dist -maxdepth 1 -type d
-
-
-
-      - name: Generate firebase.json rewrites
         working-directory: apps/${{ inputs.appDir }}
-        env:
-          VERSIONS: ${{ steps.versions.outputs.versions }}
-          LATEST: ${{ steps.versions.outputs.latest }}
+      - name: Build
+        run: pnpm --filter ${{ inputs.appDir }} build
 
-        run: |
-          set -euo pipefail
-
-
-          git checkout --quiet "$LATEST" -- firebase.json
-
-
-          vs_json=$(
-            printf '%s\n' "$VERSIONS" |
-            jq -R . |
-            jq -s .
-          )
-
-
-          jq --argjson versions "$vs_json" '
-            .hosting |= map(
-              .rewrites =
-                (
-                  $versions |
-                  map({
-                    source: ("/" + . + "/**"),
-                    destination: ("/" + . + "/index.html")
-                  })
-                )
-                +
-                [
-                  {
-                    source: "**",
-                    destination: "/index.html"
-                  }
-                ]
-            )
-          ' firebase.json > firebase.json.tmp
-
-
-          mv firebase.json.tmp firebase.json
-
-
-          jq '.hosting[].rewrites' firebase.json
-
-
+      - name: Install Firebase
+        run: npm install -g firebase-tools
 
       - name: Set Firebase project
-        working-directory: apps/${{ inputs.appDir }}
-        run:
-
-          firebase use ${{ inputs.firebaseProject }} \
-            --token "$HOTWAX_PUBLIC_SECRET"
-
+        run: firebase use ${{ inputs.firebaseProject }} --token "$HOTWAX_PUBLIC_SECRET"
         env:
           HOTWAX_PUBLIC_SECRET: ${{ secrets.HOTWAX_PUBLIC_SECRET }}
-
-
+        working-directory: apps/${{ inputs.appDir }}
 
       - name: Deploy
-        working-directory: apps/${{ inputs.appDir }}
-        run:
-
-          firebase deploy \
-            --token "$HOTWAX_PUBLIC_SECRET" \
-            -m "Deploying multi-version app" \
-            --only hosting:uat
-
+        run: firebase deploy --token "$HOTWAX_PUBLIC_SECRET" -m "Deploying via GitHub actions"  --only hosting:uat
         env:
           HOTWAX_PUBLIC_SECRET: ${{ secrets.HOTWAX_PUBLIC_SECRET }}
-
-
+        working-directory: apps/${{ inputs.appDir }}
 
   release:
     runs-on: ubuntu-latest
-
+    
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Fetch release tag
+      - uses: actions/checkout@v2
+      - name: "Fetch release tag"
         run: |
-          echo "LABEL=$(git describe --tags $(git rev-list --tags --max-count=1))" >> $GITHUB_ENV
+          echo "LABEL=$(git describe --tags `git rev-list --tags --max-count=1`)" >> $GITHUB_ENV
 
-      - name: Create label
-        run: |
-          gh label create "release-${{ env.LABEL }}" --color FF7F7E
+      - name: "Create label"
+        run: gh label create "release-${{ env.LABEL }}" --color FF7F7E
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
