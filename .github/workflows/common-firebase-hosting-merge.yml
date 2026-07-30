@@ -15,7 +15,7 @@ on:
         type: string
       maxVersions:
         description: 'How many minor versions to keep live (latest patch of each minor, across all majors)'
-        default: 5
+        default: 1
         type: number
     secrets:
       envPAT:
