@@ -149,6 +149,20 @@ jobs:
           rm -rf dist
           mkdir -p dist
 
+          # Strip one matching pair of surrounding quotes from a secret, so every consumer below gets
+          # raw JSON: the .env line (dotenv would strip them, the service worker's plain JS would not,
+          # and it needs an object literal rather than a quoted string).
+          strip_quotes() {
+            local v="$1"
+            case "$v" in
+              "'"*"'") v="${v#\'}"; v="${v%\'}" ;;
+              '"'*'"') v="${v#\"}"; v="${v%\"}" ;;
+            esac
+            printf '%s' "$v"
+          }
+          VITE_FIREBASE_CONFIG="$(strip_quotes "${VITE_FIREBASE_CONFIG:-}")"
+          VITE_FIREBASE_VAPID_KEY="$(strip_quotes "${VITE_FIREBASE_VAPID_KEY:-}")"
+
           prepare_env() {
             cp .env.example .env
 
@@ -174,6 +188,14 @@ jobs:
               sed -i \
                 "s|^VITE_FIREBASE_VAPID_KEY=.*|VITE_FIREBASE_VAPID_KEY='$VITE_FIREBASE_VAPID_KEY'|g" \
                 .env
+
+              # The messaging service worker is plain JS in public/ — it can't read import.meta.env,
+              # so its inlined config is patched here too. Only some apps ship one.
+              if [ -f public/firebase-messaging-sw.js ]; then
+                sed -i \
+                  "s|const firebaseConfig =.*|const firebaseConfig = $VITE_FIREBASE_CONFIG|g" \
+                  public/firebase-messaging-sw.js
+              fi
             fi
           }
 
@@ -187,7 +209,15 @@ jobs:
             git checkout --quiet -f "$REF"
             pnpm install
             prepare_env "$VERSION"
-            pnpm --filter ${{ inputs.appDir }} build
+
+            # Build with the VITE_*-prefixed secrets out of the environment. Vite harvests every
+            # VITE_*-prefixed process.env key and prioritizes it OVER .env (with no dotenv quote
+            # stripping), which would override what prepare_env just wrote. Unsetting inside a
+            # subshell keeps the values available for the remaining iterations of the loop.
+            (
+              unset VITE_FIREBASE_CONFIG VITE_FIREBASE_VAPID_KEY
+              pnpm --filter ${{ inputs.appDir }} build
+            )
           }
 
           # Root bootstrap from MAIN (empties dist/, writes dist/index.html) — must run first.
