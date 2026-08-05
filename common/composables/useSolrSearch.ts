@@ -291,6 +291,7 @@ function normalizeSearchResponse(resp: any): any {
 
 async function runSolrQuery(payload: any): Promise<any> {
   const isMoqui = commonUtil.isMoqui();
+  if (payload.json && !payload.json.query) payload.json.query = payload.json.params?.q || "*:*";
   const resp = await api({
     url: isMoqui ? "admin/search/query" : "admin/runSolrQuery",
     method: "post",
