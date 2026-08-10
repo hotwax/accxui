@@ -204,7 +204,9 @@ const login = async (params?: any) => {
     username.value = "";
     password.value = "";
     if(localStorage.getItem("requestedPagePath")) {
-      router.value.replace(localStorage.getItem("requestedPagePath"))
+      const requestedPagePath = localStorage.getItem("requestedPagePath")
+      localStorage.removeItem("requestedPagePath")
+      router.value.replace(requestedPagePath)
     } else {
       router.value.replace("/")
     }
