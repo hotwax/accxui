@@ -938,8 +938,8 @@ importers:
         specifier: ^2.3.5
         version: 2.3.5
       vue-virtual-scroller:
-        specifier: ^2.0.0-beta.8
-        version: 2.0.1(vue@3.5.30(typescript@6.0.2))
+        specifier: 'catalog:'
+        version: 2.0.0-beta.8(vue@3.5.30(typescript@6.0.2))
       vue3-virtual-scroll-list:
         specifier: ^0.2.1
         version: 0.2.1(vue@3.5.30(typescript@6.0.2))
@@ -6961,11 +6961,6 @@ packages:
     resolution: {integrity: sha512-b8/f5NQ5nIEBRTNi6GcPItE4s7kxNHw2AIHLtDp+2QvqdTjVN0FgONwX9cr53jWRgnu+HRLPaWDOR2JPI5MTfQ==}
     peerDependencies:
       vue: ^3.2.0
-
-  vue-virtual-scroller@2.0.1:
-    resolution: {integrity: sha512-3Drq8C61C4B3reSaZJr5nXBf/B7Beq1+h5/kYZB25MLYljTy97ISeUufRX9z6ZSZlFDXyafAOLK9XwajOWJY1A==}
-    peerDependencies:
-      vue: ^3.3.0
 
   vue3-virtual-scroll-list@0.2.1:
     resolution: {integrity: sha512-G4KxITUOy9D4ro15zOp40D6ogmMefzjIyMsBKqN3xGbV1P6dlKYMx+BBXCKm3Nr/6iipcUKM272Sh2AJRyWMyQ==}
@@ -13460,11 +13455,6 @@ snapshots:
       vue: 3.5.30(typescript@6.0.2)
       vue-observe-visibility: 2.0.0-alpha.1(vue@3.5.30(typescript@6.0.2))
       vue-resize: 2.0.0-alpha.1(vue@3.5.30(typescript@6.0.2))
-
-  vue-virtual-scroller@2.0.1(vue@3.5.30(typescript@6.0.2)):
-    dependencies:
-      mitt: 2.1.0
-      vue: 3.5.30(typescript@6.0.2)
 
   vue3-virtual-scroll-list@0.2.1(vue@3.5.30(typescript@6.0.2)):
     dependencies:
