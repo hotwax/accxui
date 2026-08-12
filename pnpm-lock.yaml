@@ -123,6 +123,9 @@ catalogs:
     vite:
       specifier: 5.2.0
       version: 5.2.0
+    vite-plugin-pwa:
+      specifier: 1.2.0
+      version: 1.2.0
     vitest:
       specifier: 1.3.1
       version: 1.3.1
@@ -367,7 +370,7 @@ importers:
         specifier: 'catalog:'
         version: 5.2.0(@types/node@22.19.15)(terser@5.46.1)
       vite-plugin-pwa:
-        specifier: 1.2.0
+        specifier: 'catalog:'
         version: 1.2.0(@vite-pwa/assets-generator@1.0.2)(vite@5.2.0(@types/node@22.19.15)(terser@5.46.1))(workbox-build@6.6.0(@types/babel__core@7.20.5))(workbox-window@7.4.0)
       vitest:
         specifier: 'catalog:'
@@ -491,7 +494,7 @@ importers:
         specifier: 'catalog:'
         version: 5.2.0(@types/node@22.19.15)(terser@5.46.1)
       vite-plugin-pwa:
-        specifier: 1.2.0
+        specifier: 'catalog:'
         version: 1.2.0(@vite-pwa/assets-generator@1.0.2)(vite@5.2.0(@types/node@22.19.15)(terser@5.46.1))(workbox-build@6.6.0(@types/babel__core@7.20.5))(workbox-window@7.4.0)
       vitest:
         specifier: 'catalog:'
@@ -611,6 +614,9 @@ importers:
       vite:
         specifier: 'catalog:'
         version: 5.2.0(@types/node@22.19.15)(terser@5.48.0)
+      vite-plugin-pwa:
+        specifier: 'catalog:'
+        version: 1.2.0(@vite-pwa/assets-generator@1.0.2)(vite@5.2.0(@types/node@22.19.15)(terser@5.48.0))(workbox-build@6.6.0(@types/babel__core@7.20.5))(workbox-window@7.4.0)
 
   apps/fulfillment:
     dependencies:
@@ -732,6 +738,9 @@ importers:
       vite:
         specifier: 'catalog:'
         version: 5.2.0(@types/node@22.19.15)(terser@5.46.1)
+      vite-plugin-pwa:
+        specifier: 'catalog:'
+        version: 1.2.0(@vite-pwa/assets-generator@1.0.2)(vite@5.2.0(@types/node@22.19.15)(terser@5.46.1))(workbox-build@6.6.0(@types/babel__core@7.20.5))(workbox-window@7.4.0)
       vitest:
         specifier: 'catalog:'
         version: 1.3.1(@types/node@22.19.15)(jsdom@24.1.3)(terser@5.46.1)
@@ -998,6 +1007,9 @@ importers:
       typescript:
         specifier: 'catalog:'
         version: 6.0.2
+      vite-plugin-pwa:
+        specifier: 'catalog:'
+        version: 1.2.0(@vite-pwa/assets-generator@1.0.2)(vite@5.2.14(@types/node@22.19.15)(terser@5.48.0))(workbox-build@6.6.0(@types/babel__core@7.20.5))(workbox-window@7.4.0)
 
   apps/job-manager:
     dependencies:
@@ -1083,6 +1095,9 @@ importers:
       typescript:
         specifier: 'catalog:'
         version: 6.0.2
+      vite-plugin-pwa:
+        specifier: 'catalog:'
+        version: 1.2.0(@vite-pwa/assets-generator@1.0.2)(vite@5.2.14(@types/node@22.19.15)(terser@5.48.0))(workbox-build@6.6.0(@types/babel__core@7.20.5))(workbox-window@7.4.0)
 
   apps/order-manager:
     dependencies:
@@ -1183,6 +1198,9 @@ importers:
       vite:
         specifier: 'catalog:'
         version: 5.2.0(@types/node@22.19.15)(terser@5.48.0)
+      vite-plugin-pwa:
+        specifier: 'catalog:'
+        version: 1.2.0(@vite-pwa/assets-generator@1.0.2)(vite@5.2.0(@types/node@22.19.15)(terser@5.48.0))(workbox-build@6.6.0(@types/babel__core@7.20.5))(workbox-window@7.4.0)
 
   apps/order-routing:
     dependencies:
@@ -1320,7 +1338,7 @@ importers:
         specifier: 'catalog:'
         version: 5.2.0(@types/node@22.19.15)(terser@5.46.1)
       vite-plugin-pwa:
-        specifier: 1.2.0
+        specifier: 'catalog:'
         version: 1.2.0(@vite-pwa/assets-generator@1.0.2)(vite@5.2.0(@types/node@22.19.15)(terser@5.46.1))(workbox-build@6.6.0(@types/babel__core@7.20.5))(workbox-window@7.4.0)
       vitest:
         specifier: 'catalog:'
@@ -1407,6 +1425,9 @@ importers:
       vite:
         specifier: 'catalog:'
         version: 5.2.0(@types/node@22.19.15)(terser@5.48.0)
+      vite-plugin-pwa:
+        specifier: 'catalog:'
+        version: 1.2.0(@vite-pwa/assets-generator@1.0.2)(vite@5.2.0(@types/node@22.19.15)(terser@5.48.0))(workbox-build@6.6.0(@types/babel__core@7.20.5))(workbox-window@7.4.0)
       vitest:
         specifier: 'catalog:'
         version: 1.3.1(@types/node@22.19.15)(jsdom@24.1.3)(terser@5.48.0)
@@ -1498,6 +1519,9 @@ importers:
       vite:
         specifier: 'catalog:'
         version: 5.2.0(@types/node@22.19.15)(terser@5.48.0)
+      vite-plugin-pwa:
+        specifier: 'catalog:'
+        version: 1.2.0(@vite-pwa/assets-generator@1.0.2)(vite@5.2.0(@types/node@22.19.15)(terser@5.48.0))(workbox-build@6.6.0(@types/babel__core@7.20.5))(workbox-window@7.4.0)
       vitest:
         specifier: 'catalog:'
         version: 1.3.1(@types/node@22.19.15)(jsdom@24.1.3)(terser@5.48.0)
@@ -1613,6 +1637,9 @@ importers:
       vite:
         specifier: 'catalog:'
         version: 5.2.0(@types/node@22.19.15)(terser@5.48.0)
+      vite-plugin-pwa:
+        specifier: 'catalog:'
+        version: 1.2.0(@vite-pwa/assets-generator@1.0.2)(vite@5.2.0(@types/node@22.19.15)(terser@5.48.0))(workbox-build@6.6.0(@types/babel__core@7.20.5))(workbox-window@7.4.0)
       vitest:
         specifier: 'catalog:'
         version: 1.3.1(@types/node@22.19.15)(jsdom@24.1.3)(terser@5.48.0)
@@ -13242,6 +13269,32 @@ snapshots:
       pretty-bytes: 6.1.1
       tinyglobby: 0.2.15
       vite: 5.2.0(@types/node@22.19.15)(terser@5.46.1)
+      workbox-build: 6.6.0(@types/babel__core@7.20.5)
+      workbox-window: 7.4.0
+    optionalDependencies:
+      '@vite-pwa/assets-generator': 1.0.2
+    transitivePeerDependencies:
+      - supports-color
+
+  vite-plugin-pwa@1.2.0(@vite-pwa/assets-generator@1.0.2)(vite@5.2.0(@types/node@22.19.15)(terser@5.48.0))(workbox-build@6.6.0(@types/babel__core@7.20.5))(workbox-window@7.4.0):
+    dependencies:
+      debug: 4.4.3(supports-color@8.1.1)
+      pretty-bytes: 6.1.1
+      tinyglobby: 0.2.15
+      vite: 5.2.0(@types/node@22.19.15)(terser@5.48.0)
+      workbox-build: 6.6.0(@types/babel__core@7.20.5)
+      workbox-window: 7.4.0
+    optionalDependencies:
+      '@vite-pwa/assets-generator': 1.0.2
+    transitivePeerDependencies:
+      - supports-color
+
+  vite-plugin-pwa@1.2.0(@vite-pwa/assets-generator@1.0.2)(vite@5.2.14(@types/node@22.19.15)(terser@5.48.0))(workbox-build@6.6.0(@types/babel__core@7.20.5))(workbox-window@7.4.0):
+    dependencies:
+      debug: 4.4.3(supports-color@8.1.1)
+      pretty-bytes: 6.1.1
+      tinyglobby: 0.2.15
+      vite: 5.2.14(@types/node@22.19.15)(terser@5.48.0)
       workbox-build: 6.6.0(@types/babel__core@7.20.5)
       workbox-window: 7.4.0
     optionalDependencies:
