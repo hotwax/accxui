@@ -393,9 +393,6 @@ importers:
       '@capacitor/ios':
         specifier: 'catalog:'
         version: 8.2.0(@capacitor/core@8.2.0)
-      '@casl/ability':
-        specifier: ^6.0.0
-        version: 6.8.0
       '@ionic/core':
         specifier: 'catalog:'
         version: 8.8.0
@@ -1028,9 +1025,6 @@ importers:
       '@capacitor/ios':
         specifier: 'catalog:'
         version: 8.2.0(@capacitor/core@8.2.0)
-      '@casl/ability':
-        specifier: ^6.0.0
-        version: 6.8.0
       '@hotwax/app-version-info':
         specifier: ^1.0.0
         version: 1.0.0
@@ -1043,9 +1037,6 @@ importers:
       '@ionic/vue-router':
         specifier: 'catalog:'
         version: 8.8.0(@stencil/core@4.1.0)(vue-router@4.5.0(vue@3.5.30(typescript@6.0.2)))(vue@3.5.30(typescript@6.0.2))
-      boon-js:
-        specifier: ^2.0.3
-        version: 2.0.5
       cron-parser:
         specifier: 'catalog:'
         version: 5.4.0
@@ -1543,9 +1534,6 @@ importers:
       '@capacitor/core':
         specifier: 'catalog:'
         version: 8.2.0
-      '@casl/ability':
-        specifier: ^6.0.0
-        version: 6.8.0
       '@ionic/core':
         specifier: 'catalog:'
         version: 8.8.0
