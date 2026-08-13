@@ -8,7 +8,8 @@
     "build": "vue-tsc && vite build",
     "preview": "vite preview",
     "test:unit": "vitest",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "update:apps": "./update-apps.sh"
   },
   "dependencies": {
     "@capacitor/android": "catalog:",
