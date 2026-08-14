@@ -24,7 +24,7 @@ MAIN_BRANCH="main"
 REMOTE="origin"
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-APPS_DIR="$SCRIPT_DIR/apps"
+APPS_DIR="$(cd -- "$SCRIPT_DIR/.." && pwd)/apps"
 
 if [ -t 1 ]; then
   BOLD=$'\033[1m'; RED=$'\033[31m'; GREEN=$'\033[32m'; YELLOW=$'\033[33m'; DIM=$'\033[2m'; RESET=$'\033[0m'
