@@ -9,7 +9,9 @@
     "preview": "vite preview",
     "test:unit": "vitest",
     "lint": "eslint .",
-    "update:apps": "./update-apps.sh"
+    "update:apps": "./scripts/update-apps.sh",
+    "release": "./scripts/cut-release.sh",
+    "deploy:app": "./scripts/deploy.sh"
   },
   "dependencies": {
     "@capacitor/android": "catalog:",
