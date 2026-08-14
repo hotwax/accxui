@@ -753,9 +753,6 @@ importers:
       '@capacitor/core':
         specifier: 'catalog:'
         version: 8.2.0
-      '@casl/ability':
-        specifier: ^6.0.0
-        version: 6.8.0
       '@ionic/core':
         specifier: catalog:ionic7
         version: 7.6.0
@@ -774,9 +771,6 @@ importers:
       '@types/luxon':
         specifier: 'catalog:'
         version: 3.7.1
-      boon-js:
-        specifier: ^2.0.3
-        version: 2.0.5
       encoding-japanese:
         specifier: 'catalog:'
         version: 2.2.0
@@ -2181,9 +2175,6 @@ packages:
     peerDependencies:
       '@capacitor/core': '>=7.0.0'
 
-  '@casl/ability@6.8.0':
-    resolution: {integrity: sha512-Ipt4mzI4gSgnomFdaPjaLgY2MWuXqAEZLrU6qqWBB7khGiBBuuEp6ytYDnq09bRXqcjaeeHiaCvCGFbBA2SpvA==}
-
   '@colors/colors@1.5.0':
     resolution: {integrity: sha512-ooWCrlZP11i8GImSjTHYHLkvFDP48nS4+204nGb1RiX/WXYHmJA2III9/e2DWVabCESdW7hBAEzHRqUn9OUVvQ==}
     engines: {node: '>=0.1.90'}
@@ -3517,18 +3508,6 @@ packages:
     resolution: {integrity: sha512-KiROIzYdEV85YygXw6BI/Dx4fnBlFQu6Mq4QE4MOH9fFnhohw6wX/OAvDY2/C+ut0I3RSPKenvZJIVYqJNkhEw==}
     engines: {node: ^18.18.0 || ^20.9.0 || >=21.1.0}
 
-  '@ucast/core@1.10.2':
-    resolution: {integrity: sha512-ons5CwXZ/51wrUPfoduC+cO7AS1/wRb0ybpQJ9RrssossDxVy4t49QxWoWgfBDvVKsz9VXzBk9z0wqTdZ+Cq8g==}
-
-  '@ucast/js@3.1.0':
-    resolution: {integrity: sha512-eJ7yQeYtMK85UZjxoxBEbTWx6UMxEXKbjVyp+NlzrT5oMKV5Gpo/9bjTl3r7msaXTVC8iD9NJacqJ8yp7joX+Q==}
-
-  '@ucast/mongo2js@1.4.1':
-    resolution: {integrity: sha512-9aeg5cmqwRQnKCXHN6I17wk83Rcm487bHelaG8T4vfpWneAI469wSI3Srnbu+PuZ5znWRbnwtVq9RgPL+bN6CA==}
-
-  '@ucast/mongo@2.4.3':
-    resolution: {integrity: sha512-XcI8LclrHWP83H+7H2anGCEeDq0n+12FU2mXCTz6/Tva9/9ddK/iacvvhCyW6cijAAOILmt0tWplRyRhVyZLsA==}
-
   '@unrs/resolver-binding-android-arm-eabi@1.11.1':
     resolution: {integrity: sha512-ppLRUgHVaGRWUx0R0Ut06Mjo9gBaBkg3v/8AxusGLhsIotbBLuRk51rAzqLC8gq6NyyAojEXglNjzf6R948DNw==}
     cpu: [arm]
@@ -4070,9 +4049,6 @@ packages:
 
   boolean-parser@0.0.2:
     resolution: {integrity: sha512-e06Mqk6t7DOXaEo3s+RATvv7ZNt5brRQ2os4NUHVkVCzUD0Z7Gw4AL4AFA/gT3WaLhrobmGvRVh1/UuJiY3sKg==}
-
-  boon-js@2.0.5:
-    resolution: {integrity: sha512-Ck9YXckVbbIjpZPxtKXJ5TcT+ptU4E9lJy2X6hBKsR2nZqg026eHf9aw3KGXoFbfO4coRLaW9ql0tWrBrqJt1A==}
 
   bplist-parser@0.3.2:
     resolution: {integrity: sha512-apC2+fspHGI3mMKj+dGevkGo/tCqVB8jMb6i+OX+E29p0Iposz07fABkRIfVUPNd5A5VbuOz1bZbnmkKLYF+wQ==}
@@ -7994,10 +7970,6 @@ snapshots:
     dependencies:
       '@capacitor/core': 8.2.0
 
-  '@casl/ability@6.8.0':
-    dependencies:
-      '@ucast/mongo2js': 1.4.1
-
   '@colors/colors@1.5.0':
     optional: true
 
@@ -9593,22 +9565,6 @@ snapshots:
       '@typescript-eslint/types': 8.56.1
       eslint-visitor-keys: 5.0.1
 
-  '@ucast/core@1.10.2': {}
-
-  '@ucast/js@3.1.0':
-    dependencies:
-      '@ucast/core': 1.10.2
-
-  '@ucast/mongo2js@1.4.1':
-    dependencies:
-      '@ucast/core': 1.10.2
-      '@ucast/js': 3.1.0
-      '@ucast/mongo': 2.4.3
-
-  '@ucast/mongo@2.4.3':
-    dependencies:
-      '@ucast/core': 1.10.2
-
   '@unrs/resolver-binding-android-arm-eabi@1.11.1':
     optional: true
 
@@ -10251,8 +10207,6 @@ snapshots:
   boolbase@1.0.0: {}
 
   boolean-parser@0.0.2: {}
-
-  boon-js@2.0.5: {}
 
   bplist-parser@0.3.2:
     dependencies:
