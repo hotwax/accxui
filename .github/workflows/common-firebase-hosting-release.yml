@@ -11,7 +11,7 @@ on:
         required: true
         type: string
       firebaseProject:
-        default: 'default'
+        default: 'uat'
         type: string
       accxuiVersion:
         description: 'Tag/version of accxui to build against'
