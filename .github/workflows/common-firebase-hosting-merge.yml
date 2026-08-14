@@ -11,7 +11,7 @@ on:
         required: true
         type: string
       firebaseProject:
-        default: 'default'
+        default: 'dev'
         type: string
     secrets:
       envPAT:
