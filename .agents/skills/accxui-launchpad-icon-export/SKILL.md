@@ -52,7 +52,7 @@ on the node.
 
 ## Repository workflow
 
-1. Run `accxui-target-preflight` for `launchpad`.
+1. Preflight the target repository (`launchpad`): verify `git status` in the launchpad checkout/worktree to ensure a clean working directory.
 2. Remember that `apps/launchpad` is the separate `hotwax/launchpad`
    repository, even though it is an active AccxUI workspace entry.
 3. Refresh the Launchpad remote and base the change on current `origin/main`.
