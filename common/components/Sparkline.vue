@@ -13,8 +13,31 @@
       :stroke-width="strokeWidth"
       fill="none"
       preserveAspectRatio="none"
+      :role="label ? 'img' : 'presentation'"
+      :aria-label="label || undefined"
+      :aria-hidden="label ? undefined : 'true'"
     >
-      <polyline :points="polylinePoints" />
+      <!--
+        preserveAspectRatio="none" stretches x far more than y, which would
+        scale the stroke unevenly; non-scaling-stroke keeps it a constant width.
+        A single value has no segment to draw, so it renders as a dot instead.
+      -->
+      <polyline
+        v-if="polylinePoints"
+        :points="polylinePoints"
+        vector-effect="non-scaling-stroke"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      />
+      <line
+        v-else-if="singlePoint"
+        :x1="singlePoint.x"
+        :y1="singlePoint.y"
+        :x2="singlePoint.x"
+        :y2="singlePoint.y"
+        vector-effect="non-scaling-stroke"
+        stroke-linecap="round"
+      />
     </svg>
   </div>
 </template>
@@ -40,15 +63,18 @@ const props = defineProps({
   height: {
     type: Number,
     default: 30
+  },
+  // Describes the line for screen readers. Without it the svg is decorative.
+  label: {
+    type: String,
+    default: ''
   }
 });
 
-// Maps each value to viewBox coordinates: x spreads evenly across 0..100,
-// y is normalized to the data range and inverted (SVG y grows downward),
-// with a small vertical inset so the stroke isn't clipped at the edges.
-const polylinePoints = computed(() => {
+// Coordinates for each value, in viewBox space.
+const coordinates = computed(() => {
   const values = props.points;
-  if (!values.length) return '';
+  if (!values.length) return [];
 
   const max = Math.max(...values);
   const min = Math.min(...values);
@@ -58,14 +84,17 @@ const polylinePoints = computed(() => {
   const usableHeight = props.height - inset * 2;
   const lastIndex = values.length - 1 || 1;
 
-  return values
-    .map((value, i) => {
-      const x = (i / lastIndex) * 100;
-      const y = inset + (1 - (value - min) / range) * usableHeight;
-      return `${x},${y}`;
-    })
-    .join(' ');
+  return values.map((value, i) => ({
+    x: (i / lastIndex) * 100,
+    y: inset + (1 - (value - min) / range) * usableHeight
+  }));
 });
+
+const singlePoint = computed(() => (coordinates.value.length === 1 ? coordinates.value[0] : null));
+
+const polylinePoints = computed(() =>
+  coordinates.value.length > 1 ? coordinates.value.map(({ x, y }) => `${x},${y}`).join(' ') : ''
+);
 </script>
 
 <style scoped>
