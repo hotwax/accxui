@@ -16,6 +16,10 @@ export interface SnapshotDomainConfig {
   collectionKey?: string | null;
   listParams?: Record<string, unknown>;
   batchSize?: number;
+  /**
+   * Fetch the collection in a single request instead of paging through it. Only for endpoints
+   * that cannot page; anything larger than one page is silently dropped.
+   */
   unpaged?: boolean;
   scopeOnSync?: { field: string; value: unknown };
   fanOut?: {

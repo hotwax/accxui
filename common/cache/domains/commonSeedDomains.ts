@@ -103,7 +103,6 @@ export function registerCommonSeedDomains(getDb: () => BaseCacheDB): void {
     projection: groupFacilityProjection,
     listUrl: "oms/groupFacilities",
     collectionKey: null,
-    unpaged: true,
   }, getDb);
 
   registerSnapshotDomain({
@@ -133,7 +132,6 @@ export function registerCommonSeedDomains(getDb: () => BaseCacheDB): void {
       roleTypeId: "CARRIER",
     },
     collectionKey: null,
-    unpaged: true,
   }, getDb);
 
   registerSnapshotDomain({
@@ -142,7 +140,6 @@ export function registerCommonSeedDomains(getDb: () => BaseCacheDB): void {
     projection: shipmentMethodTypeProjection,
     listUrl: "oms/shippingGateways/shipmentMethodTypes",
     collectionKey: null,
-    unpaged: true,
   }, getDb);
 
   registerSnapshotDomain({
@@ -151,7 +148,6 @@ export function registerCommonSeedDomains(getDb: () => BaseCacheDB): void {
     projection: carrierShipmentMethodProjection,
     listUrl: "oms/shippingGateways/carrierShipmentMethods",
     collectionKey: null,
-    unpaged: true,
   }, getDb);
 
   registerSnapshotDomain({
@@ -168,7 +164,6 @@ export function registerCommonSeedDomains(getDb: () => BaseCacheDB): void {
     projection: returnReasonProjection,
     listUrl: "oms/returnReasons",
     collectionKey: null,
-    unpaged: true,
   }, getDb);
 
   registerSnapshotDomain({
@@ -177,7 +172,6 @@ export function registerCommonSeedDomains(getDb: () => BaseCacheDB): void {
     projection: returnTypeProjection,
     listUrl: "oms/returnTypes",
     collectionKey: null,
-    unpaged: true,
   }, getDb);
 
   registerSnapshotDomain({
@@ -186,7 +180,6 @@ export function registerCommonSeedDomains(getDb: () => BaseCacheDB): void {
     projection: returnItemTypeProjection,
     listUrl: "oms/returnItemTypes",
     collectionKey: null,
-    unpaged: true,
   }, getDb);
 
   registerSnapshotDomain({
@@ -195,7 +188,6 @@ export function registerCommonSeedDomains(getDb: () => BaseCacheDB): void {
     projection: roleTypeProjection,
     listUrl: "oms/roleTypes",
     collectionKey: null,
-    unpaged: true,
   }, getDb);
 
   registerSnapshotDomain({
@@ -204,7 +196,6 @@ export function registerCommonSeedDomains(getDb: () => BaseCacheDB): void {
     projection: orderAdjustmentTypeProjection,
     listUrl: "oms/shippingGateways/orderAdjustmentTypes",
     collectionKey: null,
-    unpaged: true,
   }, getDb);
 
   registerSnapshotDomain({
@@ -213,7 +204,6 @@ export function registerCommonSeedDomains(getDb: () => BaseCacheDB): void {
     projection: contactMechPurposeTypeProjection,
     listUrl: "oms/contactMechPurposeTypes",
     collectionKey: null,
-    unpaged: true,
   }, getDb);
 
   registerSnapshotDomain({
@@ -222,7 +212,6 @@ export function registerCommonSeedDomains(getDb: () => BaseCacheDB): void {
     projection: communicationEventTypeProjection,
     listUrl: "oms/communicationEventTypes",
     collectionKey: null,
-    unpaged: true,
   }, getDb);
 
   registerSnapshotDomain({
@@ -231,7 +220,6 @@ export function registerCommonSeedDomains(getDb: () => BaseCacheDB): void {
     projection: partyRelationshipTypeProjection,
     listUrl: "oms/partyRelationshipTypes",
     collectionKey: null,
-    unpaged: true,
   }, getDb);
 
   registerSnapshotDomain({
@@ -240,7 +228,6 @@ export function registerCommonSeedDomains(getDb: () => BaseCacheDB): void {
     projection: statusFlowTransitionProjection,
     listUrl: "admin/statusFlows/transitions",
     collectionKey: null,
-    unpaged: true,
   }, getDb);
 
   registerSnapshotDomain({
@@ -253,7 +240,6 @@ export function registerCommonSeedDomains(getDb: () => BaseCacheDB): void {
       parentKeyField: "productStoreId",
       urlFor: (storeId) => `oms/productStores/${encodeURIComponent(storeId)}/facilities`,
     },
-    unpaged: true,
   }, getDb);
 
   registerSnapshotDomain({
@@ -266,7 +252,6 @@ export function registerCommonSeedDomains(getDb: () => BaseCacheDB): void {
       parentKeyField: "productStoreId",
       urlFor: (storeId) => `oms/productStores/${encodeURIComponent(storeId)}/facilityGroups`,
     },
-    unpaged: true,
   }, getDb);
 
   registerSnapshotDomain({
@@ -279,7 +264,6 @@ export function registerCommonSeedDomains(getDb: () => BaseCacheDB): void {
       parentKeyField: "productStoreId",
       urlFor: (storeId) => `oms/productStores/${encodeURIComponent(storeId)}/shipmentMethods`,
     },
-    unpaged: true,
   }, getDb);
 
   registerSnapshotDomain({
@@ -288,7 +272,6 @@ export function registerCommonSeedDomains(getDb: () => BaseCacheDB): void {
     projection: productStoreEmailSettingProjection,
     listUrl: "oms/productStoreEmailSettings",
     collectionKey: null,
-    unpaged: true,
   }, getDb);
 
   registerSnapshotDomain({
@@ -297,7 +280,6 @@ export function registerCommonSeedDomains(getDb: () => BaseCacheDB): void {
     projection: shopifyShopProjection,
     listUrl: "oms/shopifyShops/shops",
     collectionKey: null,
-    unpaged: true,
   }, getDb);
 
   registerSnapshotDomain({
@@ -306,6 +288,5 @@ export function registerCommonSeedDomains(getDb: () => BaseCacheDB): void {
     projection: shopifyShopLocationProjection,
     listUrl: "oms/shopifyShops/locations",
     collectionKey: null,
-    unpaged: true,
   }, getDb);
 }

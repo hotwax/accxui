@@ -88,7 +88,10 @@ export async function pageAll(options: {
 }): Promise<any[]> {
   const { ctx, url, collectionKey, params = {}, batchSize = 250, unpaged = false, keyOf, maxPages = 40 } = options;
   if (unpaged || batchSize === 0) {
-    const resp = await workerGet(ctx, url, params);
+    // Single request, but still ask for a full page: Moqui defaults to 20 rows when no page
+    // size is given, which silently truncates a snapshot to its first 20 records.
+    const singlePageSize = batchSize || 250;
+    const resp = await workerGet(ctx, url, { ...params, pageSize: singlePageSize, viewSize: singlePageSize });
     const rows = unwrapCollection(resp, collectionKey);
     return rows ?? [];
   }
