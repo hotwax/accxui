@@ -11,12 +11,16 @@ on:
         required: true
         type: string
       firebaseProject:
-        default: 'default'
+        default: 'uat'
         type: string
       accxuiVersion:
         description: 'Tag/version of accxui to build against'
         default: 'main'
         type: string
+      maxVersions:
+        description: 'How many releases to keep live (latest patch of each MAJOR.MINOR, newest first)'
+        default: 2
+        type: number
     secrets:
       envPAT:
         required: true
@@ -38,23 +42,22 @@ jobs:
           repository: hotwax/accxui
           path: .
           ref: ${{ inputs.accxuiVersion }}
+          fetch-depth: 0 # full history + tags: each release is built against the accxui it declares
+          fetch-tags: true
 
       - name: Checkout app in apps/
         uses: actions/checkout@v4
         with:
           repository: ${{ inputs.app }}
           path: apps/${{ inputs.appDir }}
+          fetch-depth: 0 # full history + tags: every release is built from its own tag
+          fetch-tags: true
 
       - name: Install pnpm
         uses: pnpm/action-setup@v4
         with:
           version: 9
           run_install: false
-      
-      - name: Checkout to latest release tag
-        run: |
-          git checkout $(git describe --tags `git rev-list --tags --max-count=1`)
-        working-directory: apps/${{ inputs.appDir }}
 
       - name: Use Node.js v22
         uses: actions/setup-node@v4
@@ -62,45 +65,133 @@ jobs:
           node-version: 22
           cache: 'pnpm'
 
-      - name: Install Dependencies
-        run: pnpm install
-
-      - name: Generate .env file
-        run: cp .env.example .env
+      - name: Build multi-version tree
         working-directory: apps/${{ inputs.appDir }}
-
-      - name: Set Firebase and VAPID Config
-        run: |
-          if [[ -n "$VITE_FIREBASE_CONFIG" ]]; then
-            sed -i "s|^VITE_FIREBASE_CONFIG=.*|VITE_FIREBASE_CONFIG=$VITE_FIREBASE_CONFIG|g" .env
-            sed -i "s|^VITE_FIREBASE_VAPID_KEY=.*|VITE_FIREBASE_VAPID_KEY='$VITE_FIREBASE_VAPID_KEY'|g" .env
-            sed -i "s|const firebaseConfig =.*|const firebaseConfig = $VITE_FIREBASE_CONFIG|g" public/firebase-messaging-sw.js
-          fi
         env:
+          MAX_VERSIONS: ${{ inputs.maxVersions }}
           VITE_FIREBASE_CONFIG: ${{ secrets.VITE_FIREBASE_CONFIG }}
           VITE_FIREBASE_VAPID_KEY: ${{ secrets.VITE_FIREBASE_VAPID_KEY }}
+        run: |
+          set -euo pipefail
+
+          prepare_env() {
+            cp .env.example .env
+            if [ -n "$VITE_FIREBASE_CONFIG" ]; then
+              sed -i "s|^VITE_FIREBASE_CONFIG=.*|VITE_FIREBASE_CONFIG=$VITE_FIREBASE_CONFIG|g" .env
+              sed -i "s|^VITE_FIREBASE_VAPID_KEY=.*|VITE_FIREBASE_VAPID_KEY='$VITE_FIREBASE_VAPID_KEY'|g" .env
+              # public/ is plain JS and cannot read import.meta.env, so patch its inlined config too.
+              if [ -f public/firebase-messaging-sw.js ]; then
+                sed -i "s|const firebaseConfig =.*|const firebaseConfig = $VITE_FIREBASE_CONFIG|g" public/firebase-messaging-sw.js
+              fi
+            fi
+          }
+
+          # $1 = buildVersion ("" = root bootstrap, "vX.Y.Z" = that version).
+          build() {
+            prepare_env
+
+            # The version config is forced through the build environment rather than edited into .env:
+            # Vite gives VITE_*-prefixed process.env precedence over .env, so this is authoritative and
+            # cannot silently miss the way an in-place regex edit can. buildVersion drives base/outDir;
+            # environmentTypeId is always UAT here. appId is taken from the release's own .env.example,
+            # which pre-migration tags lack — those just build unversioned at root.
+            local cfg=""
+            if grep -q '^VITE_APP_VERSION_CONFIG=' .env; then
+              cfg=$(grep '^VITE_APP_VERSION_CONFIG=' .env | cut -d'=' -f2- |
+                    jq -c --arg v "$1" '.buildVersion = $v | .environmentTypeId = "AppEnvUAT"')
+              echo "building ${1:-root} with VITE_APP_VERSION_CONFIG=$cfg"
+            fi
+
+            # VITE_FIREBASE_* must NOT leak in the same way — .env holds the quote-stripped values.
+            ( unset VITE_FIREBASE_CONFIG VITE_FIREBASE_VAPID_KEY
+              if [ -n "$cfg" ]; then export VITE_APP_VERSION_CONFIG="$cfg"; fi
+              pnpm --filter ${{ inputs.appDir }} build )
+
+            [ -f "dist/${1:+$1/}index.html" ] || { echo "::error::${1:-root} built to the wrong path"; exit 1; }
+          }
+
+          # Every release was cut against one accxui version, named in that tag's own caller workflow: the
+          # lockfile it was resolved with lives there, and its imports expect that common/. Pointing all
+          # releases at the newest accxui gives an old release code it never shipped with, and a lockfile
+          # that cannot satisfy its manifest — pnpm defaults --frozen-lockfile to true in CI, so the
+          # install fails outright on any dependency the release has since added, dropped, or moved to
+          # catalog:. accxui gitignores apps/, so re-pointing its ref leaves the app checkout untouched.
+          # Tags predating the input keep inputs.accxuiVersion.
+          default_accxui="${{ inputs.accxuiVersion }}"
+          accxui="$default_accxui"
+          use_accxui() {
+            local want
+            want=$(grep -rhoE 'accxuiVersion:[[:space:]]*[^[:space:]]+' .github/workflows 2>/dev/null |
+                   head -1 | awk '{print $2}' | tr -d "\"'") || true
+            want="${want:-$default_accxui}"
+            if [ "$want" != "$accxui" ]; then
+              echo "accxui $accxui -> $want (declared by $1)"
+              git -C "$GITHUB_WORKSPACE" checkout --quiet -f "$want" ||
+                { echo "::error::$1 declares accxui $want, which does not exist"; exit 1; }
+              accxui="$want"
+            fi
+          }
+
+          checkout() { git clean -fd; git checkout --quiet -f "$1"; use_accxui "$1"; pnpm install; }
+
+          # Latest patch of each MAJOR.MINOR, newest MAX_VERSIONS of those (sort -V ascending, so the last
+          # write per minor wins). Releases with no VITE_APP_VERSION_CONFIG predate multi-version support:
+          # they ignore buildVersion and build to dist/, which would clobber the tree, so skip those.
+          versions=()
+          while read -r tag; do
+            latest="$tag"
+            if git show "$tag:.env.example" 2>/dev/null | grep -q '^VITE_APP_VERSION_CONFIG='; then
+              versions+=("$tag")
+            else
+              echo "::warning::$tag predates multi-version support; skipping /$tag/"
+            fi
+          done < <(
+            git tag -l | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V |
+            awk -F'[.]' '{m=$1"."$2; if(!(m in l)){o[++n]=m} l[m]=$0} END{for(i=1;i<=n;i++)print l[o[i]]}' |
+            tail -n "$MAX_VERSIONS"
+          )
+          [ -n "${latest:-}" ] || { echo "::error::no vX.Y.Z tags found"; exit 1; }
+          echo "root=$latest versions=${versions[*]:-<none>}"
+
+          # firebase deploy publishes all of dist/, so the whole tree is assembled locally first. Root
+          # goes first: its outDir is dist/ and Vite empties that, wiping any version folder present.
+          rm -rf dist
+          checkout "$latest"
+          build ""
+          # Still checked out, so build its versioned bundle now and skip a second checkout + install.
+          if printf '%s\n' "${versions[@]:-}" | grep -qx "$latest"; then build "$latest"; fi
+
+          for v in "${versions[@]:-}"; do
+            if [ -z "$v" ] || [ "$v" = "$latest" ]; then continue; fi
+            checkout "$v"
+            build "$v"
+          done
+          [ -f dist/index.html ] || { echo "::error::root bootstrap was overwritten"; exit 1; }
+
+          # Hosting config comes from the release serving root; the loop left us on the oldest one.
+          # Version rewrites first, catch-all last: Firebase is first-match-wins and the catch-all has to
+          # fall through to the root bootstrap.
+          git checkout --quiet "$latest" -- firebase.json .firebaserc
+          rewrites=$(printf '%s\n' "${versions[@]:-}" | { grep -v '^$' || true; } | jq -R . | jq -s \
+            'map({source:("/"+.+"/**"), destination:("/"+.+"/index.html")}) + [{source:"**",destination:"/index.html"}]')
+          jq --argjson r "$rewrites" '.hosting |= map(.rewrites = $r)' firebase.json > fb.tmp && mv fb.tmp firebase.json
+          jq -c '.hosting[] | {target, rewrites}' firebase.json
+          find dist -mindepth 1 -maxdepth 1 -type d | sort
+          echo "DEPLOY_MSG=Root $latest + versions ${versions[*]:-none}" >> "$GITHUB_ENV"
+
+      - name: Deploy to Firebase
         working-directory: apps/${{ inputs.appDir }}
-      - name: Build
-        run: pnpm --filter ${{ inputs.appDir }} build
-
-      - name: Install Firebase
-        run: npm install -g firebase-tools
-
-      - name: Set Firebase project
-        run: firebase use ${{ inputs.firebaseProject }} --token "$HOTWAX_PUBLIC_SECRET"
         env:
           HOTWAX_PUBLIC_SECRET: ${{ secrets.HOTWAX_PUBLIC_SECRET }}
-        working-directory: apps/${{ inputs.appDir }}
-
-      - name: Deploy
-        run: firebase deploy --token "$HOTWAX_PUBLIC_SECRET" -m "Deploying via GitHub actions"  --only hosting:uat
-        env:
-          HOTWAX_PUBLIC_SECRET: ${{ secrets.HOTWAX_PUBLIC_SECRET }}
-        working-directory: apps/${{ inputs.appDir }}
+        run: |
+          set -euo pipefail
+          npm install -g firebase-tools
+          firebase use ${{ inputs.firebaseProject }} --token "$HOTWAX_PUBLIC_SECRET"
+          firebase deploy --token "$HOTWAX_PUBLIC_SECRET" -m "$DEPLOY_MSG" --only hosting:uat
 
   release:
     runs-on: ubuntu-latest
-    
+
     steps:
       - uses: actions/checkout@v2
       - name: "Fetch release tag"
