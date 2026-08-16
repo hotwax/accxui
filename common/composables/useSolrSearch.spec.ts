@@ -1,14 +1,20 @@
-import { describe, it, expect } from 'vitest';
+import { beforeEach, describe, it, expect, vi } from 'vitest';
+import api from '../core/remoteApi';
 import { useSolrSearch } from './useSolrSearch';
 
-const { prepareOrderLookupQuery } = useSolrSearch();
+vi.mock('../core/remoteApi', () => ({
+  default: vi.fn()
+}));
+
+const mockedApi = vi.mocked(api);
+const { prepareOrderLookupQuery, runSolrQuery } = useSolrSearch();
 
 describe('prepareOrderLookupQuery', () => {
   it('should have default filters and params', () => {
     const query = {};
     const payload = prepareOrderLookupQuery(query);
     expect(payload.json.filter).toEqual(["docType: ORDER", "orderTypeId: SALES_ORDER"]);
-    expect(payload.json.params.q.op).toBe("AND");
+    expect(payload.json.params['q.op']).toBe("AND");
     expect(payload.json.query).toBe("*:*");
   });
 
@@ -69,5 +75,40 @@ describe('prepareOrderLookupQuery', () => {
     const query3 = { date: 'custom', fromDate: '2023-01-01T12:00:00Z' };
     const payload3 = prepareOrderLookupQuery(query3);
     expect(payload3.json.filter).toContain('{!tag=orderLookupFilter}orderDate: [2023-01-01T00:00:00Z TO *]');
+  });
+});
+
+describe('runSolrQuery', () => {
+  beforeEach(() => {
+    vi.stubEnv('VITE_OMS_TYPE', 'MOQUI');
+    mockedApi.mockReset();
+  });
+
+  it('preserves facets from a Moqui search response envelope', async () => {
+    mockedApi.mockResolvedValue({
+      status: 200,
+      data: {
+        response: {
+          responseHeader: { status: 0 },
+          response: { numFound: 0, start: 0, docs: [] },
+          facets: {
+            count: 3,
+            physicalFacilities: {
+              buckets: [{ val: 'OREM', orderCount: 3 }]
+            }
+          }
+        }
+      }
+    } as any);
+
+    const response = await runSolrQuery({ json: { query: '*:*' } });
+
+    expect(response.data.response).toEqual({ numFound: 0, start: 0, docs: [] });
+    expect(response.data.facets).toEqual({
+      count: 3,
+      physicalFacilities: {
+        buckets: [{ val: 'OREM', orderCount: 3 }]
+      }
+    });
   });
 });

@@ -39,6 +39,7 @@
     "pinia-plugin-persistedstate": "catalog:",
     "qs": "catalog:",
     "register-service-worker": "catalog:",
+    "uuid": "^10.0.0",
     "vee-validate": "catalog:",
     "vue": "catalog:",
     "vue-i18n": "catalog:",
@@ -68,7 +69,7 @@
     "chrome-ide-trace": "catalog:",
     "eslint": "catalog:",
     "eslint-import-resolver-typescript": "^4.4.4",
-    "eslint-plugin-import": "^2.32.0",
+    "eslint-plugin-import-x": "^4.17.1",
     "eslint-plugin-vue": "10.8.0",
     "espree": "^11.2.0",
     "globals": "^17.4.0",
@@ -88,7 +89,10 @@
     "overrides": {
       "rollup": "catalog:",
       "@stencil/core": "catalog:",
-      "pinia": "catalog:"
+      "pinia": "catalog:",
+      "eslint-plugin-vue": "10.8.0",
+      "@typescript-eslint/parser": "8.56.1",
+      "@typescript-eslint/eslint-plugin": "8.56.1"
     }
   },
   "description": "An Ionic project"
