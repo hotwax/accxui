@@ -18,10 +18,14 @@ const checkIfImageExists = (src: string) => {
   })
 };
 
+let lastRequestedSrc = "";
+
 const isShopifyCdnUrl = computed(() => {
-  if(!props.src) return false
+  if (!props.src) return false
   try {
-    return new URL(props.src).hostname === "cdn.shopify.com"
+    const urlString = props.src.startsWith('//') ? 'https:' + props.src : props.src
+    const hostname = new URL(urlString).hostname
+    return hostname === "cdn.shopify.com" || hostname === "cdn.shopifycdn.net"
   } catch {
     return false
   }
@@ -40,12 +44,26 @@ const prepareImgUrl = (src: string, size?: string) => {
 };
 
 const setImageUrl = () => {
-  imageUrl.value = defaultImgUrl
   if (props.src) {
     const src: string = prepareImgUrl(props.src, props.size)
-    checkIfImageExists(src).then(() => imageUrl.value = src).catch(err => console.error("checkIfImageExists", err))
+    lastRequestedSrc = src
+    checkIfImageExists(src)
+      .then(() => {
+        if (lastRequestedSrc === src) {
+          imageUrl.value = src
+        }
+      })
+      .catch(err => {
+        if (lastRequestedSrc === src) {
+          console.error("checkIfImageExists", err)
+          imageUrl.value = defaultImgUrl
+        }
+      })
+  } else {
+    lastRequestedSrc = ""
+    imageUrl.value = defaultImgUrl
   }
 };
 
-watch(() => [props.src, props.size], setImageUrl, { immediate: true });
+watch([() => props.src, () => props.size], setImageUrl, { immediate: true });
 </script>
