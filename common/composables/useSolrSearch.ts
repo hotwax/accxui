@@ -374,6 +374,10 @@ async function searchProducts(params: { keyword?: string, sort?: string, qf?: st
     payload.json.filter += ` ${OPERATOR.AND} isVirtual: false`
   }
 
+  if (!params.filters?.isVariant) {
+    payload.json.filter += ` ${OPERATOR.AND} isVariant: true`
+  }
+
   try {
     const isMoqui = commonUtil.isMoqui();
     let resp = await api({
