@@ -11,7 +11,7 @@ on:
         required: true
         type: string
       firebaseProject:
-        default: 'default'
+        default: 'uat'
         type: string
       accxuiVersion:
         description: 'Tag/version of accxui to build against'
@@ -42,6 +42,8 @@ jobs:
           repository: hotwax/accxui
           path: .
           ref: ${{ inputs.accxuiVersion }}
+          fetch-depth: 0 # full history + tags: each release is built against the accxui it declares
+          fetch-tags: true
 
       - name: Checkout app in apps/
         uses: actions/checkout@v4
@@ -108,7 +110,29 @@ jobs:
             [ -f "dist/${1:+$1/}index.html" ] || { echo "::error::${1:-root} built to the wrong path"; exit 1; }
           }
 
-          checkout() { git clean -fd; git checkout --quiet -f "$1"; pnpm install; }
+          # Every release was cut against one accxui version, named in that tag's own caller workflow: the
+          # lockfile it was resolved with lives there, and its imports expect that common/. Pointing all
+          # releases at the newest accxui gives an old release code it never shipped with, and a lockfile
+          # that cannot satisfy its manifest — pnpm defaults --frozen-lockfile to true in CI, so the
+          # install fails outright on any dependency the release has since added, dropped, or moved to
+          # catalog:. accxui gitignores apps/, so re-pointing its ref leaves the app checkout untouched.
+          # Tags predating the input keep inputs.accxuiVersion.
+          default_accxui="${{ inputs.accxuiVersion }}"
+          accxui="$default_accxui"
+          use_accxui() {
+            local want
+            want=$(grep -rhoE 'accxuiVersion:[[:space:]]*[^[:space:]]+' .github/workflows 2>/dev/null |
+                   head -1 | awk '{print $2}' | tr -d "\"'") || true
+            want="${want:-$default_accxui}"
+            if [ "$want" != "$accxui" ]; then
+              echo "accxui $accxui -> $want (declared by $1)"
+              git -C "$GITHUB_WORKSPACE" checkout --quiet -f "$want" ||
+                { echo "::error::$1 declares accxui $want, which does not exist"; exit 1; }
+              accxui="$want"
+            fi
+          }
+
+          checkout() { git clean -fd; git checkout --quiet -f "$1"; use_accxui "$1"; pnpm install; }
 
           # Latest patch of each MAJOR.MINOR, newest MAX_VERSIONS of those (sort -V ascending, so the last
           # write per minor wins). Releases with no VITE_APP_VERSION_CONFIG predate multi-version support:
