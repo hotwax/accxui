@@ -1,4 +1,9 @@
-import { api, commonUtil, cookieHelper, logger, translate, useEmbeddedAppStore } from "..";
+import { commonUtil } from "../utils/commonUtil";
+import { cookieHelper } from "../helpers/cookieHelper";
+import logger from "../core/logger";
+import { translate } from "../core/i18n";
+import api from "../core/remoteApi";
+import { useEmbeddedAppStore } from "../store/embeddedApp";
 import { DateTime } from "luxon";
 import { computed, ref } from "vue";
 import emitter from "../core/emitter";
@@ -198,7 +203,9 @@ export function useAuth() {
     // this causes an issue on relogin to the same instance without moving to the oms page
     accxuiConfig.value.oms = cookieHelper().get("oms") as string
     accxuiConfig.value.appVersion = appVersion
-    localStorage.removeItem("requestedPagePath")
+    if (typeof localStorage !== "undefined" && localStorage?.removeItem) {
+      localStorage.removeItem("requestedPagePath")
+    }
 
     if (commonUtil.isAppEmbedded()) {
       const embeddedAppStore = useEmbeddedAppStore();
@@ -206,9 +213,9 @@ export function useAuth() {
       embeddedAppStore.$reset();
     }
 
-    if(redirectionUrl) {
-      window.location.href = redirectionUrl
-    } else {
+    if (redirectionUrl) {
+      window.location.href = redirectionUrl;
+    } else if (accxuiConfig.value.router?.replace) {
       accxuiConfig.value.router.replace("/login");
     }
     emitter.emit("dismissLoader");
