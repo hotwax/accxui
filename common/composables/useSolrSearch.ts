@@ -291,6 +291,7 @@ function normalizeSearchResponse(resp: any): any {
 
 async function runSolrQuery(payload: any): Promise<any> {
   const isMoqui = commonUtil.isMoqui();
+  if (payload.json && !payload.json.query) payload.json.query = payload.json.params?.q || "*:*";
   const resp = await api({
     url: isMoqui ? "admin/search/query" : "admin/runSolrQuery",
     method: "post",
@@ -371,6 +372,10 @@ async function searchProducts(params: { keyword?: string, sort?: string, qf?: st
 
   if (!params.filters?.isVirtual) {
     payload.json.filter += ` ${OPERATOR.AND} isVirtual: false`
+  }
+
+  if (!params.filters?.isVariant) {
+    payload.json.filter += ` ${OPERATOR.AND} isVariant: true`
   }
 
   try {
