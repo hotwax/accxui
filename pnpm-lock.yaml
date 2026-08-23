@@ -1355,18 +1355,12 @@ importers:
       '@capacitor/android':
         specifier: 'catalog:'
         version: 8.2.0(@capacitor/core@8.2.0)
-      '@capacitor/clipboard':
-        specifier: 'catalog:'
-        version: 8.0.1(@capacitor/core@8.2.0)
       '@capacitor/core':
         specifier: 'catalog:'
         version: 8.2.0
       '@capacitor/ios':
         specifier: 'catalog:'
         version: 8.2.0(@capacitor/core@8.2.0)
-      '@hotwax/app-version-info':
-        specifier: ^1.0.0
-        version: 1.0.0
       '@ionic/core':
         specifier: 'catalog:'
         version: 8.8.0
@@ -1412,9 +1406,6 @@ importers:
       qs:
         specifier: 'catalog:'
         version: 6.15.0
-      register-service-worker:
-        specifier: 'catalog:'
-        version: 1.7.2
       vue:
         specifier: 'catalog:'
         version: 3.5.30(typescript@6.0.2)
