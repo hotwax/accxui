@@ -70,12 +70,24 @@ describe('DxpOmsInstanceFooter', () => {
     expect(wrapper.find('[data-stub="ion-label"]').text()).toBe('rails-oms');
   });
 
-  it('emits the selected store id rather than the raw Ionic event', () => {
+  it('emits the selected store id, so apps need not dig into the Ionic event', () => {
     const wrapper = render({ productStores: STORES, currentProductStoreId: 'STORE' });
 
     wrapper.findComponent({ name: 'ion-select' }).vm.$emit('ionChange', { detail: { value: 'OUTLET' } });
 
-    expect(wrapper.emitted('update:productStore')?.[0]).toEqual(['OUTLET']);
+    expect(wrapper.emitted('update:productStore')?.[0]?.[0]).toBe('OUTLET');
+  });
+
+  it('also passes the raw event through, for apps that must revert the picker', () => {
+    // available-to-promise confirms before leaving an unsaved page and puts the picker back
+    // when the user declines. ion-select keeps its own display value, so reverting means
+    // writing to event.target.value — unreachable from the id alone.
+    const wrapper = render({ productStores: STORES, currentProductStoreId: 'STORE' });
+    const ionEvent = { detail: { value: 'OUTLET' }, target: { value: 'OUTLET' } };
+
+    wrapper.findComponent({ name: 'ion-select' }).vm.$emit('ionChange', ionEvent);
+
+    expect(wrapper.emitted('update:productStore')?.[0]?.[1]).toBe(ionEvent);
   });
 
   it('colors the timezone as danger only when the app says it is mismatched', () => {
