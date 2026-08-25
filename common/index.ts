@@ -1,5 +1,6 @@
 import imagePreview from './directives/imagePreview'
 import DxpShopifyImg from "./components/DxpShopifyImg.vue"
+import DxpOmsInstanceFooter from "./components/DxpOmsInstanceFooter.vue"
 import RadioFacetGroup from "./components/RadioFacetGroup.vue"
 import StatCard from "./components/StatCard.vue"
 import Sparkline from "./components/Sparkline.vue"
@@ -34,6 +35,7 @@ export {
   commonUtil,
   cookieHelper,
   createDxpI18n,
+  DxpOmsInstanceFooter,
   DxpShopifyImg,
   emitter,
   firebaseMessaging,
