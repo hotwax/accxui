@@ -29,7 +29,7 @@
           :label="selectLabel || translate('Select store')"
           interface="popover"
           :value="currentProductStoreId"
-          @ionChange="emit('update:productStore', $event.detail.value)"
+          @ionChange="emit('update:productStore', $event.detail.value, $event)"
         >
           <ion-select-option
             v-for="store in productStores"
@@ -75,7 +75,13 @@ const props = withDefaults(defineProps<{
 });
 
 const emit = defineEmits<{
-  (event: 'update:productStore', productStoreId: string): void;
+  /**
+   * The chosen store id, plus the originating Ionic event. Most apps only need the id; the
+   * event is there for the ones that confirm the switch and have to put the picker back when
+   * the user declines — ion-select keeps its own display value, so reverting means writing to
+   * `event.target.value`, which is unreachable from the id alone.
+   */
+  (event: 'update:productStore', productStoreId: string, ionEvent: any): void;
 }>();
 
 function storeId(store: any): string {
