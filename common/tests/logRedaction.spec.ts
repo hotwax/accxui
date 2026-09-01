@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { REDACTED, RedactSensitiveDataHook, sanitizeForLog } from './logRedaction';
+import { REDACTED, RedactSensitiveDataHook, sanitizeForLog } from '../core/logRedaction';
 
 /** The exact token seen leaking from a 400 on oms/orders/110879/fulfillmentTimeline. */
 const TOKEN = 'eyJhbGciOiJIUzUxMiIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE3ODc0MzQ5NDEsInVzZXJMb2dpbklkIjoiYWRpdHlhLnBhdGVsIn0.nseV_rrCuALmHuEv79d92UjxuMltZpHPg4biQeKLKAej';

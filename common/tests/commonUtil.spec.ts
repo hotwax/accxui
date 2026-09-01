@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { commonUtil } from "./commonUtil";
+import { commonUtil } from "../utils/commonUtil";
 
 describe("commonUtil local instance URLs", () => {
   beforeEach(() => {

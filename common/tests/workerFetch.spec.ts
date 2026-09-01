@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const workerRemoteApi = vi.hoisted(() => vi.fn());
-vi.mock("../../core/workerRemoteApi", () => ({ default: workerRemoteApi }));
+vi.mock("../core/workerRemoteApi", () => ({ default: workerRemoteApi }));
 
-import { pageAll } from "./workerFetch";
-import type { SyncContext } from "../types";
+import { pageAll } from "../cache/sync/workerFetch";
+import type { SyncContext } from "../cache/types";
 
 const ctx = { token: "test-token", maargUrl: "https://example.hotwax.io/rest/s1/", now: 0 } as unknown as SyncContext;
 const keyOf = (record: any) => record?.id;
