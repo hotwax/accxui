@@ -27,6 +27,7 @@
     "axios": "catalog:",
     "axios-cache-adapter": "catalog:",
     "comlink": "catalog:",
+    "dexie": "catalog:",
     "cron-parser": "catalog:",
     "cronstrue": "catalog:",
     "encoding-japanese": "catalog:",
