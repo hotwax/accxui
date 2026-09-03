@@ -138,6 +138,7 @@ const isLoggingIn = ref(false);
 const isDiscoveringLocalApiServers = ref(false);
 const localApiServers = ref<LocalApiServer[]>([]);
 const hasDiscoveredLocalApiServers = ref(false);
+const hasAttemptedDevAutoLogin = ref(false);
 let router: any = ref();
 
 const goToLogin = () => {
@@ -175,6 +176,35 @@ const toggleOmsInput = () => {
 
 const canDiscoverLocalApiServers = () => {
   return import.meta.env.DEV && typeof window !== "undefined";
+};
+
+const canDevAutoLogin = () => {
+  return Boolean(import.meta.env.DEV && import.meta.env.VITE_USERNAME && import.meta.env.VITE_PASSWORD);
+};
+
+// A BASIC OMS is the only one we can sign into with a username and password. An empty
+// loginOption means it has not been fetched for this OMS yet, and setOms fetches it before
+// deciding, so treating that as BASIC here defers the decision rather than guessing.
+const isBasicLoginOption = () => {
+  return !Object.keys(loginOption.value).length || loginOption.value.loginAuthType === "BASIC";
+};
+
+// Dev-only convenience: sign in with the credentials the local env supplies instead of making
+// a developer retype them on every reload. Automatic callers get one attempt per page load, so
+// a rejected sign-in leaves the form usable instead of retrying on each re-entry of the view;
+// an explicit server selection passes force since that is a deliberate retry.
+const attemptDevAutoLogin = async (force = false) => {
+  if(!canDevAutoLogin() || isLoggingIn.value) {
+    return;
+  }
+  if(!force && hasAttemptedDevAutoLogin.value) {
+    return;
+  }
+
+  hasAttemptedDevAutoLogin.value = true;
+  username.value = import.meta.env.VITE_USERNAME;
+  password.value = import.meta.env.VITE_PASSWORD;
+  await login();
 };
 
 const discoverLocalApiServerOptions = async () => {
@@ -257,13 +287,7 @@ const selectLocalApiServer = async (server: LocalApiServer) => {
   // user can't perform any operation there
   toggleOmsInput();
 
-  const devUsername = import.meta.env.VITE_USERNAME;
-  const devPassword = import.meta.env.VITE_PASSWORD;
-  if (import.meta.env.DEV && devUsername && devPassword) {
-    username.value = devUsername;
-    password.value = devPassword;
-    await login();
-  }
+  await attemptDevAutoLogin(true);
 };
 
 const initialise = async () => {
@@ -337,6 +361,20 @@ const initialise = async () => {
 
     if (showOmsInput.value) {
       discoverLocalApiServerOptions();
+
+      // VITE_DEFAULT_ALIAS only prefills the OMS input, it never applies it, so dev auto-login
+      // had no resolved instance to authenticate against and the developer was dropped on an
+      // empty form. Apply the prefilled OMS the same way selecting a discovered server does.
+      if(canDevAutoLogin() && instanceUrl.value && isBasicLoginOption()) {
+        await setOms();
+      }
+    }
+
+    // setOms clears showOmsInput for a BASIC OMS and redirects away for a SAML one, so reaching
+    // here with the credentials form showing means signing in is both possible and safe. This
+    // also covers a reload where the OMS is already set and only the credentials are missing.
+    if(!showOmsInput.value) {
+      await attemptDevAutoLogin();
     }
   } catch (error) {
     console.error(error);
