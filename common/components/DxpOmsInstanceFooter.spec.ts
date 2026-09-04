@@ -23,7 +23,7 @@ vi.mock('@ionic/vue', () => {
       name: 'ion-select',
       props: ['label', 'value'],
       emits: ['ionChange'],
-      template: '<div data-stub="ion-select"><slot /></div>'
+      template: '<div data-stub="ion-select"><slot name="label" /><slot /></div>'
     },
     IonSelectOption: passthrough('ion-select-option')
   };
@@ -57,7 +57,7 @@ describe('DxpOmsInstanceFooter', () => {
     expect(picker(wrapper).exists()).toBe(false);
   });
 
-  it('gives the picker its own row once there is more than one store', () => {
+  it('renders the picker in place of the static store label once there is more than one store', () => {
     const wrapper = render({
       instanceLabel: 'rails-oms',
       productStores: STORES,
