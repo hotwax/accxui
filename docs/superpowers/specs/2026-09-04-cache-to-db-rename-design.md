@@ -34,6 +34,25 @@ Out of scope entirely — unrelated senses of the word, none of which change:
 and the generic template heading `docs/DESIGN_DOCUMENT_GUIDE.md:43` ("Local Storage/Caching
 strategy").
 
+### File scope
+
+Narrower than the raw `grep -i cach` hit count suggests, because most order-manager hits are
+Tier C or prose. Verified by grepping for the renamed identifiers specifically:
+
+| repo | files | which |
+| --- | --- | --- |
+| `accxui` | 17 | 13 in `common/cache/`, plus `common/index.ts`, `common/composables/useProducts.ts` (prose), `common/tests/projection.spec.ts`, `common/tests/workerFetch.spec.ts` |
+| `order-manager` | 10 | `src/App.vue`, `src/cache/appCacheDb.ts`, `src/config/appSyncConfig.ts`, `src/main.ts`, `src/services/appCacheSync.ts`, `src/store/seed.ts`, `src/store/user.ts`, `src/views/Settings.vue`, `src/workers/appSync.worker.ts`, `tests/cache/appCacheDb.spec.ts` |
+
+No other `order-manager` file changes — not `store/order.ts`, `store/orderDetail.ts`,
+`views/OrderDetail.vue`, any `components/**`, any `utils/**`, any other spec, or any `docs/*.md`.
+Their "cache" references are all Tier C or prose.
+
+`tests/cache/appCacheDb.spec.ts` is currently untracked on this branch. It is also the guard for
+the database-name change: it asserts `orderManagerDbName('demo-oms') === 'demo-oms-OrderManagerCacheDB'`
+and the two multi-tenant names `alpha-OrderManagerCacheDB` / `beta-OrderManagerCacheDB`, all three
+of which become `…-OrderManagerDB`.
+
 ### Tier A — `accxui` / `common` framework
 
 Directory and files:
@@ -105,7 +124,6 @@ Log prefixes inside `common/db/`: `[cache]` → `[db]` (11 sites), `[cache-boots
 | `initSeedCache` | `initSeedDb` |
 | `populateFromCache` | `populateFromDb` |
 | `cacheSubtitle` (`views/Settings.vue`) | `syncSubtitle` |
-| `CachedProduct` (Dexie row type, `services/productDb.ts`) | `ProductRecord` |
 
 `getOrderManagerDb` and `orderManagerDbName` already read correctly and do not change.
 
@@ -123,12 +141,11 @@ No locale JSON file contains either string, so `translate()` falls back to the k
 translation catalogue needs editing. The visible label changes from "Local cache" to
 "Local database" — intended, since the panel reports IndexedDB row counts.
 
-Prose in `docs/*.md` (7 files: `Compromises.md`, `OrderAllocationSummary.md`,
-`OrderCloneDesign.md`, `OrderDetailDataBinding.md`, `OrderDetailStore.md`, `ProductData.md`,
-`UnifiedFacilityInventoryModal.md`) updates only where it names a renamed identifier or calls the
-IndexedDB layer a cache. One exception stays verbatim:
-`UnifiedFacilityInventoryModal.md:329` mentions `facilityCache` in a "before" column describing
-an approach that no longer exists — historical record, not current naming.
+**No `order-manager/docs/*.md` file changes.** Seven docs mention "cache", but none names a
+Tier A or Tier B identifier, and every "cache" in them refers to the Tier C product stack —
+including `Compromises.md:14` ("SKU from the Dexie cache", i.e. `productDb.ts`) and
+`UnifiedFacilityInventoryModal.md:329` (`facilityCache`, a "before" column describing an approach
+that no longer exists). All stay verbatim.
 
 ### Tier C — keeps `cache`, by design
 
@@ -138,18 +155,13 @@ underneath. Renaming them would make the vocabulary less accurate, not more.
 | thing | why it stays |
 | --- | --- |
 | `store/order.ts` — `this.cache`, `cacheOrders` | in-memory map of fetched orders; a miss refetches from the search service |
-| `store/productCache.ts` — `useProductCacheStore`, `productCache` | reactive in-memory mirror **over** `services/productDb.ts`; the mirror is the cache, `productDb` is the DB. The pair already names both halves correctly |
+| the product stack: `services/productDb.ts`, `store/productCache.ts`, `composables/useProductMaster.ts` — `CachedProduct`, `useProductCacheStore`, `productCache`, `cacheReady` | a **separate Dexie implementation**, unrelated to this framework. `productDb.ts` imports `Dexie` directly and never `BaseCacheDB`; none of the three files import from `@common/db`, only barrel helpers (`cookieHelper`, `logger`, `useSolrSearch`, `commonUtil`). It already names both of its halves correctly — `productDb` for the durable layer, `productCache` for the reactive in-memory mirror over it |
 | `components/orders/RejectItemsModal.vue` — `cachedReasons` | local `const` memo inside one function |
-| `composables/useProductMaster.ts` — `cacheReady` | readiness of the in-memory mirror |
 | `views/OrderDetail.vue:2368` — `uncached` (comment) | prose about the in-memory mirror |
 
-`CachedProduct` is the one exception pulled out of this tier and into Tier B: it is the Dexie row
-type declared in `productDb.ts`, so it names persisted shape, not the mirror. Because
-`store/productCache.ts` declares `export type { CachedProduct, ProductIdentification }`, that file
-is edited for the type rename even though the store, its id (`defineStore("productCache")`), and
-`useProductCacheStore` all keep their names. Its consumers —
-`composables/useProductMaster.ts`, `components/inventory/ProductInventoryModal.vue`,
-`components/orders/CloneOrderModal.vue`, and the other import sites — change only the type name.
+Nothing in this tier is touched at all — not the identifiers, not the `defineStore("productCache")`
+id, not the type names, not their import sites (`components/inventory/ProductInventoryModal.vue`,
+`components/orders/CloneOrderModal.vue`, `components/tasks/FraudTaskCard.vue`, and the rest).
 
 ## Two cross-cutting runtime changes
 
@@ -217,8 +229,10 @@ Consequences:
 ## Verification
 
 - `git grep -in 'cach' -- common` in `accxui` returns only the out-of-scope senses listed above.
-- `git grep -in 'cach' -- src tests` in `order-manager` returns only Tier C entries,
-  `VITE_CACHE_MAX_AGE`, and `.cache` in `vite.config.js`.
+- `git grep -in 'cach' -- src tests` in `order-manager` returns only Tier C entries and prose;
+  `git grep -il 'cach' -- docs` still returns the same seven untouched files.
+- The identifier sweep returns nothing: `git grep -lE 'BaseCacheDB|CachedRow|CachedEntity|useCachedList|useCachedRecord|useCacheStatus|CacheDomainCatalogItem|COMMON_CACHE_SCHEMA|startCacheBootstrap|clearAllCaches|cachedAt|OrderManagerCacheDB|startAppCacheSync|getCacheSyncToken|ORDER_MANAGER_CACHE_CATALOG|subscribeToCacheUpdates|initSeedCache|populateFromCache|@common/cache|@/cache/'`
+  in both repos.
 - `git grep -n 'hotwax-cache-sync'` returns nothing in either repo; `git grep -n DB_SYNC_CHANNEL`
   returns one definition and three import sites.
 - `pnpm test` in `order-manager` passes, including the moved `tests/db/orderManagerDb.spec.ts`.
@@ -234,4 +248,6 @@ Consequences:
 - No behaviour, projection, sync-cadence, or schema change beyond the two runtime renames above.
 - No Dexie version bump.
 - No touching `inventory-count`; it does not import `@common/cache` at all.
+- No touching the product stack (`productDb.ts` / `productCache.ts` / `useProductMaster.ts`) or
+  its `CachedProduct` type. It is a separate Dexie implementation and stays as it is.
 - No sweep of Tier C, and no unrelated refactoring of the sync framework.
