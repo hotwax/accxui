@@ -12,7 +12,7 @@ import { useSolrSearch } from "./useSolrSearch";
  * remote target and a delta), so a screen showing those rows can only offer an id unless it resolves
  * the product separately. This is that resolver, in one place instead of a copy per app. It keeps the
  * Solr query shape of the per-app `useProductMaster` composables (`docType:PRODUCT`, batched ids, the
- * same field list) but not their durable Dexie cache: the requirement is names for the rows a screen has
+ * same field list) but not their durable Dexie DB: the requirement is names for the rows a screen has
  * open, which a Map keyed by productId satisfies.
  *
  * Module state survives an SPA logout, so the composable registers its own `reset()` with the common

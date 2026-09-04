@@ -3,9 +3,9 @@
  */
 
 import Dexie, { type Table, liveQuery, type Observable } from "dexie";
-import type { CachedEntity, CachedRow, EntityProjection, LiveQueryOptions } from "./types";
+import type { DbEntity, DbRow, EntityProjection, LiveQueryOptions } from "./types";
 
-export class BaseCacheDB extends Dexie {
+export class BaseDB extends Dexie {
   syncMeta!: Table<Record<string, any>, string>;
   protected _tableNames: string[] = [];
 
@@ -27,7 +27,7 @@ export class BaseCacheDB extends Dexie {
 /**
  * Wipe all data tables in the given Dexie instance on logout.
  */
-export async function clearDatabaseTables(db: BaseCacheDB): Promise<void> {
+export async function clearDatabaseTables(db: BaseDB): Promise<void> {
   try {
     await db.transaction("rw", db.getTableNames(), async () => {
       for (const tableName of db.getTableNames()) {
@@ -35,13 +35,13 @@ export async function clearDatabaseTables(db: BaseCacheDB): Promise<void> {
       }
     });
   } catch (error) {
-    console.error(`[cache] Failed to clear tables for ${db.name}:`, error);
+    console.error(`[db] Failed to clear tables for ${db.name}:`, error);
   }
 }
 
 const LOGIN_MARKER_PREFIX = "loginSync:";
 
-export async function hasSyncedThisLogin(db: BaseCacheDB, domain: string): Promise<boolean> {
+export async function hasSyncedThisLogin(db: BaseDB, domain: string): Promise<boolean> {
   try {
     const record = await db.syncMeta.get(`${LOGIN_MARKER_PREFIX}${domain}`);
     return Boolean(record?.synced);
@@ -50,7 +50,7 @@ export async function hasSyncedThisLogin(db: BaseCacheDB, domain: string): Promi
   }
 }
 
-export async function markSyncedThisLogin(db: BaseCacheDB, domain: string): Promise<void> {
+export async function markSyncedThisLogin(db: BaseDB, domain: string): Promise<void> {
   try {
     await db.syncMeta.put({
       key: `${LOGIN_MARKER_PREFIX}${domain}`,
@@ -58,36 +58,36 @@ export async function markSyncedThisLogin(db: BaseCacheDB, domain: string): Prom
       timestamp: Date.now(),
     });
   } catch (error) {
-    console.warn(`[cache] Failed to mark ${domain} synced:`, error);
+    console.warn(`[db] Failed to mark ${domain} synced:`, error);
   }
 }
 
-export async function ensureCacheReady(db: BaseCacheDB): Promise<void> {
+export async function ensureDbReady(db: BaseDB): Promise<void> {
   try {
     if (!db.isOpen()) {
       await db.open();
     }
   } catch (err: any) {
-    console.warn(`[cache] Database open failed for ${db.name}, rebuilding:`, err);
+    console.warn(`[db] Database open failed for ${db.name}, rebuilding:`, err);
     try {
       db.close();
       await Dexie.delete(db.name);
       await db.open();
     } catch (rebuildErr) {
-      console.error(`[cache] Rebuild failed for ${db.name}:`, rebuildErr);
+      console.error(`[db] Rebuild failed for ${db.name}:`, rebuildErr);
     }
   }
 }
 
 /**
- * Define a cached entity with liveQuery and snapshot read methods.
+ * Define a stored entity with liveQuery and snapshot read methods.
  */
-export function defineCachedEntity<T = Record<string, any>>(
-  db: BaseCacheDB,
+export function defineDbEntity<T = Record<string, any>>(
+  db: BaseDB,
   table: string,
   projection: EntityProjection,
-): CachedEntity<T> {
-  function buildQuery(tableRef: Table<CachedRow, string>, options: LiveQueryOptions = {}) {
+): DbEntity<T> {
+  function buildQuery(tableRef: Table<DbRow, string>, options: LiveQueryOptions = {}) {
     let collection: any;
 
     if (options.scope) {
@@ -128,23 +128,23 @@ export function defineCachedEntity<T = Record<string, any>>(
   return {
     table,
     projection,
-    live(options: LiveQueryOptions = {}): Observable<CachedRow[]> {
+    live(options: LiveQueryOptions = {}): Observable<DbRow[]> {
       return liveQuery(async () => {
-        const tableRef = db.table<CachedRow, string>(table);
+        const tableRef = db.table<DbRow, string>(table);
         const query = buildQuery(tableRef, options);
         return query.toArray();
       });
     },
     async get(key: string): Promise<T | undefined> {
       if (!key) return undefined;
-      const row = await db.table<CachedRow, string>(table).get(key);
+      const row = await db.table<DbRow, string>(table).get(key);
       return (row?.raw as T) ?? (row as unknown as T);
     },
     async all(options: LiveQueryOptions = {}): Promise<T[]> {
-      const tableRef = db.table<CachedRow, string>(table);
+      const tableRef = db.table<DbRow, string>(table);
       const query = buildQuery(tableRef, options);
       const rows = await query.toArray();
-      return rows.map((r: CachedRow) => (r.raw as T) ?? (r as unknown as T));
+      return rows.map((r: DbRow) => (r.raw as T) ?? (r as unknown as T));
     },
   };
 }

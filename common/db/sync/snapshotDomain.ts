@@ -2,9 +2,9 @@
  * Factory for Class-B (reference/config) snapshot sync domains.
  */
 
-import { BaseCacheDB, hasSyncedThisLogin, markSyncedThisLogin } from "../db";
+import { BaseDB, hasSyncedThisLogin, markSyncedThisLogin } from "../baseDb";
 import { diffStaleKeys, isUnkeyableFetch, projectRows } from "../projection";
-import type { CachedRow, EntityProjection, SyncContext } from "../types";
+import type { DbRow, EntityProjection, SyncContext } from "../types";
 import { registerSyncDomain } from "./syncRegistry";
 import { pageAll, unwrapCollection, workerGet } from "./workerFetch";
 
@@ -43,7 +43,7 @@ function keyOfRecord(record: any, config: SnapshotDomainConfig): string | undefi
   return key === undefined || key === null || key === "" ? undefined : String(key);
 }
 
-export function registerSnapshotDomain(config: SnapshotDomainConfig, getDb: (omsInstance: string) => BaseCacheDB): void {
+export function registerSnapshotDomain(config: SnapshotDomainConfig, getDb: (omsInstance: string) => BaseDB): void {
   registerSyncDomain({
     name: config.name,
     async sync(ctx: SyncContext) {
@@ -53,7 +53,7 @@ export function registerSnapshotDomain(config: SnapshotDomainConfig, getDb: (oms
       let rawRecords: any[] = [];
 
       if (config.fanOut) {
-        const parentRows = await db.table<CachedRow, string>(config.fanOut.parentTable).toArray();
+        const parentRows = await db.table<DbRow, string>(config.fanOut.parentTable).toArray();
         for (const parent of parentRows) {
           const parentId = String(parent[config.fanOut.parentKeyField] || parent.raw?.[config.fanOut.parentKeyField] || "");
           if (!parentId) continue;
@@ -81,7 +81,7 @@ export function registerSnapshotDomain(config: SnapshotDomainConfig, getDb: (oms
       }
 
       if (rawRecords.length > 0 && isUnkeyableFetch(rawRecords, config.projection)) {
-        console.warn(`[cache] ${config.name}: fetched ${rawRecords.length} records but keys could not be built. Aborting snapshot replace.`);
+        console.warn(`[db] ${config.name}: fetched ${rawRecords.length} records but keys could not be built. Aborting snapshot replace.`);
         return;
       }
 
@@ -89,7 +89,7 @@ export function registerSnapshotDomain(config: SnapshotDomainConfig, getDb: (oms
       const freshKeys = freshRows.map((r) => String(r[config.projection.keyField]));
 
       await db.transaction("rw", [config.table, "syncMeta"], async () => {
-        const tableRef = db.table<CachedRow, string>(config.table);
+        const tableRef = db.table<DbRow, string>(config.table);
         let existingKeys: string[] = [];
 
         if (config.scopeOnSync) {
@@ -114,7 +114,7 @@ export function registerSnapshotDomain(config: SnapshotDomainConfig, getDb: (oms
 
     async refetchOne(pk: Record<string, unknown>, ctx: SyncContext) {
       const db = getDb(ctx.omsInstance);
-      const tableRef = db.table<CachedRow, string>(config.table);
+      const tableRef = db.table<DbRow, string>(config.table);
 
       if (config.byPk) {
         const target = config.byPk(pk);
@@ -128,7 +128,7 @@ export function registerSnapshotDomain(config: SnapshotDomainConfig, getDb: (oms
             }
           }
         } catch (error) {
-          console.warn(`[cache] ${config.name}: failed to refetch by PK:`, error);
+          console.warn(`[db] ${config.name}: failed to refetch by PK:`, error);
         }
       } else if (config.refetchScope) {
         const scopeConfig = config.refetchScope(pk);

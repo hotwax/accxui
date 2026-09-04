@@ -1,11 +1,11 @@
 /**
- * Main-thread Cache Bootstrap and Mutation Dispatcher.
+ * Main-thread Local Database Bootstrap and Mutation Dispatcher.
  */
 
 import { wrap, type Remote } from "comlink";
 import { reactive } from "vue";
-import type { BaseCacheDB } from "../db";
-import { clearDatabaseTables } from "../db";
+import type { BaseDB } from "../baseDb";
+import { clearDatabaseTables } from "../baseDb";
 import type { SyncHarness } from "./pollingWorkerHarness";
 
 export const bootstrapState = reactive({
@@ -16,20 +16,20 @@ export const bootstrapState = reactive({
 
 let workerInstance: Worker | null = null;
 let harnessProxy: Remote<SyncHarness> | null = null;
-let currentDb: BaseCacheDB | null = null;
+let currentDb: BaseDB | null = null;
 
 export interface BootstrapConfig {
   workerFactory: () => Worker;
   token: string;
   maargUrl: string;
-  /** OMS instance whose cache is being synced. Forwarded to the worker. */
+  /** OMS instance whose database is being synced. Forwarded to the worker. */
   omsInstance: string;
-  db: BaseCacheDB;
+  db: BaseDB;
   domains?: string[];
   baseTickMs?: number;
 }
 
-export async function startCacheBootstrap(config: BootstrapConfig): Promise<void> {
+export async function startDbBootstrap(config: BootstrapConfig): Promise<void> {
   currentDb = config.db;
   bootstrapState.running = true;
   bootstrapState.error = null;
@@ -50,8 +50,8 @@ export async function startCacheBootstrap(config: BootstrapConfig): Promise<void
 
     bootstrapState.lastSyncAt = Date.now();
   } catch (error: any) {
-    console.error("[cache-bootstrap] Bootstrap failed:", error);
-    bootstrapState.error = error?.message || "Cache sync failed";
+    console.error("[db-bootstrap] Bootstrap failed:", error);
+    bootstrapState.error = error?.message || "Database sync failed";
   } finally {
     bootstrapState.running = false;
   }
@@ -68,7 +68,7 @@ export async function refreshAfterMutation(domain: string, pk: Record<string, un
     try {
       await harnessProxy.refetchOne(domain, pk);
     } catch (error) {
-      console.warn(`[cache] Failed to refresh record after mutation for ${domain}:`, error);
+      console.warn(`[db] Failed to refresh record after mutation for ${domain}:`, error);
     }
   }
 }
@@ -83,7 +83,7 @@ export async function resyncDomain(domain: string): Promise<void> {
       await harnessProxy.resyncDomain(domain);
       return;
     } catch (error) {
-      console.warn(`[cache] Failed to resync domain ${domain} via worker, attempting direct sync:`, error);
+      console.warn(`[db] Failed to resync domain ${domain} via worker, attempting direct sync:`, error);
     }
   }
 
@@ -111,7 +111,7 @@ export async function resyncAll(): Promise<void> {
       await harnessProxy.resyncAll();
       return;
     } catch (error) {
-      console.warn(`[cache] Failed to resync all domains via worker, attempting direct sync:`, error);
+      console.warn(`[db] Failed to resync all domains via worker, attempting direct sync:`, error);
     }
   }
 
@@ -132,12 +132,12 @@ export async function resyncAll(): Promise<void> {
         trigger: "manual",
       });
     } catch (err) {
-      console.warn(`[cache] Failed to sync ${domain.name}:`, err);
+      console.warn(`[db] Failed to sync ${domain.name}:`, err);
     }
   }
 }
 
-export async function clearAllCaches(db?: BaseCacheDB): Promise<void> {
+export async function clearLocalDb(db?: BaseDB): Promise<void> {
   const targetDb = db || currentDb;
   if (harnessProxy) {
     harnessProxy.stop();
