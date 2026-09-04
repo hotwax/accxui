@@ -14,25 +14,19 @@
   <ion-footer>
     <ion-toolbar>
       <ion-item lines="none">
-        <ion-label class="ion-text-wrap">
-          <p class="overline">{{ displayInstanceLabel }}</p>
-          <template v-if="!hasStorePicker">{{ currentStoreLabel }}</template>
-        </ion-label>
-        <ion-note v-if="displayTimeZone" slot="end" class="ion-text-end" :color="isTimeZoneMismatched ? 'danger' : ''">
-          {{ displayTimeZone }}
-          <p v-if="displayZoneTime">{{ displayZoneTime }}</p>
-        </ion-note>
-      </ion-item>
-
-      <ion-item v-if="hasStorePicker" lines="none">
         <ion-select
+          v-if="hasStorePicker"
+          label-placement="stacked"
           :justify="selectLabel ? 'space-between' : 'start'"
-          :label="selectLabel || undefined"
           :aria-label="selectLabel || translate('Select store')"
           interface="popover"
           :value="currentProductStoreId"
           @ionChange="emit('update:productStore', $event.detail.value, $event)"
         >
+          <ion-label slot="label">
+            <p class="overline">{{ displayInstanceLabel }}</p>
+            <template v-if="selectLabel">{{ selectLabel }}</template>
+          </ion-label>
           <ion-select-option
             v-for="store in productStores"
             :key="storeId(store)"
@@ -41,6 +35,16 @@
             {{ storeLabel(store) }}
           </ion-select-option>
         </ion-select>
+
+        <ion-label v-else class="ion-text-wrap">
+          <p class="overline">{{ displayInstanceLabel }}</p>
+          {{ currentStoreLabel }}
+        </ion-label>
+
+        <ion-note v-if="displayTimeZone" slot="end" class="ion-text-end" :color="isTimeZoneMismatched ? 'danger' : ''">
+          {{ displayTimeZone }}
+          <p v-if="displayZoneTime">{{ displayZoneTime }}</p>
+        </ion-note>
       </ion-item>
     </ion-toolbar>
   </ion-footer>
