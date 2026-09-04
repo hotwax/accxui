@@ -12,6 +12,7 @@ import { getFastTravelApps, getFastTravelApp, buildAppUrl } from './utils/fastTr
 import emitter from './core/emitter'
 import { commonUtil } from './utils/commonUtil'
 import { useSolrSearch } from './composables/useSolrSearch'
+import { useProducts } from './composables/useProducts'
 import { useShopify } from './composables/useShopify'
 import logger from './core/logger'
 import { cookieHelper } from './helpers/cookieHelper'
@@ -54,6 +55,7 @@ export {
   buildAppUrl,
   moduleFederationUtil,
   useSolrSearch,
+  useProducts,
   useShopify,
   translate,
   useNotificationStore,
