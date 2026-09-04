@@ -13,6 +13,7 @@ vi.mock("../utils/commonUtil", () => ({
 }));
 
 import { useProducts } from "../composables/useProducts";
+import { clearSessionScopedState } from "../core/sessionScope";
 
 const solrDoc = (productId: string, overrides: Record<string, unknown> = {}) => ({
   productId,
@@ -105,5 +106,16 @@ describe("useProducts (shared product master)", () => {
     await resolve(["P1"]);
     expect(products.value.get("P1")?.parentProductName).toBe("Tenant B");
     expect(runSolrQuery).toHaveBeenCalledTimes(2);
+  });
+
+  it("registers its reset with the common session scope, so logout clears it without app wiring", async () => {
+    runSolrQuery.mockResolvedValue({ data: { response: { docs: [solrDoc("P1")] } } });
+    const { products, resolve } = useProducts();
+    await resolve(["P1"]);
+    expect(products.value.size).toBe(1);
+
+    clearSessionScopedState();
+
+    expect(products.value.size).toBe(0);
   });
 });

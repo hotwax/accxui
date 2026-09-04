@@ -1,5 +1,6 @@
 import { ref } from "vue";
 import logger from "../core/logger";
+import { onSessionCleared } from "../core/sessionScope";
 import { commonUtil } from "../utils/commonUtil";
 import { useSolrSearch } from "./useSolrSearch";
 
@@ -14,8 +15,8 @@ import { useSolrSearch } from "./useSolrSearch";
  * same field list) but not their durable Dexie cache: the requirement is names for the rows a screen has
  * open, which a Map keyed by productId satisfies.
  *
- * Module state survives an SPA logout. Apps that clear session state on logout should call `reset()`
- * from their own session-clearing hook so the next login cannot read the previous tenant's products.
+ * Module state survives an SPA logout, so the composable registers its own `reset()` with the common
+ * session scope; `useAuth().logout()` runs it. No consumer has to remember to.
  */
 
 export interface ProductIdentification {
@@ -143,12 +144,14 @@ async function resolve(productIds: Iterable<string>): Promise<void> {
   products.value = next;
 }
 
-/** Forget every resolved product and every in-flight id. For the app's logout hook. */
+/** Forget every resolved product and every in-flight id. Runs on logout via the common session scope. */
 function reset(): void {
   generation += 1;
   products.value = new Map();
   requested.clear();
 }
+
+onSessionCleared(reset);
 
 export function useProducts() {
   return { products, resolve, getByIds, reset };
