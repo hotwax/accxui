@@ -27,28 +27,6 @@
               <ion-input :label="translate('OMS')" label-placement="fixed" name="instanceUrl" v-model="instanceUrl" id="instanceUrl" type="text" required />
             </ion-item>
 
-            <ion-list v-if="isDiscoveringLocalApiServers || localApiServers.length">
-              <ion-list-header>
-                <ion-label>{{ translate("Local OMS") }}</ion-label>
-                <ion-spinner v-if="isDiscoveringLocalApiServers" name="crescent" />
-              </ion-list-header>
-              <ion-item
-                v-for="server in localApiServers"
-                :key="server.oms"
-                button
-                :disabled="isCheckingOms"
-                @click="selectLocalApiServer(server)"
-              >
-                <ion-label>
-                  {{ server.label }}
-                  <p>{{ server.oms }}</p>
-                </ion-label>
-                <ion-note slot="end">
-                  {{ server.signal === "loginOptions" ? translate("Ready") : translate("Detected") }}
-                </ion-note>
-              </ion-item>
-            </ion-list>
-
             <div class="ion-padding">
               <!-- @keyup.enter.stop to stop the form from submitting on enter press as keyup.enter is already bound
               through the form above, causing both the form and the button to submit. -->
@@ -58,6 +36,31 @@
                 <ion-icon v-else slot="end" :icon="arrowForwardOutline" />
               </ion-button>
             </div>
+
+            <ion-list v-if="canDiscoverLocalApiServers() && (isDiscoveringLocalApiServers || devServers.length)">
+              <ion-list-header>
+                <ion-label>{{ translate("Dev servers") }}</ion-label>
+                <ion-spinner v-if="isDiscoveringLocalApiServers" name="crescent" />
+              </ion-list-header>
+              <ion-item
+                v-for="server in devServers"
+                :key="server.oms"
+                button
+                :disabled="isCheckingOms"
+                @click="selectDevServer(server)"
+              >
+                <ion-label>
+                  {{ server.label }}
+                  <p>{{ server.oms }}</p>
+                </ion-label>
+                <ion-badge v-if="server.hasAutoLogin" color="primary" slot="end">
+                  {{ translate("Auto login") }}
+                </ion-badge>
+                <ion-note v-else-if="server.signal" slot="end">
+                  {{ server.signal === "loginOptions" ? translate("Ready") : translate("Detected") }}
+                </ion-note>
+              </ion-item>
+            </ion-list>
           </section>
 
           <section v-else>
@@ -81,6 +84,34 @@
                 <ion-icon v-else slot="end" :icon="arrowForwardOutline" />
               </ion-button>
             </div>
+
+            <ion-list v-if="canDevAutoLoginForCurrentOms">
+              <ion-item
+                button
+                :disabled="isLoggingIn"
+                @click="attemptDevAutoLogin(true)"
+              >
+                <ion-label>
+                  {{ configuredDevUsername }}
+                  <p>{{ translate("Configured dev user") }}</p>
+                </ion-label>
+                <ion-badge color="primary" slot="end">
+                  {{ translate("Auto login") }}
+                </ion-badge>
+              </ion-item>
+            </ion-list>
+
+            <div v-if="canShowAutoLoginDocLink" class="ion-text-center ion-padding-bottom">
+              <ion-note>
+                <a
+                  href="https://github.com/hotwax/accxui/blob/main/docs/DEV_AUTO_LOGIN.md"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  {{ translate("How to configure auto login") }}
+                </a>
+              </ion-note>
+            </div>
           </section>
         </form>
       </div>
@@ -90,6 +121,7 @@
 
 <script setup lang="ts">
 import {
+  IonBadge,
   IonButton,
   IonChip,
   IonContent,
@@ -105,7 +137,7 @@ import {
   loadingController,
   onIonViewWillEnter
 } from "@ionic/vue";
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import Logo from "./Logo.vue";
 import { arrowBackOutline, arrowForwardOutline, warningOutline } from 'ionicons/icons'
 import { cookieHelper } from "../helpers/cookieHelper";
@@ -113,7 +145,7 @@ import { translate } from "../core/i18n"
 import { commonUtil } from "../utils/commonUtil";
 import { useAuth } from "../composables/useAuth";
 import { accxuiConfig } from "../core/configRegistry";
-import { discoverLocalApiServers, type LocalApiServer } from "../core/localApiServerDiscovery";
+import { discoverLocalApiServers, type LocalApiServer, type LocalApiServerSignal } from "../core/localApiServerDiscovery";
 
 let route = null as any;
 
@@ -138,6 +170,7 @@ const isLoggingIn = ref(false);
 const isDiscoveringLocalApiServers = ref(false);
 const localApiServers = ref<LocalApiServer[]>([]);
 const hasDiscoveredLocalApiServers = ref(false);
+const hasAttemptedDevAutoLogin = ref(typeof window !== "undefined" && window.sessionStorage?.getItem("skipDevAutoLogin") === "true");
 let router: any = ref();
 
 const goToLogin = () => {
@@ -175,6 +208,78 @@ const toggleOmsInput = () => {
 
 const canDiscoverLocalApiServers = () => {
   return import.meta.env.DEV && typeof window !== "undefined";
+};
+
+const getDevCredentials = () => {
+  const devUsername = import.meta.env.VITE_DEV_USERNAME || import.meta.env.VITE_USERNAME;
+  const devPassword = import.meta.env.VITE_DEV_PASSWORD || import.meta.env.VITE_PASSWORD;
+  return { devUsername, devPassword };
+};
+
+const canDevAutoLogin = () => {
+  const { devUsername, devPassword } = getDevCredentials();
+  return Boolean(import.meta.env.DEV && devUsername && devPassword);
+};
+
+const normalizeOmsUrl = (url: string) => url.trim().toLowerCase().replace(/\/+$/, "");
+
+const configuredDevUsername = computed(() => getDevCredentials().devUsername || "");
+
+const canDevAutoLoginForCurrentOms = computed(() => {
+  if (!canDevAutoLogin()) return false;
+  const currentOms = (cookieHelper().get("oms") || instanceUrl.value || accxuiConfig.value?.oms || "").toString().trim().toLowerCase();
+  if (!currentOms) return false;
+
+  const normalizedCurrentOms = normalizeOmsUrl(currentOms);
+  const resolvedCurrentOms = normalizeOmsUrl(alias[currentOms] ? alias[currentOms] : currentOms);
+
+  if (defaultAlias) {
+    const rawDefault = defaultAlias.trim().toLowerCase();
+    const normalizedDefault = normalizeOmsUrl(rawDefault);
+    const resolvedDefault = normalizeOmsUrl(alias[rawDefault] ? alias[rawDefault] : rawDefault);
+
+    if (
+      [normalizedDefault, resolvedDefault].includes(normalizedCurrentOms) ||
+      [normalizedDefault, resolvedDefault].includes(resolvedCurrentOms)
+    ) {
+      return true;
+    }
+  }
+
+  return (
+    normalizedCurrentOms.includes("localhost") ||
+    normalizedCurrentOms.includes("127.0.0.1") ||
+    resolvedCurrentOms.includes("localhost") ||
+    resolvedCurrentOms.includes("127.0.0.1")
+  );
+});
+
+const canShowAutoLoginDocLink = computed(() => Boolean(import.meta.env.DEV && !canDevAutoLoginForCurrentOms.value));
+
+// A BASIC OMS is the only one we can sign into with a username and password. An empty
+// loginOption means it has not been fetched for this OMS yet, and setOms fetches it before
+// deciding, so treating that as BASIC here defers the decision rather than guessing.
+const isBasicLoginOption = () => {
+  return !Object.keys(loginOption.value).length || loginOption.value.loginAuthType === "BASIC";
+};
+
+// Dev-only convenience: sign in with the credentials the local env supplies instead of making
+// a developer retype them on every reload. Automatic callers get one attempt per page load, so
+// a rejected sign-in leaves the form usable instead of retrying on each re-entry of the view;
+// an explicit server selection passes force since that is a deliberate retry.
+const attemptDevAutoLogin = async (force = false) => {
+  if(!canDevAutoLogin() || isLoggingIn.value) {
+    return;
+  }
+  if(!force && hasAttemptedDevAutoLogin.value) {
+    return;
+  }
+
+  const { devUsername, devPassword } = getDevCredentials();
+  hasAttemptedDevAutoLogin.value = true;
+  username.value = devUsername;
+  password.value = devPassword;
+  await login();
 };
 
 const discoverLocalApiServerOptions = async () => {
@@ -244,7 +349,68 @@ const setOms = async () => {
   isCheckingOms.value = false;
 };
 
-const selectLocalApiServer = async (server: LocalApiServer) => {
+export interface DevServer {
+  label: string;
+  oms: string;
+  hasAutoLogin: boolean;
+  signal?: LocalApiServerSignal;
+  isEnv?: boolean;
+}
+
+const devServers = computed<DevServer[]>(() => {
+  if (!canDiscoverLocalApiServers()) return [];
+
+  const servers: DevServer[] = [];
+  const seenOms = new Set<string>();
+
+  // 1. Dev server from env (VITE_DEFAULT_ALIAS)
+  if (defaultAlias) {
+    const rawEnvOms = defaultAlias.trim();
+    const resolvedEnvOms = alias[rawEnvOms.toLowerCase()] ? alias[rawEnvOms.toLowerCase()] : rawEnvOms;
+    const normalizedEnvOms = normalizeOmsUrl(resolvedEnvOms);
+
+    let label = defaultAlias;
+    if (defaultAlias === resolvedEnvOms) {
+      const aliasKey = Object.keys(alias).find((key) => normalizeOmsUrl(alias[key]) === normalizedEnvOms);
+      label = aliasKey || defaultAlias;
+    }
+
+    servers.push({
+      label,
+      oms: resolvedEnvOms,
+      hasAutoLogin: canDevAutoLogin(),
+      isEnv: true
+    });
+    seenOms.add(normalizedEnvOms);
+  }
+
+  // 2. Discovered local API servers
+  for (const server of localApiServers.value) {
+    const normalizedServerOms = normalizeOmsUrl(server.oms);
+    if (seenOms.has(normalizedServerOms)) {
+      const existing = servers.find((s) => normalizeOmsUrl(s.oms) === normalizedServerOms);
+      if (existing) {
+        existing.signal = server.signal;
+        if (server.label && existing.label === defaultAlias) {
+          existing.label = server.label;
+        }
+      }
+    } else {
+      servers.push({
+        label: server.label,
+        oms: server.oms,
+        hasAutoLogin: canDevAutoLogin(),
+        signal: server.signal,
+        isEnv: false
+      });
+      seenOms.add(normalizedServerOms);
+    }
+  }
+
+  return servers;
+});
+
+const selectDevServer = async (server: DevServer) => {
   if (isCheckingOms.value) return;
 
   instanceUrl.value = server.oms;
@@ -257,12 +423,8 @@ const selectLocalApiServer = async (server: LocalApiServer) => {
   // user can't perform any operation there
   toggleOmsInput();
 
-  const devUsername = import.meta.env.VITE_DEV_USERNAME;
-  const devPassword = import.meta.env.VITE_DEV_PASSWORD;
-  if (import.meta.env.DEV && devUsername && devPassword) {
-    username.value = devUsername;
-    password.value = devPassword;
-    await login();
+  if (server.hasAutoLogin) {
+    await attemptDevAutoLogin(true);
   }
 };
 
@@ -337,6 +499,13 @@ const initialise = async () => {
 
     if (showOmsInput.value) {
       discoverLocalApiServerOptions();
+
+      // VITE_DEFAULT_ALIAS only prefills the OMS input, it never applies it. If dev auto-login
+      // is configured and instanceUrl is set, advance to the credentials form so the user lands
+      // directly on the username/password screen with the one-click dev user item.
+      if(canDevAutoLogin() && instanceUrl.value && isBasicLoginOption()) {
+        await setOms();
+      }
     }
   } catch (error) {
     console.error(error);
