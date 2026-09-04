@@ -1,5 +1,6 @@
 import { Scanner, Features, Group, Redirect } from '@shopify/app-bridge/actions';
 import { useEmbeddedAppStore } from "../store/embeddedApp";
+import { commonUtil } from "../utils/commonUtil";
 import { createApp } from "@shopify/app-bridge";
 import { getSessionToken } from "@shopify/app-bridge-utils";
 import api from '../core/remoteApi';
@@ -136,7 +137,9 @@ const openPosScanner = (): Promise<any> => {
         url: `app-bridge/login`,
         method: 'post',
         data: loginPayload,
-        baseURL: `${maargUrl}/rest/s1/`
+        // Route through getMaargURL so a shop config holding a bare instance name ("demo") resolves the
+        // same way as a full URL — string-concatenating /rest/s1/ onto it produced an invalid base.
+        baseURL: commonUtil.getMaargURL(maargUrl)
       });
 
       if (!loginResp.data.token || !loginResp.data.omsInstanceUrl) {
