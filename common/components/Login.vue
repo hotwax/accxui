@@ -70,6 +70,22 @@
               </ion-chip>
             </div>
 
+            <ion-item
+              v-if="canDevAutoLoginForCurrentOms"
+              button
+              lines="full"
+              :disabled="isLoggingIn"
+              @click="attemptDevAutoLogin(true)"
+            >
+              <ion-label>
+                {{ configuredDevUsername }}
+                <p>{{ translate("Configured dev user") }}</p>
+              </ion-label>
+              <ion-badge color="primary" slot="end">
+                {{ translate("Auto login") }}
+              </ion-badge>
+            </ion-item>
+
             <ion-item lines="full">
               <ion-input :label="translate('Username')" label-placement="fixed" name="username" v-model="username" id="username"  type="text" required />
             </ion-item>
@@ -83,6 +99,18 @@
                 <ion-spinner v-if="isLoggingIn" slot="end" name="crescent" />
                 <ion-icon v-else slot="end" :icon="arrowForwardOutline" />
               </ion-button>
+            </div>
+
+            <div v-if="canShowAutoLoginDocLink" class="ion-text-center ion-padding-bottom">
+              <ion-note>
+                <a
+                  href="https://github.com/hotwax/accxui/blob/main/docs/DEV_AUTO_LOGIN.md"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  {{ translate("How to configure auto login") }}
+                </a>
+              </ion-note>
             </div>
           </section>
         </form>
@@ -193,6 +221,41 @@ const canDevAutoLogin = () => {
   return Boolean(import.meta.env.DEV && devUsername && devPassword);
 };
 
+const normalizeOmsUrl = (url: string) => url.trim().toLowerCase().replace(/\/+$/, "");
+
+const configuredDevUsername = computed(() => getDevCredentials().devUsername || "");
+
+const canDevAutoLoginForCurrentOms = computed(() => {
+  if (!canDevAutoLogin()) return false;
+  const currentOms = (cookieHelper().get("oms") || instanceUrl.value || accxuiConfig.value?.oms || "").toString().trim().toLowerCase();
+  if (!currentOms) return false;
+
+  const normalizedCurrentOms = normalizeOmsUrl(currentOms);
+  const resolvedCurrentOms = normalizeOmsUrl(alias[currentOms] ? alias[currentOms] : currentOms);
+
+  if (defaultAlias) {
+    const rawDefault = defaultAlias.trim().toLowerCase();
+    const normalizedDefault = normalizeOmsUrl(rawDefault);
+    const resolvedDefault = normalizeOmsUrl(alias[rawDefault] ? alias[rawDefault] : rawDefault);
+
+    if (
+      [normalizedDefault, resolvedDefault].includes(normalizedCurrentOms) ||
+      [normalizedDefault, resolvedDefault].includes(resolvedCurrentOms)
+    ) {
+      return true;
+    }
+  }
+
+  return (
+    normalizedCurrentOms.includes("localhost") ||
+    normalizedCurrentOms.includes("127.0.0.1") ||
+    resolvedCurrentOms.includes("localhost") ||
+    resolvedCurrentOms.includes("127.0.0.1")
+  );
+});
+
+const canShowAutoLoginDocLink = computed(() => Boolean(import.meta.env.DEV && !canDevAutoLoginForCurrentOms.value));
+
 // A BASIC OMS is the only one we can sign into with a username and password. An empty
 // loginOption means it has not been fetched for this OMS yet, and setOms fetches it before
 // deciding, so treating that as BASIC here defers the decision rather than guessing.
@@ -293,8 +356,6 @@ export interface DevServer {
   signal?: LocalApiServerSignal;
   isEnv?: boolean;
 }
-
-const normalizeOmsUrl = (url: string) => url.trim().toLowerCase().replace(/\/+$/, "");
 
 const devServers = computed<DevServer[]>(() => {
   if (!canDiscoverLocalApiServers()) return [];
@@ -438,20 +499,6 @@ const initialise = async () => {
 
     if (showOmsInput.value) {
       discoverLocalApiServerOptions();
-
-      // VITE_DEFAULT_ALIAS only prefills the OMS input, it never applies it, so dev auto-login
-      // had no resolved instance to authenticate against and the developer was dropped on an
-      // empty form. Apply the prefilled OMS the same way selecting a discovered server does.
-      if(canDevAutoLogin() && instanceUrl.value && isBasicLoginOption()) {
-        await setOms();
-      }
-    }
-
-    // setOms clears showOmsInput for a BASIC OMS and redirects away for a SAML one, so reaching
-    // here with the credentials form showing means signing in is both possible and safe. This
-    // also covers a reload where the OMS is already set and only the credentials are missing.
-    if(!showOmsInput.value) {
-      await attemptDevAutoLogin();
     }
   } catch (error) {
     console.error(error);
