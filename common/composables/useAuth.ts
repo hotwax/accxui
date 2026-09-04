@@ -55,7 +55,6 @@ export function useAuth() {
     cookieHelper().remove("maarg");
     cookieHelper().remove("userId");
     updateToken("", "")
-    updateOMS("")
     updateUserId("")
   }
 

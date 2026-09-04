@@ -499,6 +499,13 @@ const initialise = async () => {
 
     if (showOmsInput.value) {
       discoverLocalApiServerOptions();
+
+      // VITE_DEFAULT_ALIAS only prefills the OMS input, it never applies it. If dev auto-login
+      // is configured and instanceUrl is set, advance to the credentials form so the user lands
+      // directly on the username/password screen with the one-click dev user item.
+      if(canDevAutoLogin() && instanceUrl.value && isBasicLoginOption()) {
+        await setOms();
+      }
     }
   } catch (error) {
     console.error(error);
