@@ -8,6 +8,7 @@ import { DateTime } from "luxon";
 import { computed, ref } from "vue";
 import emitter from "../core/emitter";
 import { accxuiConfig } from "../core/configRegistry";
+import { clearSessionScopedState } from "../core/sessionScope";
 import { getCanonicalPath } from "../utils/appVersionUtil";
 
 interface LoginOption {
@@ -198,6 +199,9 @@ export function useAuth() {
         logger.error("Error running postLogout hook", err);
       }
     }
+
+    // Shared composables in common hold module-level tenant data too; sweep them after the app's own hook.
+    clearSessionScopedState()
 
     // Reset oms in app's state, as we are clearing app's state on logout, but do not clear oms cookie
     // this causes an issue on relogin to the same instance without moving to the oms page

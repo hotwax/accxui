@@ -178,8 +178,15 @@ const canDiscoverLocalApiServers = () => {
   return import.meta.env.DEV && typeof window !== "undefined";
 };
 
+const getDevCredentials = () => {
+  const devUsername = import.meta.env.VITE_DEV_USERNAME || import.meta.env.VITE_USERNAME;
+  const devPassword = import.meta.env.VITE_DEV_PASSWORD || import.meta.env.VITE_PASSWORD;
+  return { devUsername, devPassword };
+};
+
 const canDevAutoLogin = () => {
-  return Boolean(import.meta.env.DEV && import.meta.env.VITE_USERNAME && import.meta.env.VITE_PASSWORD);
+  const { devUsername, devPassword } = getDevCredentials();
+  return Boolean(import.meta.env.DEV && devUsername && devPassword);
 };
 
 // A BASIC OMS is the only one we can sign into with a username and password. An empty
@@ -201,9 +208,10 @@ const attemptDevAutoLogin = async (force = false) => {
     return;
   }
 
+  const { devUsername, devPassword } = getDevCredentials();
   hasAttemptedDevAutoLogin.value = true;
-  username.value = import.meta.env.VITE_USERNAME;
-  password.value = import.meta.env.VITE_PASSWORD;
+  username.value = devUsername;
+  password.value = devPassword;
   await login();
 };
 
