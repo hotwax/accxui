@@ -1,4 +1,5 @@
 import { createLogger, StringifyObjectsHook } from 'vue-logger-plugin'
+import { RedactSensitiveDataHook } from './logRedaction'
 
 // TODO Implement logic to send logs to server
 // https://github.com/dev-tavern/vue-logger-plugin#sample-custom-hook---leveraging-axios-to-send-logs-to-server
@@ -18,9 +19,12 @@ import { createLogger, StringifyObjectsHook } from 'vue-logger-plugin'
 // Setting enabled to false will disable all logger functionality (console output + hook invocations).
 // Setting consoleEnabled to false will disable just the console output but will still invoke the hooks.
 
+// RedactSensitiveDataHook runs FIRST, and must: StringifyObjectsHook is what serialises an
+// axios error, and an axios error carries the request config — Authorization header included.
+// Redacting before that runs is what keeps a live bearer token out of the console.
 const logger = createLogger({
   enabled: true,
-  beforeHooks: [ StringifyObjectsHook ]
+  beforeHooks: [ RedactSensitiveDataHook, StringifyObjectsHook ]
 });
 
 function getStack(error: any) {

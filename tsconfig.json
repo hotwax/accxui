@@ -17,6 +17,7 @@
     "lib": ["ESNext", "DOM", "dom.iterable", "scripthost"],
     "skipLibCheck": true,
     "noEmit": true,
+    "ignoreDeprecations": "6.0"
   },
   "include": ["apps/**/*.ts", "apps/**/*.tsx", "apps/**/*.vue", "common/**/*.ts"],
   "exclude": ["node_modules", "**/dist"]

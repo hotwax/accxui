@@ -13,6 +13,7 @@ import { getFastTravelApps, getFastTravelApp, buildAppUrl } from './utils/fastTr
 import emitter from './core/emitter'
 import { commonUtil } from './utils/commonUtil'
 import { useSolrSearch } from './composables/useSolrSearch'
+import { useProducts } from './composables/useProducts'
 import { useShopify } from './composables/useShopify'
 import logger from './core/logger'
 import { cookieHelper } from './helpers/cookieHelper'
@@ -26,6 +27,7 @@ import { firebaseMessaging } from './core/firebaseMessaging'
 import { useNotificationStore } from './store/notification'
 import { useEmbeddedAppStore } from './store/embeddedApp'
 import { initialiseConfig } from './core/configRegistry'
+import { onSessionCleared, clearSessionScopedState } from './core/sessionScope'
 import { useAuth } from './composables/useAuth'
 
 // ✅ These are pure types (erased during build)
@@ -42,6 +44,8 @@ export {
   i18n,
   imagePreview,
   initialiseConfig,
+  onSessionCleared,
+  clearSessionScopedState,
   logger,
   Login,
   RadioFacetGroup,
@@ -56,9 +60,12 @@ export {
   buildAppUrl,
   moduleFederationUtil,
   useSolrSearch,
+  useProducts,
   useShopify,
   translate,
   useNotificationStore,
   useEmbeddedAppStore,
   useAuth
 }
+
+export * from './cache';
