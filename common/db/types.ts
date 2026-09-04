@@ -1,26 +1,26 @@
 /**
- * Shared Type Definitions for the AccxUI Cache Framework.
+ * Shared Type Definitions for the AccxUI Local Database Framework.
  */
 
 import type { Observable } from "dexie";
 
-/** A cached row: indexed/normalized fields + untouched server object in raw. */
-export interface CachedRow {
+/** A stored row: indexed/normalized fields + untouched server object in raw. */
+export interface DbRow {
   [field: string]: unknown;
   raw: Record<string, unknown>;
-  cachedAt: number;
+  syncedAt: number;
 }
 
 export type FieldKind = "text" | "count" | "date" | "structured";
 
 export interface EntityProjection {
-  /** Primary-key field name on the cached row (must project to a non-empty string). */
+  /** Primary-key field name on the stored row (must project to a non-empty string). */
   keyField: string;
   /** Field name -> how to coerce it. Every listed field is hoisted to the row's top level. */
   fields: Record<string, FieldKind>;
   /** Optional synthetic key builder for entities with composite natural keys. */
   buildKey?: (raw: Record<string, unknown>) => string | undefined;
-  /** Cached-field name -> source field to read from if different. */
+  /** Stored-field name -> source field to read from if different. */
   rename?: Record<string, string>;
 }
 
@@ -36,18 +36,18 @@ export interface LiveQueryOptions {
   /** Date field to apply since/until bounds to. */
   dateField?: string;
   /** In-memory predicate applied to the matched set. */
-  filter?: (row: CachedRow) => boolean;
+  filter?: (row: DbRow) => boolean;
   /** Maximum number of records to return. */
   limit?: number;
   /** Sort order for indexed queries ('asc' | 'desc'). Default: 'desc' when dateField is specified. */
   order?: "asc" | "desc";
 }
 
-export interface CachedEntity<T = Record<string, any>> {
+export interface DbEntity<T = Record<string, any>> {
   table: string;
   projection: EntityProjection;
   /** Live reactive query over the table. */
-  live: (options?: LiveQueryOptions) => Observable<CachedRow[]>;
+  live: (options?: LiveQueryOptions) => Observable<DbRow[]>;
   /** Read a single record by primary key (instant lookup). */
   get: (key: string) => Promise<T | undefined>;
   /** Read all records matching options (promise-based snapshot). */
@@ -57,6 +57,8 @@ export interface CachedEntity<T = Record<string, any>> {
 export interface SyncContext {
   token: string;
   now: number;
+  /** OMS instance being synced. Databases are per-OMS, and the worker cannot read it from cookies. */
+  omsInstance: string;
   [key: string]: unknown;
 }
 
@@ -67,4 +69,4 @@ export interface SyncDomain {
   refetchOne?: (pk: Record<string, unknown>, ctx: SyncContext) => Promise<void>;
 }
 
-export type CacheSchemaDefinition = Record<string, string>;
+export type DbSchemaDefinition = Record<string, string>;

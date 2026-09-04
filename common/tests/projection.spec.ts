@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { diffStaleKeys, isUnkeyableFetch, projectRow, projectRows, toCount, toMillis, toText } from "../cache/projection";
-import type { EntityProjection } from "../cache/types";
+import { diffStaleKeys, isUnkeyableFetch, projectRow, projectRows, toCount, toMillis, toText } from "../db/projection";
+import type { EntityProjection } from "../db/types";
 
 describe("projection coercion helpers", () => {
   it("coerces dates accurately to epoch millis", () => {
@@ -49,7 +49,7 @@ describe("projectRow & projectRows", () => {
       facilityName: "Main Warehouse",
       maximumOrderLimit: 100,
       raw,
-      cachedAt: 12345,
+      syncedAt: 12345,
     });
   });
 

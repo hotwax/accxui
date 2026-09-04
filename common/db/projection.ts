@@ -1,10 +1,10 @@
 /**
- * Pure projection + diff helpers for the local cache.
+ * Pure projection + diff helpers for the local database.
  *
  * Deliberately free of Dexie and Vue so every rule here is unit-testable without IndexedDB.
  */
 
-import type { CachedRow, EntityProjection, FieldKind } from "./types";
+import type { DbRow, EntityProjection, FieldKind } from "./types";
 
 /** Coerce a server date field (epoch-millis number, numeric string, or ISO string) to millis. */
 export function toMillis(value: unknown): number | undefined {
@@ -38,13 +38,13 @@ const COERCE: Record<FieldKind, (value: unknown) => unknown> = {
 };
 
 /**
- * Project one raw server record into a cached row. Returns null when the record has no usable primary key.
+ * Project one raw server record into a stored row. Returns null when the record has no usable primary key.
  */
 export function projectRow(
   raw: Record<string, unknown>,
   projection: EntityProjection,
   now: number,
-): CachedRow | null {
+): DbRow | null {
   const row: Record<string, unknown> = {};
   for (const [field, kind] of Object.entries(projection.fields)) {
     const source = raw?.[field] !== undefined ? field : projection.rename?.[field] ?? field;
@@ -56,7 +56,7 @@ export function projectRow(
   if (!key) return null;
   row[projection.keyField] = key;
 
-  return { ...row, raw, cachedAt: now } as CachedRow;
+  return { ...row, raw, syncedAt: now } as DbRow;
 }
 
 /** Project many records, dropping any without a usable key. */
@@ -64,8 +64,8 @@ export function projectRows(
   rawRows: Array<Record<string, unknown>>,
   projection: EntityProjection,
   now: number,
-): CachedRow[] {
-  const rows: CachedRow[] = [];
+): DbRow[] {
+  const rows: DbRow[] = [];
   for (const raw of rawRows) {
     const row = projectRow(raw, projection, now);
     if (row) rows.push(row);
@@ -84,7 +84,7 @@ export function isUnkeyableFetch(
 }
 
 /**
- * Keys to delete after a snapshot sync: everything cached that the fresh full set no longer contains.
+ * Keys to delete after a snapshot sync: everything stored that the fresh full set no longer contains.
  */
 export function diffStaleKeys(existingKeys: readonly string[], freshKeys: readonly string[]): string[] {
   const fresh = new Set(freshKeys);

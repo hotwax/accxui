@@ -1,29 +1,29 @@
 /**
- * Reactive Vue 3 composables for Dexie IndexedDB cache tables.
+ * Reactive Vue 3 composables over the local Dexie IndexedDB tables.
  */
 
 import { computed, onUnmounted, ref, shallowRef, watch, type Ref } from "vue";
 import type { Subscription } from "dexie";
-import type { CachedEntity, CachedRow, LiveQueryOptions } from "./types";
-import { bootstrapState } from "./sync/appCacheBootstrap";
+import type { DbEntity, DbRow, LiveQueryOptions } from "./types";
+import { bootstrapState } from "./sync/appDbBootstrap";
 
-export interface CachedList<T = Record<string, any>> {
-  rows: Ref<CachedRow[]>;
+export interface DbList<T = Record<string, any>> {
+  rows: Ref<DbRow[]>;
   records: Ref<T[]>;
   hydrated: Ref<boolean>;
 }
 
-export interface CachedRecordResult<T = Record<string, any>> {
-  row: Ref<CachedRow | undefined>;
+export interface DbRecordResult<T = Record<string, any>> {
+  row: Ref<DbRow | undefined>;
   record: Ref<T | undefined>;
   hydrated: Ref<boolean>;
 }
 
-export function useCachedList<T = Record<string, any>>(
-  entity: CachedEntity<T>,
+export function useDbList<T = Record<string, any>>(
+  entity: DbEntity<T>,
   options: LiveQueryOptions = {},
-): CachedList<T> {
-  const rows = shallowRef<CachedRow[]>([]) as Ref<CachedRow[]>;
+): DbList<T> {
+  const rows = shallowRef<DbRow[]>([]) as Ref<DbRow[]>;
   const records = shallowRef<T[]>([]) as Ref<T[]>;
   const emitted = ref(false);
 
@@ -39,12 +39,12 @@ export function useCachedList<T = Record<string, any>>(
         emitted.value = true;
       },
       error: (err) => {
-        console.error(`[useCachedList] liveQuery error on ${entity.table}:`, err);
+        console.error(`[useDbList] liveQuery error on ${entity.table}:`, err);
         emitted.value = true;
       },
     });
   } catch (error) {
-    console.error(`[useCachedList] Failed to subscribe to ${entity.table}:`, error);
+    console.error(`[useDbList] Failed to subscribe to ${entity.table}:`, error);
     emitted.value = true;
   }
 
@@ -58,11 +58,11 @@ export function useCachedList<T = Record<string, any>>(
   return { rows, records, hydrated };
 }
 
-export function useCachedRecord<T = Record<string, any>>(
-  entity: CachedEntity<T>,
+export function useDbRecord<T = Record<string, any>>(
+  entity: DbEntity<T>,
   key: Ref<string | undefined> | string | undefined,
-): CachedRecordResult<T> {
-  const row = shallowRef<CachedRow | undefined>(undefined) as Ref<CachedRow | undefined>;
+): DbRecordResult<T> {
+  const row = shallowRef<DbRow | undefined>(undefined) as Ref<DbRow | undefined>;
   const record = shallowRef<T | undefined>(undefined) as Ref<T | undefined>;
   const emitted = ref(false);
 
@@ -98,12 +98,12 @@ export function useCachedRecord<T = Record<string, any>>(
             emitted.value = true;
           },
           error: (err) => {
-            console.error(`[useCachedRecord] liveQuery error on ${entity.table}:`, err);
+            console.error(`[useDbRecord] liveQuery error on ${entity.table}:`, err);
             emitted.value = true;
           },
         });
     } catch (error) {
-      console.error(`[useCachedRecord] Failed to subscribe to ${entity.table}:`, error);
+      console.error(`[useDbRecord] Failed to subscribe to ${entity.table}:`, error);
       emitted.value = true;
     }
   }

@@ -3,13 +3,16 @@
  */
 
 import { expose } from "comlink";
-import { BaseCacheDB, ensureCacheReady } from "../db";
+import { BaseDB, ensureDbReady } from "../baseDb";
+import { DB_SYNC_CHANNEL } from "../syncChannel";
 import type { SyncContext } from "../types";
 import { getAllSyncDomains, getSyncDomain } from "./syncRegistry";
 
 export interface HarnessStartPayload {
   maargUrl: string;
   token: string;
+  /** Required — the worker has no cookies, so the main thread must name the OMS to sync into. */
+  omsInstance: string;
   domains?: string[];
   baseTickMs?: number;
 }
@@ -25,13 +28,13 @@ export interface SyncHarness {
   getDomainNames: () => string[];
 }
 
-export function createPollingWorkerHarness(getDb: () => BaseCacheDB): SyncHarness {
-  let ctx: SyncContext = { token: "", now: Date.now(), maargUrl: "" };
+export function createPollingWorkerHarness(getDb: (omsInstance: string) => BaseDB): SyncHarness {
+  let ctx: SyncContext = { token: "", now: Date.now(), maargUrl: "", omsInstance: "" };
   let activeDomainNames: string[] = [];
   let timer: any = null;
   let running = false;
 
-  const syncChannel = typeof BroadcastChannel !== "undefined" ? new BroadcastChannel("hotwax-cache-sync") : null;
+  const syncChannel = typeof BroadcastChannel !== "undefined" ? new BroadcastChannel(DB_SYNC_CHANNEL) : null;
 
   async function tick() {
     if (running || !ctx.token) return;
@@ -48,7 +51,7 @@ export function createPollingWorkerHarness(getDb: () => BaseCacheDB): SyncHarnes
           await domain.sync(ctx);
           syncChannel?.postMessage({ type: "domain-synced", domain: domain.name });
         } catch (error) {
-          console.warn(`[cache-worker] Sync failed for domain ${domain.name}:`, error);
+          console.warn(`[db-worker] Sync failed for domain ${domain.name}:`, error);
         }
       }
       syncChannel?.postMessage({ type: "sync-complete" });
@@ -63,12 +66,13 @@ export function createPollingWorkerHarness(getDb: () => BaseCacheDB): SyncHarnes
       ctx = {
         token: payload.token,
         maargUrl: payload.maargUrl,
+        omsInstance: payload.omsInstance,
         now: Date.now(),
       };
       activeDomainNames = payload.domains || [];
 
-      const db = getDb();
-      await ensureCacheReady(db);
+      const db = getDb(ctx.omsInstance);
+      await ensureDbReady(db);
 
       await tick();
       if (payload.baseTickMs && payload.baseTickMs > 0) {
@@ -84,7 +88,7 @@ export function createPollingWorkerHarness(getDb: () => BaseCacheDB): SyncHarnes
       const domain = getSyncDomain(domainName);
       if (!domain) return;
       ctx.now = Date.now();
-      const db = getDb();
+      const db = getDb(ctx.omsInstance);
       await db.syncMeta.delete(`loginSync:${domainName}`);
       await domain.sync(ctx);
       syncChannel?.postMessage({ type: "domain-synced", domain: domainName });
@@ -92,7 +96,7 @@ export function createPollingWorkerHarness(getDb: () => BaseCacheDB): SyncHarnes
 
     async resyncAll() {
       ctx.now = Date.now();
-      const db = getDb();
+      const db = getDb(ctx.omsInstance);
       const all = getAllSyncDomains();
       for (const domain of all) {
         await db.syncMeta.delete(`loginSync:${domain.name}`);
@@ -126,7 +130,7 @@ export function createPollingWorkerHarness(getDb: () => BaseCacheDB): SyncHarnes
   return harness;
 }
 
-export function exposeWorkerHarness(getDb: () => BaseCacheDB): void {
+export function exposeWorkerHarness(getDb: (omsInstance: string) => BaseDB): void {
   const harness = createPollingWorkerHarness(getDb);
   expose(harness);
 }
