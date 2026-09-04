@@ -378,7 +378,7 @@ const getMaargBaseURL = () => {
   return getEmbeddedAppStoreSafe().maarg || cookieHelper().get("maarg")
 }
 
-const getOmsURL = () => {
+const getOmsURL = (isMoquiOnly = isMoqui()) => {
   const oms = getEmbeddedAppStoreSafe().oms || cookieHelper().get("oms")
   // VITE_OMS_TYPE=MOQUI → use Moqui REST paths (/rest/s1/)
   // VITE_OMS_TYPE unset  → use OFBiz paths (/api/)  [default, backward-compatible]
@@ -390,10 +390,10 @@ const getOmsURL = () => {
       // Full URL provided — use as-is if it already has a known path suffix
       omsURL = (trimmedOms.includes('/api') || trimmedOms.includes('/rest/'))
         ? trimmedOms
-        : commonUtil.isMoqui() ? `${cleanOms}/rest/s1/` : `${cleanOms}/api/`
+        : isMoquiOnly ? `${cleanOms}/rest/s1/` : `${cleanOms}/api/`
     } else {
       // Plain subdomain — build full URL for the configured backend type
-      omsURL = commonUtil.isMoqui()
+      omsURL = isMoquiOnly
         ? `https://${trimmedOms}.hotwax.io/rest/s1/`
         : `https://${trimmedOms}.hotwax.io/api/`
     }
@@ -599,6 +599,29 @@ const isValidEmail = (email: string) => {
 const isValidPassword = (password: string) => {
   const passwordPattern = /^.*(?=.{5,})(?=.*[a-zA-Z])(?=.*[0-9])(?=.*[!@#$%^&*]).*$/;
   return passwordPattern.test(password);
+}
+
+// Matches semver with optional -prerelease and +build metadata,
+// plus an optional leading "v"/"V" prefix (e.g. "v1.2.3-rc.1+build.5").
+const SEMANTIC_VERSION_PATTERN = /^[vV]?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$/;
+
+// Checks whether the passed value is a valid semver string.
+const isValidVersion = (value: any): boolean => {
+  return typeof value === "string" && SEMANTIC_VERSION_PATTERN.test(value.trim());
+}
+
+// Checks whether currentVersion is greater than or equal to the requiredVersion,
+// Any -prerelease / +build metadata is stripped and ignored, so 1.0.0 and 1.0.0-rc.1 compare as equal.
+const isVersionGreaterOrEqual = (requiredVersion: string, currentVersion: string): boolean => {
+  // If no compatibility requirement is configured or current version is not available or invalid
+  // (assuming that the server is on some branch), allow access by default
+  if (!isValidVersion(requiredVersion) || !isValidVersion(currentVersion)) return true;
+  const parse = (version: string) => version.trim().replace(/^[vV]/, "").split(/[-+]/)[0].split(".").map(Number);
+  const [requiredMajor, requiredMinor, requiredPatch] = parse(requiredVersion);
+  const [currentMajor, currentMinor, currentPatch] = parse(currentVersion);
+  if (currentMajor !== requiredMajor) return currentMajor > requiredMajor;
+  if (currentMinor !== requiredMinor) return currentMinor > requiredMinor;
+  return currentPatch >= requiredPatch;
 }
 
 const isValidDeliveryDays = (deliveryDays: any) => {
@@ -858,6 +881,56 @@ const formatDateTime = (dateStr: string, format?: string | null, endOfDay = fals
   return format ? final.toFormat(format) : final.toFormat("yyyy-MM-dd HH:mm:ss.SSS");
 }
 
+/**
+ * Parses any date/time value returned by Moqui or OFBiz into a Luxon DateTime.
+ * Handles: Luxon DateTime passthrough, epoch milliseconds (number or numeric string),
+ * ISO 8601, SQL timestamp, RFC 2822, HTTP date, and common custom format strings.
+ * Returns null when the value is empty or cannot be parsed.
+ */
+const parseDateTimeValue = (value: any): DateTime | null => {
+  if (!value) return null
+  if (DateTime.isDateTime(value)) return value as DateTime
+  if (typeof value === 'number') {
+    const dt = DateTime.fromMillis(value)
+    return dt.isValid ? dt : null
+  }
+  if (typeof value !== 'string') return null
+  if (/^\d+$/.test(value)) {
+    const dt = DateTime.fromMillis(Number(value))
+    return dt.isValid ? dt : null
+  }
+  const norm = value.replace(/^[A-Za-z]{3},\s*/, '')
+  const parsers = [
+    () => DateTime.fromISO(value),
+    () => DateTime.fromSQL(value),
+    () => DateTime.fromFormat(value, "yyyy-MM-dd'T'HH:mm:ssZZ"),
+    () => DateTime.fromFormat(value, 'yyyy-MM-dd HH:mm:ss.SSS'),
+    () => DateTime.fromRFC2822(value),
+    () => DateTime.fromHTTP(value),
+    () => DateTime.fromFormat(norm, 'dd LLL yyyy HH:mm:ss ZZZ'),
+    () => DateTime.fromFormat(norm, 'dd LLL yyyy HH:mm:ss z'),
+  ]
+  for (const parse of parsers) {
+    const dt = parse()
+    if (dt.isValid) return dt
+  }
+  return null
+}
+
+/**
+ * General-purpose display formatter. Parses any date/time value with
+ * parseDateTimeValue and formats it for display. Default output is
+ * DateTime.DATETIME_MED locale string (e.g. "Jun 4, 2026, 10:30 AM").
+ * Named formatDateTimeValue to distinguish from the existing formatDateTime
+ * which is an ISO date-range helper with a different signature.
+ */
+const formatDateTimeValue = (value: any, format?: string): string => {
+  if (!value) return ''
+  const dt = parseDateTimeValue(value)
+  if (!dt) return ''
+  return format ? dt.toFormat(format) : dt.toLocaleString(DateTime.DATETIME_MED)
+}
+
 function getDateTimeWithOrdinalSuffix(time: any) {
   if (!time) return "-";
   const dateTime = DateTime.fromMillis(time);
@@ -897,6 +970,8 @@ export const commonUtil = {
   formatCurrency,
   formatDate,
   formatDateTime,
+  formatDateTimeValue,
+  parseDateTimeValue,
   formatPhoneNumber,
   formatUtcDate,
   generateInternalId,
@@ -935,6 +1010,8 @@ export const commonUtil = {
   isValidDeliveryDays,
   isValidEmail,
   isValidPassword,
+  isValidVersion,
+  isVersionGreaterOrEqual,
   jsonParse,
   jsonToCsv,
   parseBooleanSetting,

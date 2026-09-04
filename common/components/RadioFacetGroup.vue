@@ -19,7 +19,6 @@
 <script lang="ts" setup>
 import { IonItem, IonLabel, IonRadio, IonRadioGroup } from '@ionic/vue';
 import type { PropType } from 'vue';
-import { defineEmits, defineProps } from 'vue';
 
 type LabelPlacement = 'end' | 'fixed' | 'start' | 'stacked';
 

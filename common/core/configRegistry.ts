@@ -5,6 +5,9 @@ export interface Config {
   current: any;
   permissions?: any[];
   oms: string;
+  // The app version this deployment is pinned to (mirrors the app's useUserStore().appVersion via a
+  // getter/setter). undefined = not resolved yet, "" = no version configured, "vX.Y.Z" = pinned.
+  appVersion?: string;
 
   // Actions
   $reset?: () => void;

@@ -19,7 +19,6 @@
 
 <script lang="ts" setup>
 import { IonButton, IonButtons, IonContent, IonHeader, IonIcon, IonModal, IonTitle, IonToolbar } from '@ionic/vue';
-import { defineProps } from 'vue';
 import { closeOutline } from 'ionicons/icons';
 import DxpShopifyImg from './DxpShopifyImg.vue';
 

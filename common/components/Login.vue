@@ -118,7 +118,7 @@ import { discoverLocalApiServers, type LocalApiServer } from "../core/localApiSe
 let route = null as any;
 
 // This is the best practice for defining composable instance, as this ensures in managing the reactive state properly
-const { loginOption, fetchLoginOptions, isAuthenticated, login: authLogin, updateOMS, clearAuth } = useAuth();
+const { loginOption, fetchLoginOptions, fetchAppVersion, isAuthenticated, login: authLogin, updateOMS, clearAuth } = useAuth();
 
 const username = ref("");
 const password = ref("");
@@ -204,7 +204,9 @@ const login = async (params?: any) => {
     username.value = "";
     password.value = "";
     if(localStorage.getItem("requestedPagePath")) {
-      router.value.replace(localStorage.getItem("requestedPagePath"))
+      const requestedPagePath = localStorage.getItem("requestedPagePath")
+      localStorage.removeItem("requestedPagePath")
+      router.value.replace(requestedPagePath)
     } else {
       router.value.replace("/")
     }
@@ -229,6 +231,7 @@ const setOms = async () => {
 
   // run SAML login flow if login options are configured for the OMS
   await fetchLoginOptions();
+  await fetchAppVersion();
 
   // checking loginOption.length to know if fetchLoginOptions API returned data
   // as toggleOmsInput is called twice without this check, from fetchLoginOptions and
@@ -254,8 +257,8 @@ const selectLocalApiServer = async (server: LocalApiServer) => {
   // user can't perform any operation there
   toggleOmsInput();
 
-  const devUsername = import.meta.env.VITE_USERNAME;
-  const devPassword = import.meta.env.VITE_PASSWORD;
+  const devUsername = import.meta.env.VITE_DEV_USERNAME;
+  const devPassword = import.meta.env.VITE_DEV_PASSWORD;
   if (import.meta.env.DEV && devUsername && devPassword) {
     username.value = devUsername;
     password.value = devPassword;
@@ -286,6 +289,7 @@ const initialise = async () => {
       accxuiConfig.value.oms = target;
 
       await fetchLoginOptions()
+      await fetchAppVersion();
       await login(route.query)
       return;
     }
@@ -299,6 +303,8 @@ const initialise = async () => {
     // fetch login options only if OMS is there as API calls require OMS
     if (cookieHelper().get("oms")) {
       await fetchLoginOptions();
+      // pin the Login page to the app version configured for this deployment, if any
+      await fetchAppVersion();
     }
 
     // show OMS input if SAML is configured or if OMS cookie is not set
