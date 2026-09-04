@@ -45,6 +45,12 @@ const BATCH_SIZE = 200;
 const products = ref(new Map<string, ResolvedProduct>());
 /** Ids already requested, so a re-render cannot queue the same product twice. */
 const requested = new Set<string>();
+/**
+ * Bumped by `reset()`. A resolve that was already awaiting Solr when the session was cleared captures
+ * the generation first and drops its result if it moved, so a logout mid-request cannot repopulate the
+ * map with the previous tenant's products.
+ */
+let generation = 0;
 
 /** Solr treats these as syntax, so an id containing one has to arrive escaped or the query fails. */
 function escapeSolrValue(value: string): string {
@@ -128,9 +134,10 @@ async function resolve(productIds: Iterable<string>): Promise<void> {
     .filter((productId) => !requested.has(productId));
   if(!pending.length) {return;}
   pending.forEach((productId) => requested.add(productId));
+  const requestGeneration = generation;
 
   const fetched = await getByIds(pending);
-  if(!fetched.length) {return;}
+  if(requestGeneration !== generation || !fetched.length) {return;}
   const next = new Map(products.value);
   for(const product of fetched) {next.set(product.productId, product);}
   products.value = next;
@@ -138,6 +145,7 @@ async function resolve(productIds: Iterable<string>): Promise<void> {
 
 /** Forget every resolved product and every in-flight id. For the app's logout hook. */
 function reset(): void {
+  generation += 1;
   products.value = new Map();
   requested.clear();
 }

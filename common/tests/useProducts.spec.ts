@@ -88,4 +88,22 @@ describe("useProducts (shared product master)", () => {
     await resolve(["P1"]);
     expect(runSolrQuery).toHaveBeenCalledTimes(2);
   });
+  it("drops a resolution that was in flight when reset() ran, so a logout cannot repopulate the map", async () => {
+    let release: (value: unknown) => void = () => {};
+    runSolrQuery.mockReturnValueOnce(new Promise((resolve) => { release = resolve; }));
+    const { products, resolve, reset } = useProducts();
+
+    const inFlight = resolve(["P1"]);
+    reset();
+    release({ data: { response: { docs: [solrDoc("P1")] } } });
+    await inFlight;
+
+    expect(products.value.size).toBe(0);
+
+    // The next session asks again and gets its own answer.
+    runSolrQuery.mockResolvedValueOnce({ data: { response: { docs: [solrDoc("P1", { parentProductName: "Tenant B" })] } } });
+    await resolve(["P1"]);
+    expect(products.value.get("P1")?.parentProductName).toBe("Tenant B");
+    expect(runSolrQuery).toHaveBeenCalledTimes(2);
+  });
 });
