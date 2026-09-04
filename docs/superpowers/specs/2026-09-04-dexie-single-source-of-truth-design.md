@@ -2,7 +2,7 @@
 
 Replace the Order Manager seed Pinia store with a Dexie-backed read path: one thin
 operations layer over Dexie (`dbClient`), one in-memory lookup index fed only from Dexie
-(`seedIndex`), and one pair of Vue composables (`useDb` / `useRecord`).
+(`seedIndex`), and one Vue composable (`useDb`).
 
 ## Problem
 
@@ -56,7 +56,7 @@ Not doing).
 
 | Area | Change |
 | --- | --- |
-| `common/db` | New `dbClient`. `useDbList`/`useDbRecord` → `useDb`/`useRecord`. `raw` dropped from `DbRow`. `defineDbEntity`/`DbEntity` deleted. `index`-free catalog reuse. |
+| `common/db` | New `dbClient`. `useDbList`/`useDbRecord` → a single `useDb`. `raw` dropped from `DbRow`. `defineDbEntity`/`DbEntity` deleted. `index`-free catalog reuse. |
 | `apps/order-manager` | New `seedIndex` + `useSeedData`. Seed Pinia store deleted. REST loaders deleted. Catalog gains the two Shopify domains. 42 consumer files migrated. |
 
 ### Out of scope
@@ -80,8 +80,8 @@ Dexie (IndexedDB) ─────────────── the single sourc
   ├─ seedIndex             plain module. In-memory lookup index over every
   │  (order-manager)       catalog table. Sync getters, importable anywhere.
   │
-  ├─ useDb / useRecord     Vue composables over dbClient.live/liveOne.
-  │  (common/db)
+  ├─ useDb                 Vue composable over dbClient.live. One entry point,
+  │  (common/db)           list-shaped, with `first` for the single-record case.
   │
   └─ useSeedData           thin composable wrapping seedIndex for templates.
      (order-manager)
@@ -118,7 +118,6 @@ interface DbClient {
 
   // live
   live<T>(table: string, opts?: QueryOptions): Observable<T[]>
-  liveOne<T>(table: string, key: string): Observable<T | undefined>
 
   // meta
   tableNames(): string[]
@@ -220,24 +219,48 @@ domains but are missing from `ORDER_MANAGER_SYNC_CATALOG`, so they never sync.
 REST loaders fill the store. Dropping the REST path without adding these two entries breaks
 those screens. They are added as part of this work, taking the catalog to 29 entries.
 
-### `useDb` / `useRecord` / `useSeedData`
+### `useDb` / `useSeedData`
+
+One composable, not two. `useDbList`/`useDbRecord` are split only because that is what
+exists today; both have zero consumers, so there is nothing to preserve. A naive merge
+would still return two different shapes (`records` vs `record`), which moves the split from
+the function name into the type. Collapsing it properly means one return shape, with the
+single-record case as a computed:
 
 ```ts
 // common/db/useDb.ts
 function useDb<T>(db: BaseDB, table: string, opts?: MaybeRefs<QueryOptions>): {
-  records: Ref<T[]>; count: Ref<number>; hydrated: Ref<boolean>; error: Ref<Error | null>;
-}
-
-function useRecord<T>(db: BaseDB, table: string, key: MaybeRef<string>): {
-  record: Ref<T | undefined>; hydrated: Ref<boolean>; error: Ref<Error | null>;
+  records:  Ref<T[]>
+  first:    Ref<T | undefined>   // computed over records — the single-record case
+  count:    Ref<number>
+  hydrated: Ref<boolean>
+  error:    Ref<Error | null>
 }
 ```
 
-Both subscribe through `dbClient.live`/`liveOne`, unsubscribe on unmount, and re-subscribe
-when reactive options or the key change — a gap in today's `useDbList`, which reads
-`options` once at setup and never watches them. `hydrated` keeps its current semantic from
-`useDbList.ts:30`: emitted at least once, and either rows are present or the bootstrap is
-idle.
+```ts
+// list
+const { records } = useDb(db, "facilities", { scope: { field: "facilityTypeId", value: type } });
+
+// one record by primary key
+const { first: facility, hydrated } = useDb(db, "facilities", { equals: { facilityId: id } });
+```
+
+Reading one row through `equals` on the primary key costs nothing extra: Dexie resolves
+`where(pk).equals(v)` through the index, the same work `get()` does, and returns an array of
+at most one. `dbClient.liveOne` is therefore not needed and is not part of the API;
+`dbClient.get()` remains for promise-based primary-key reads in services and stores.
+
+It subscribes through `dbClient.live`, unsubscribes on unmount, and re-subscribes when
+reactive options change — a gap in today's `useDbList`, which reads `options` once at setup
+and never watches them. `hydrated` keeps its current semantic from `useDbList.ts:30`:
+emitted at least once, and either rows are present or the bootstrap is idle. It carries real
+weight here, because `first === undefined` means either "no such row" or "not hydrated yet".
+
+`useDb` ships with **zero consumers**. `seedIndex` uses `dbClient` directly and nothing else
+reads Dexie reactively today. It exists so that new code has a sanctioned way to do reactive
+reads instead of reaching for bare `liveQuery` — which is how the current duplication
+started.
 
 ```ts
 // apps/order-manager/src/db/useSeedData.ts
@@ -298,7 +321,7 @@ change — deliberately deferred rather than designed in now.
   `fetchProductStoreSettings`. This is why the seed store is deleted outright rather than
   shrunk: it holds nothing that Dexie does not.
 - `defineDbEntity`, `DbEntity` — superseded by `dbClient` plus the catalog.
-- `useDbList`, `useDbRecord` — zero consumers today.
+- `useDbList`, `useDbRecord` — zero consumers today; replaced by the single `useDb`.
 - `geoProjection.wellKnownText` — declared, never read.
 - Getters with zero call sites, not carried over to `seedIndex`:
   `contactPurposeDescription`, `communicationEventTypeDescription`,
@@ -310,7 +333,7 @@ change — deliberately deferred rather than designed in now.
 
 Each step should land green before the next starts.
 
-1. **`dbClient` + `useDb`/`useRecord`** in `common/db`, alongside the existing code. Nothing
+1. **`dbClient` + `useDb`** in `common/db`, alongside the existing code. Nothing
    consumes them yet. `useDbList`/`useDbRecord` deleted in the same step (zero consumers).
 2. **Projection audit.** For every catalog table, diff the fields consumers read against
    `EntityProjection.fields`. Extend projections where they fall short — at minimum
