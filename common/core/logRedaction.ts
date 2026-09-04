@@ -14,7 +14,7 @@ import type { LoggerHook } from 'vue-logger-plugin'
  * `RedactSensitiveDataHook` applies it to every logger argument, so the ~58 existing
  * `logger.error(msg, error)` call sites are fixed without touching any of them.
  *
- * Spec: apps/order-manager/tests/core/logRedaction.spec.ts
+ * Spec: common/tests/logRedaction.spec.ts
  */
 
 export const REDACTED = '[redacted]'

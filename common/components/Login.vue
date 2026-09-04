@@ -257,8 +257,8 @@ const selectLocalApiServer = async (server: LocalApiServer) => {
   // user can't perform any operation there
   toggleOmsInput();
 
-  const devUsername = import.meta.env.VITE_USERNAME;
-  const devPassword = import.meta.env.VITE_PASSWORD;
+  const devUsername = import.meta.env.VITE_DEV_USERNAME;
+  const devPassword = import.meta.env.VITE_DEV_PASSWORD;
   if (import.meta.env.DEV && devUsername && devPassword) {
     username.value = devUsername;
     password.value = devPassword;

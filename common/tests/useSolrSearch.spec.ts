@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { useSolrSearch } from './useSolrSearch';
+import { useSolrSearch } from '../composables/useSolrSearch';
 
 const { prepareOrderLookupQuery } = useSolrSearch();
 
