@@ -27,23 +27,26 @@
               <ion-input :label="translate('OMS')" label-placement="fixed" name="instanceUrl" v-model="instanceUrl" id="instanceUrl" type="text" required />
             </ion-item>
 
-            <ion-list v-if="isDiscoveringLocalApiServers || localApiServers.length">
+            <ion-list v-if="canDiscoverLocalApiServers() && (isDiscoveringLocalApiServers || devServers.length)">
               <ion-list-header>
-                <ion-label>{{ translate("Local OMS") }}</ion-label>
+                <ion-label>{{ translate("Dev servers") }}</ion-label>
                 <ion-spinner v-if="isDiscoveringLocalApiServers" name="crescent" />
               </ion-list-header>
               <ion-item
-                v-for="server in localApiServers"
+                v-for="server in devServers"
                 :key="server.oms"
                 button
                 :disabled="isCheckingOms"
-                @click="selectLocalApiServer(server)"
+                @click="selectDevServer(server)"
               >
                 <ion-label>
                   {{ server.label }}
                   <p>{{ server.oms }}</p>
                 </ion-label>
-                <ion-note slot="end">
+                <ion-badge v-if="server.hasAutoLogin" color="primary" slot="end">
+                  {{ translate("Auto login") }}
+                </ion-badge>
+                <ion-note v-else-if="server.signal" slot="end">
                   {{ server.signal === "loginOptions" ? translate("Ready") : translate("Detected") }}
                 </ion-note>
               </ion-item>
@@ -90,6 +93,7 @@
 
 <script setup lang="ts">
 import {
+  IonBadge,
   IonButton,
   IonChip,
   IonContent,
@@ -105,7 +109,7 @@ import {
   loadingController,
   onIonViewWillEnter
 } from "@ionic/vue";
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import Logo from "./Logo.vue";
 import { arrowBackOutline, arrowForwardOutline, warningOutline } from 'ionicons/icons'
 import { cookieHelper } from "../helpers/cookieHelper";
@@ -113,7 +117,7 @@ import { translate } from "../core/i18n"
 import { commonUtil } from "../utils/commonUtil";
 import { useAuth } from "../composables/useAuth";
 import { accxuiConfig } from "../core/configRegistry";
-import { discoverLocalApiServers, type LocalApiServer } from "../core/localApiServerDiscovery";
+import { discoverLocalApiServers, type LocalApiServer, type LocalApiServerSignal } from "../core/localApiServerDiscovery";
 
 let route = null as any;
 
@@ -138,7 +142,7 @@ const isLoggingIn = ref(false);
 const isDiscoveringLocalApiServers = ref(false);
 const localApiServers = ref<LocalApiServer[]>([]);
 const hasDiscoveredLocalApiServers = ref(false);
-const hasAttemptedDevAutoLogin = ref(false);
+const hasAttemptedDevAutoLogin = ref(typeof window !== "undefined" && window.sessionStorage?.getItem("skipDevAutoLogin") === "true");
 let router: any = ref();
 
 const goToLogin = () => {
@@ -282,7 +286,70 @@ const setOms = async () => {
   isCheckingOms.value = false;
 };
 
-const selectLocalApiServer = async (server: LocalApiServer) => {
+export interface DevServer {
+  label: string;
+  oms: string;
+  hasAutoLogin: boolean;
+  signal?: LocalApiServerSignal;
+  isEnv?: boolean;
+}
+
+const normalizeOmsUrl = (url: string) => url.trim().toLowerCase().replace(/\/+$/, "");
+
+const devServers = computed<DevServer[]>(() => {
+  if (!canDiscoverLocalApiServers()) return [];
+
+  const servers: DevServer[] = [];
+  const seenOms = new Set<string>();
+
+  // 1. Dev server from env (VITE_DEFAULT_ALIAS)
+  if (defaultAlias) {
+    const rawEnvOms = defaultAlias.trim();
+    const resolvedEnvOms = alias[rawEnvOms.toLowerCase()] ? alias[rawEnvOms.toLowerCase()] : rawEnvOms;
+    const normalizedEnvOms = normalizeOmsUrl(resolvedEnvOms);
+
+    let label = defaultAlias;
+    if (defaultAlias === resolvedEnvOms) {
+      const aliasKey = Object.keys(alias).find((key) => normalizeOmsUrl(alias[key]) === normalizedEnvOms);
+      label = aliasKey || defaultAlias;
+    }
+
+    servers.push({
+      label,
+      oms: resolvedEnvOms,
+      hasAutoLogin: canDevAutoLogin(),
+      isEnv: true
+    });
+    seenOms.add(normalizedEnvOms);
+  }
+
+  // 2. Discovered local API servers
+  for (const server of localApiServers.value) {
+    const normalizedServerOms = normalizeOmsUrl(server.oms);
+    if (seenOms.has(normalizedServerOms)) {
+      const existing = servers.find((s) => normalizeOmsUrl(s.oms) === normalizedServerOms);
+      if (existing) {
+        existing.signal = server.signal;
+        if (server.label && existing.label === defaultAlias) {
+          existing.label = server.label;
+        }
+      }
+    } else {
+      servers.push({
+        label: server.label,
+        oms: server.oms,
+        hasAutoLogin: canDevAutoLogin(),
+        signal: server.signal,
+        isEnv: false
+      });
+      seenOms.add(normalizedServerOms);
+    }
+  }
+
+  return servers;
+});
+
+const selectDevServer = async (server: DevServer) => {
   if (isCheckingOms.value) return;
 
   instanceUrl.value = server.oms;
@@ -295,7 +362,9 @@ const selectLocalApiServer = async (server: LocalApiServer) => {
   // user can't perform any operation there
   toggleOmsInput();
 
-  await attemptDevAutoLogin(true);
+  if (server.hasAutoLogin) {
+    await attemptDevAutoLogin(true);
+  }
 };
 
 const initialise = async () => {
