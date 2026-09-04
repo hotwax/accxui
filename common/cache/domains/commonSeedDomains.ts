@@ -36,7 +36,7 @@ import {
   statusProjection,
 } from "./commonSeedEntities";
 
-export function registerCommonSeedDomains(getDb: () => BaseCacheDB): void {
+export function registerCommonSeedDomains(getDb: (omsInstance: string) => BaseCacheDB): void {
   registerSnapshotDomain({
     name: "productStore",
     table: "productStores",
