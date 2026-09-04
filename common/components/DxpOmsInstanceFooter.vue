@@ -26,7 +26,9 @@
 
       <ion-item v-if="hasStorePicker" lines="none">
         <ion-select
-          :label="selectLabel || translate('Select store')"
+          :justify="selectLabel ? 'space-between' : 'start'"
+          :label="selectLabel || undefined"
+          :aria-label="selectLabel || translate('Select store')"
           interface="popover"
           :value="currentProductStoreId"
           @ionChange="emit('update:productStore', $event.detail.value, $event)"
