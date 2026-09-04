@@ -117,4 +117,24 @@ describe('DxpOmsInstanceFooter', () => {
 
     expect(wrapper.text()).toContain('STORE');
   });
+
+  it('shows the sole store when currentProductStoreId is omitted', () => {
+    const wrapper = render({
+      productStores: [STORES[0]]
+    });
+
+    expect(wrapper.text()).toContain('Rails');
+    expect(picker(wrapper).exists()).toBe(false);
+  });
+
+  it('resolves timezone from accxuiConfig when prop is omitted', async () => {
+    const { accxuiConfig } = await import('../core/configRegistry');
+    accxuiConfig.value.current = { timeZone: 'America/New_York' };
+
+    const wrapper = render();
+    expect(note(wrapper).text()).toContain('America/New_York');
+
+    accxuiConfig.value.current = {};
+  });
 });
+

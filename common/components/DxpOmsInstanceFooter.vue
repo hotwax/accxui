@@ -15,12 +15,12 @@
     <ion-toolbar>
       <ion-item lines="none">
         <ion-label class="ion-text-wrap">
-          <p class="overline">{{ instanceLabel }}</p>
+          <p class="overline">{{ displayInstanceLabel }}</p>
           <template v-if="!hasStorePicker">{{ currentStoreLabel }}</template>
         </ion-label>
-        <ion-note v-if="timeZone" slot="end" class="ion-text-end" :color="timeZoneMismatched ? 'danger' : ''">
-          {{ timeZone }}
-          <p v-if="zoneTime">{{ zoneTime }}</p>
+        <ion-note v-if="displayTimeZone" slot="end" class="ion-text-end" :color="isTimeZoneMismatched ? 'danger' : ''">
+          {{ displayTimeZone }}
+          <p v-if="displayZoneTime">{{ displayZoneTime }}</p>
         </ion-note>
       </ion-item>
 
@@ -45,9 +45,13 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { IonFooter, IonItem, IonLabel, IonNote, IonSelect, IonSelectOption, IonToolbar } from '@ionic/vue';
 import { translate } from '../core/i18n';
+import { accxuiConfig } from '../core/configRegistry';
+import { commonUtil } from '../utils/commonUtil';
+
+const HOTWAX_HOST_SUFFIX = '.hotwax.io';
 
 const props = withDefaults(defineProps<{
   /** The OMS this session is pointed at — a bare handle reads better than a full URL. */
@@ -56,11 +60,11 @@ const props = withDefaults(defineProps<{
   productStores?: any[];
   /** Which of `productStores` is active. */
   currentProductStoreId?: string;
-  /** The user's configured timezone. Omitted entirely when blank. */
+  /** The user's configured timezone. When omitted, resolves from accxuiConfig. */
   timeZone?: string;
-  /** Colors the timezone danger — the app decides what counts as a mismatch. */
+  /** Colors the timezone danger. When omitted, derived by comparing against browser timezone. */
   timeZoneMismatched?: boolean;
-  /** Current time in `timeZone`. Apps that do not run a clock leave it blank and it is hidden. */
+  /** Current time in `timeZone`. When omitted, driven by an internal 10s clock when mismatched. */
   zoneTime?: string;
   /** Overrides the picker's label. */
   selectLabel?: string;
@@ -69,7 +73,7 @@ const props = withDefaults(defineProps<{
   productStores: () => [],
   currentProductStoreId: '',
   timeZone: '',
-  timeZoneMismatched: false,
+  timeZoneMismatched: undefined,
   zoneTime: '',
   selectLabel: ''
 });
@@ -95,7 +99,62 @@ function storeLabel(store: any): string {
 const hasStorePicker = computed(() => (props.productStores?.length || 0) > 1);
 
 const currentStoreLabel = computed(() => {
-  const current = (props.productStores || []).find((store: any) => storeId(store) === props.currentProductStoreId);
+  const stores = props.productStores || [];
+  const current = stores.find((store: any) => storeId(store) === props.currentProductStoreId)
+    || (stores.length === 1 ? stores[0] : null);
   return current ? storeLabel(current) : '';
+});
+
+const displayInstanceLabel = computed(() => {
+  if (props.instanceLabel) return props.instanceLabel;
+  const url = (commonUtil as any)?.getMaargURL?.() || (commonUtil as any)?.getOmsURL?.() || '';
+  if (!url) return '';
+  const host = url.replace(/^https?:\/\//, '').split('/')[0];
+  return host.endsWith(HOTWAX_HOST_SUFFIX) ? host.slice(0, -HOTWAX_HOST_SUFFIX.length) : host;
+});
+
+const browserTimeZone = typeof Intl !== 'undefined' && Intl.DateTimeFormat
+  ? Intl.DateTimeFormat().resolvedOptions().timeZone
+  : '';
+
+const displayTimeZone = computed(() => {
+  if (props.timeZone) return props.timeZone;
+  return accxuiConfig.value?.current?.timeZone || '';
+});
+
+const isTimeZoneMismatched = computed(() => {
+  if (props.timeZoneMismatched !== undefined) {
+    return props.timeZoneMismatched;
+  }
+  return !!displayTimeZone.value && !!browserTimeZone && displayTimeZone.value !== browserTimeZone;
+});
+
+const selectedZoneTime = ref('');
+const displayZoneTime = computed(() => props.zoneTime || selectedZoneTime.value);
+let clockTimer: ReturnType<typeof setInterval> | undefined;
+
+function refreshSelectedZoneTime() {
+  if (props.zoneTime) {
+    selectedZoneTime.value = props.zoneTime;
+    return;
+  }
+  if (!displayTimeZone.value || !isTimeZoneMismatched.value) {
+    selectedZoneTime.value = '';
+    return;
+  }
+  if (commonUtil && typeof commonUtil.getCurrentTime === 'function') {
+    selectedZoneTime.value = commonUtil.getCurrentTime(displayTimeZone.value, 't');
+  }
+}
+
+watch([displayTimeZone, isTimeZoneMismatched], refreshSelectedZoneTime);
+
+onMounted(() => {
+  refreshSelectedZoneTime();
+  clockTimer = setInterval(refreshSelectedZoneTime, 10000);
+});
+
+onUnmounted(() => {
+  if (clockTimer) clearInterval(clockTimer);
 });
 </script>
