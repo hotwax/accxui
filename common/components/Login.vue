@@ -27,6 +27,16 @@
               <ion-input :label="translate('OMS')" label-placement="fixed" name="instanceUrl" v-model="instanceUrl" id="instanceUrl" type="text" required />
             </ion-item>
 
+            <div class="ion-padding">
+              <!-- @keyup.enter.stop to stop the form from submitting on enter press as keyup.enter is already bound
+              through the form above, causing both the form and the button to submit. -->
+              <ion-button color="primary" expand="block" @click.prevent="isCheckingOms ? '' : setOms()" @keyup.enter.stop>
+                {{ translate("Next") }}
+                <ion-spinner v-if="isCheckingOms" name="crescent" slot="end" />
+                <ion-icon v-else slot="end" :icon="arrowForwardOutline" />
+              </ion-button>
+            </div>
+
             <ion-list v-if="canDiscoverLocalApiServers() && (isDiscoveringLocalApiServers || devServers.length)">
               <ion-list-header>
                 <ion-label>{{ translate("Dev servers") }}</ion-label>
@@ -51,16 +61,6 @@
                 </ion-note>
               </ion-item>
             </ion-list>
-
-            <div class="ion-padding">
-              <!-- @keyup.enter.stop to stop the form from submitting on enter press as keyup.enter is already bound
-              through the form above, causing both the form and the button to submit. -->
-              <ion-button color="primary" expand="block" @click.prevent="isCheckingOms ? '' : setOms()" @keyup.enter.stop>
-                {{ translate("Next") }}
-                <ion-spinner v-if="isCheckingOms" name="crescent" slot="end" />
-                <ion-icon v-else slot="end" :icon="arrowForwardOutline" />
-              </ion-button>
-            </div>
           </section>
 
           <section v-else>
@@ -69,22 +69,6 @@
                 {{ cookieHelper().get("oms") }}
               </ion-chip>
             </div>
-
-            <ion-item
-              v-if="canDevAutoLoginForCurrentOms"
-              button
-              lines="full"
-              :disabled="isLoggingIn"
-              @click="attemptDevAutoLogin(true)"
-            >
-              <ion-label>
-                {{ configuredDevUsername }}
-                <p>{{ translate("Configured dev user") }}</p>
-              </ion-label>
-              <ion-badge color="primary" slot="end">
-                {{ translate("Auto login") }}
-              </ion-badge>
-            </ion-item>
 
             <ion-item lines="full">
               <ion-input :label="translate('Username')" label-placement="fixed" name="username" v-model="username" id="username"  type="text" required />
@@ -100,6 +84,22 @@
                 <ion-icon v-else slot="end" :icon="arrowForwardOutline" />
               </ion-button>
             </div>
+
+            <ion-list v-if="canDevAutoLoginForCurrentOms">
+              <ion-item
+                button
+                :disabled="isLoggingIn"
+                @click="attemptDevAutoLogin(true)"
+              >
+                <ion-label>
+                  {{ configuredDevUsername }}
+                  <p>{{ translate("Configured dev user") }}</p>
+                </ion-label>
+                <ion-badge color="primary" slot="end">
+                  {{ translate("Auto login") }}
+                </ion-badge>
+              </ion-item>
+            </ion-list>
 
             <div v-if="canShowAutoLoginDocLink" class="ion-text-center ion-padding-bottom">
               <ion-note>
