@@ -55,7 +55,7 @@ export function registerSnapshotDomain(config: SnapshotDomainConfig, getDb: (oms
       if (config.fanOut) {
         const parentRows = await db.table<DbRow, string>(config.fanOut.parentTable).toArray();
         for (const parent of parentRows) {
-          const parentId = String(parent[config.fanOut.parentKeyField] || parent.raw?.[config.fanOut.parentKeyField] || "");
+          const parentId = String(parent[config.fanOut.parentKeyField] || "");
           if (!parentId) continue;
           const url = config.fanOut.urlFor(parentId);
           const fanRows = await pageAll({

@@ -14,6 +14,27 @@ export const bootstrapState = reactive({
   error: null as string | null,
 });
 
+/**
+ * Bumped whenever the stored row shape changes in a way existing rows cannot satisfy.
+ * On mismatch the data tables are cleared once and the worker refills them.
+ * v2: `raw` removed from stored rows.
+ */
+export const DB_SHAPE_VERSION = 2;
+const SHAPE_MARKER_KEY = "dbShapeVersion";
+
+async function ensureRowShape(db: BaseDB): Promise<void> {
+  try {
+    const marker = await db.syncMeta.get(SHAPE_MARKER_KEY);
+    if (Number(marker?.version) === DB_SHAPE_VERSION) return;
+
+    console.info(`[db-bootstrap] Row shape changed, clearing local tables for ${db.name}.`);
+    await clearDatabaseTables(db);
+    await db.syncMeta.put({ key: SHAPE_MARKER_KEY, version: DB_SHAPE_VERSION, timestamp: Date.now() });
+  } catch (error) {
+    console.warn("[db-bootstrap] Row shape check failed:", error);
+  }
+}
+
 let workerInstance: Worker | null = null;
 let harnessProxy: Remote<SyncHarness> | null = null;
 let currentDb: BaseDB | null = null;
@@ -35,6 +56,8 @@ export async function startDbBootstrap(config: BootstrapConfig): Promise<void> {
   bootstrapState.error = null;
 
   try {
+    await ensureRowShape(config.db);
+
     if (!workerInstance) {
       workerInstance = config.workerFactory();
       harnessProxy = wrap<SyncHarness>(workerInstance);

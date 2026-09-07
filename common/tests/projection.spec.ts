@@ -35,7 +35,7 @@ describe("projectRow & projectRows", () => {
     },
   };
 
-  it("projects raw server payload correctly", () => {
+  it("stores only the projected fields, never the raw server payload", () => {
     const raw = {
       facilityId: "FAC_01",
       facilityName: "Main Warehouse",
@@ -48,7 +48,6 @@ describe("projectRow & projectRows", () => {
       facilityId: "FAC_01",
       facilityName: "Main Warehouse",
       maximumOrderLimit: 100,
-      raw,
       syncedAt: 12345,
     });
   });

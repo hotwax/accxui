@@ -56,7 +56,7 @@ export function projectRow(
   if (!key) return null;
   row[projection.keyField] = key;
 
-  return { ...row, raw, syncedAt: now } as DbRow;
+  return { ...row, syncedAt: now } as DbRow;
 }
 
 /** Project many records, dropping any without a usable key. */

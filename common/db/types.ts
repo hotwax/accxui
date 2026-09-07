@@ -2,10 +2,9 @@
  * Shared Type Definitions for the AccxUI Local Database Framework.
  */
 
-/** A stored row: indexed/normalized fields + untouched server object in raw. */
+/** A stored row: the projected fields, plus when they were synced. */
 export interface DbRow {
   [field: string]: unknown;
-  raw: Record<string, unknown>;
   syncedAt: number;
 }
 
