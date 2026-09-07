@@ -4,6 +4,7 @@ import { createApp } from "@shopify/app-bridge";
 import { getSessionToken } from "@shopify/app-bridge-utils";
 import api from '../core/remoteApi';
 import { accxuiConfig } from '../core/configRegistry';
+import { useAuth } from './useAuth';
 
 export function useShopify() {
   const store = useEmbeddedAppStore();
@@ -158,6 +159,9 @@ const openPosScanner = (): Promise<any> => {
           lastName: appState.pos?.user?.lastName
         };
       });
+
+      useAuth().updateToken(loginResp.data.token, loginResp.data.expiresAt)
+      useAuth().updateOMS(loginResp.data.omsInstanceUrl)
 
       if (accxuiConfig.value.oms !== undefined) {
         accxuiConfig.value.oms = loginResp.data.omsInstanceUrl;
