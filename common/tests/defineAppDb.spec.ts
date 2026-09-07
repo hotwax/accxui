@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { composeAppSchema, assertDistinctSeedTables } from "../db/defineAppDb";
 
 describe("composeAppSchema", () => {
@@ -130,6 +130,15 @@ describe("defineAppDb", () => {
     const second = appDb.get("other-oms");
     expect(second).not.toBe(first);
     expect(second.name).toBe("other-oms-TestDB");
+  });
+
+  it("closes the previous connection on a switch so stale handles stop serving rows", () => {
+    const alpha = appDb.get("alpha-oms");
+    const close = vi.spyOn(alpha, "close");
+
+    appDb.get("beta-oms");
+
+    expect(close).toHaveBeenCalled();
   });
 
   it("throws from raw() until a resolver is registered", () => {
