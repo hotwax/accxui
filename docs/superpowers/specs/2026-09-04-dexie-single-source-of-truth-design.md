@@ -1,8 +1,8 @@
 # Dexie as the single source of truth for Order Manager seed data
 
 Replace the Order Manager seed Pinia store with a Dexie-backed read path: one thin
-operations layer over Dexie (`dbClient`), one in-memory lookup index fed only from Dexie
-(`seedIndex`), and one Vue composable (`useDb`).
+operations layer over Dexie (`dbClient`), one module of lazily built lookup slices fed only
+from Dexie (`useSeedData.ts`), and one Vue composable for reactive reads (`useDb`).
 
 ## Problem
 
@@ -34,21 +34,27 @@ projected fields *and* a complete copy of the server payload under `raw`.
 ## Success criteria
 
 - Exactly one writer for seed data: the sync worker.
-- Boot performs 29 table reads once, not ~1,700 scans.
-- No Pinia store holds seed reference data.
-- Subscriptions are torn down on logout and re-established on OMS switch.
+- A table is read at most once per session, plus one subscription, and only if used —
+  replacing ~1,700 overlapping full-table scans on a fresh login.
+- No Pinia store holds seed reference data, and no boot hydration step exists.
+- Subscriptions are torn down on logout and before an OMS switch.
 - IndexedDB rows carry projected fields only.
 - Label lookups stay synchronous, with the same call-site shape.
 
 ### Accepted behaviour change
 
-On a **fresh login**, labels resolve when the worker's domains land rather than when a
-parallel REST call returns. Until a slice fills, lookups return the raw id — the same
-fallback `itemDescription()` already produces for an unloaded dataset today, so it is a
-timing shift, not a new failure mode. Reloads are unaffected: the database is already
-populated, and `hydrate` reads it before first paint. If the delay proves noticeable,
-prioritising the label-critical domains in the worker's sync order is the fix (see
-Not doing).
+Lookups return the raw id until their slice fills — the same fallback `itemDescription()`
+already produces for an unloaded dataset today. Two cases differ from current behaviour:
+
+**First access to a table**, even on a warm database, resolves a tick late. Where the value
+is read in a computed it self-corrects invisibly; where it is stamped into data it would
+not, which is what `ensureLoaded` exists for.
+
+**On a fresh login**, labels resolve when the worker's domains land rather than when a
+parallel REST call returns. This is a timing shift, not a new failure mode — and unlike a
+stamped value, a computed self-corrects the moment the slice fills. If the delay proves
+noticeable, prioritising the label-critical domains in the worker's sync order is the fix
+(see Not doing).
 
 ## Scope
 
@@ -57,7 +63,7 @@ Not doing).
 | Area | Change |
 | --- | --- |
 | `common/db` | New `dbClient`. `useDbList`/`useDbRecord` → a single `useDb`. `raw` dropped from `DbRow`. `defineDbEntity`/`DbEntity` deleted. `index`-free catalog reuse. |
-| `apps/order-manager` | New `seedIndex` + `useSeedData`. Seed Pinia store deleted. REST loaders deleted. Catalog gains the two Shopify domains. 42 consumer files migrated. |
+| `apps/order-manager` | New `useSeedData.ts` (state + getters + composable + `ensureLoaded`). Seed Pinia store deleted. REST loaders deleted. Catalog gains the two Shopify domains. 42 consumer files migrated. |
 
 ### Out of scope
 
@@ -77,21 +83,26 @@ Dexie (IndexedDB) ─────────────── the single sourc
   │                        stores and composables. Takes BaseDB as a parameter
   │                        so the worker never imports commonUtil.
   │
-  ├─ seedIndex             plain module. In-memory lookup index over every
-  │  (order-manager)       catalog table. Sync getters, importable anywhere.
-  │
   ├─ useDb                 Vue composable over dbClient.live. One entry point,
   │  (common/db)           list-shaped, with `first` for the single-record case.
   │
-  └─ useSeedData           thin composable wrapping seedIndex for templates.
-     (order-manager)
+  └─ useSeedData.ts        ONE module, order-manager. Module-scoped reactive
+     (order-manager)       slices built lazily on first access, plus:
+                             · plain sync getters  -> stores, services, utils
+                             · useSeedData()       -> components
+                             · ensureLoaded(tables) -> async stamping sites
+                             · reset()             -> logout / OMS switch
 ```
 
-`seedIndex` is a plain module rather than a composable or a store because
-`store/order.ts:56`, `utils/badAddressState.ts:32` and `services/order.ts:793` need
-synchronous lookups outside any component. A plain module import works in all four
-contexts; a composable works in one. `useSeedData` exists solely to give templates
-reactivity and delegates every call to the same module.
+There is no separate index module and no boot hydration step. `useSeedData.ts` owns its
+state, and a slice comes into existence the first time something asks for it.
+
+The module is plain — not a composable, not a store — because `store/order.ts:56`,
+`utils/badAddressState.ts:32` and `services/order.ts:793` need synchronous lookups outside
+any component. A plain import works in all four contexts; a composable works only in
+components. `useSeedData()` exists solely to give templates and computeds reactivity, and
+delegates to the same module state.
+
 
 ### `dbClient`
 
@@ -138,7 +149,7 @@ export const omDb = () => dbClient(getOrderManagerDb(commonUtil.getOMSInstanceNa
 `live` wraps Dexie's `liveQuery`: it emits the query result immediately on subscribe, then
 re-runs and re-emits whenever a write touches the queried table — including writes from the
 sync worker and from other tabs. It re-runs the whole query rather than producing a delta,
-which is why `seedIndex` debounces.
+which is why the seed slices debounce.
 
 ### Storing projected rows only
 
@@ -174,58 +185,88 @@ verified as already covered: `isPhysicalFacility` (`parentTypeId`, `facilityType
 `geoProjection.wellKnownText` is declared and read by nobody. It is removed — it is polygon
 geometry and the largest projected field in the schema.
 
-### `seedIndex`
+### `useSeedData.ts` — lazy reactive slices
+
+One module owns everything: the state, the subscriptions, the sync getters, and the
+composable.
 
 ```ts
-// apps/order-manager/src/db/seedIndex.ts — plain module
-const slices = new Map<string, Map<string, DbRow>>();  // table -> pk -> row, verbatim
-const version = ref(0);                                 // the only reactive cell
-let state: "cold" | "hydrating" | "ready" = "cold";
+// apps/order-manager/src/db/useSeedData.ts
+const slices = new Map<string, ShallowRef<Map<string, Row>>>();
+const subscriptions = new Map<string, Subscription>();
 ```
 
-Because `raw` is gone, stored rows are already lean, so the index holds them verbatim —
-there is no separate entry shape to define or keep in sync.
+**A slice is created on first access.** The first call for a table finds nothing, returns
+the raw id, and kicks off an async read plus a `liveQuery` subscription. When the read
+lands, the ref is set; any computed that read it re-evaluates and the real label appears.
+
+```ts
+function sliceOf(table: string): Map<string, Row> {
+  let slice = slices.get(table);
+  if (!slice) {
+    slice = shallowRef(new Map());
+    slices.set(table, slice);
+    void loadAndSubscribe(table);   // async; fills the ref, then keeps it fresh
+  }
+  return slice.value;                // reading .value registers the dependency
+}
+```
+
+There is no catalog to configure and no boot step. Only tables a session actually touches
+are ever read or subscribed — a user who never opens a country picker never loads the 1,388
+geo rows.
 
 | Aspect | Behaviour |
 | --- | --- |
-| **Which tables** | Every entry in `ORDER_MANAGER_SYNC_CATALOG`. No flag, no second config file. |
-| **Hydration** | Eager at boot — one `dbClient` read per table, in parallel. |
-| **Refresh** | One `liveQuery(() => table.toArray())` per table, 150 ms trailing debounce, rebuilding only that slice. |
-| **Reactivity** | A single `ref` version counter, bumped on slice rebuild. `useSeedData` wraps getters in computeds that read it; plain imports pay nothing. |
-| **Miss** | Returns the raw id, exactly as `itemDescription()` does today. No new undefined-flash. |
-| **Secondary indexes** | Built during slice rebuild: `statusesByType`, `enumsByType`, `enumChildTypesByParent`, `geoAssocsByCountry`, `carrierShipmentMethodsByParty`, `transitionsByStatus`. This removes the O(n) `flatMap` scans that `findStatus`/`findEnum` run on every `describe()` call today. |
-| **Lifecycle** | `hydrate(catalog, db)` on login and on authenticated boot; `reset()` on logout; `reset()` then `hydrate()` on OMS switch. |
-| **Writes** | `createOrderIdentificationType` POSTs, then calls the existing `refreshAfterMutation("enum", { enumId })` → worker refetch → Dexie write → liveQuery → slice rebuild. |
+| **Which tables** | Whichever ones get asked for. No config. |
+| **First access** | Returns the raw id, starts an async read and a `liveQuery` subscription. |
+| **Refresh** | One `liveQuery(() => table.toArray())` per live slice, 150 ms trailing debounce, replacing only that slice's ref. |
+| **Reactivity** | Per-slice `shallowRef`. Reading through a getter registers a dependency, so only computeds that touched a changed table re-run. |
+| **Miss** | Returns the raw id, exactly as `itemDescription()` does today. |
+| **Secondary indexes** | Rebuilt with their source slice: `statusesByType`, `enumsByType`, `enumChildTypesByParent`, `geoAssocsByCountry`, `carrierShipmentMethodsByParty`, `transitionsByStatus`. Removes the O(n) `flatMap` scans `findStatus`/`findEnum` run on every `describe()` today. |
+| **Lifecycle** | `reset()` on logout and before an OMS switch: unsubscribe everything, drop every slice. |
+| **Writes** | `createOrderIdentificationType` POSTs, then `refreshAfterMutation("enum", { enumId })` → worker refetch → Dexie write → liveQuery → slice replaced. |
 
-`liveQuery` is the correctness mechanism, not `DB_SYNC_CHANNEL`. Dexie's own change
-tracking covers every writer — worker, main thread, other tabs — so a table cannot go
-silently stale if something writes without broadcasting. `DB_SYNC_CHANNEL` survives only
-for sync *progress* reporting to the Settings screen.
+`liveQuery` is the correctness mechanism, not `DB_SYNC_CHANNEL`. Dexie's own change tracking
+covers every writer — worker, main thread, other tabs — so a live slice cannot go silently
+stale. `DB_SYNC_CHANNEL` survives only for sync progress reporting on the Settings screen.
 
-### Catalog reuse
+### `ensureLoaded` — the one rule lazy loading imposes
 
-`ORDER_MANAGER_SYNC_CATALOG` becomes the single registry for a domain. No new config file
-and no `index` flag: every catalog table is indexed.
+Reactive refs self-correct only where a **computed re-reads them**. Where a lookup result is
+*stamped into data* — copied into a row, a form, or a `ref` — it is evaluated once and never
+revisited, so a cold slice leaves a raw id there permanently.
 
-Three consumers, one list:
+Every such site in the app is already inside an async function, so the module exports:
 
-- `startAppDbSync` → `catalog.map(d => d.name)` (already the case)
-- `useDbStatus(db, catalog)` → Settings screen (unchanged)
-- `seedIndex.hydrate(catalog, db)` → one slice per entry
+```ts
+export async function ensureLoaded(tables: string[]): Promise<void>
+```
 
-**Bug this surfaces.** `shopifyShop` and `shopifyShopLocation` have registered common sync
-domains but are missing from `ORDER_MANAGER_SYNC_CATALOG`, so they never sync.
-`views/CreateOrder.vue:327` and `views/OrderDetail.vue:1163` work today only because the
-REST loaders fill the store. Dropping the REST path without adding these two entries breaks
-those screens. They are added as part of this work, taking the catalog to 29 entries.
+Call it before stamping:
 
-### `useDb` / `useSeedData`
+```ts
+// store/order.ts — inside async fetchWorkflowPage
+await ensureLoaded(["productStores", "shipmentMethodTypes"]);
+const orders = docs.map((doc) => ({ …, productStoreName: productStoreName(doc.productStoreId) }));
+```
 
-One composable, not two. `useDbList`/`useDbRecord` are split only because that is what
-exists today; both have zero consumers, so there is nothing to preserve. A naive merge
-would still return two different shapes (`records` vs `record`), which moves the split from
-the function name into the type. Collapsing it properly means one return shape, with the
-single-record case as a computed:
+The six stamping sites:
+
+| Site | Enclosing scope | Tables |
+| --- | --- | --- |
+| `store/order.ts:47` | `async fetchWorkflowPage` | `productStores`, `shipmentMethodTypes` |
+| `store/customer.ts:326` | `async loadCustomerDashboard` | `statuses` |
+| `store/customer.ts:374` | async order-progress block | `statuses` |
+| `store/customerService.ts:1058` | async filter-rule builder | `enums` |
+| `services/order.ts:793,798` | `allocationDocuments` caller | `facilityTypes` |
+| `components/tasks/BadAddressTaskCard.vue:171` | `hydrate()` in `onMounted` — make it `async` | `geos`, `geoAssocs` |
+
+Everything else self-corrects for free, including `orderDetail.ts`'s `adjustmentDisplayLabel`
+(read from three Pinia getters, which are computeds), every component computed, and every
+template binding.
+
+### `useDb`
 
 ```ts
 // common/db/useDb.ts
@@ -238,43 +279,44 @@ function useDb<T>(db: BaseDB, table: string, opts?: MaybeRefs<QueryOptions>): {
 }
 ```
 
-```ts
-// list
-const { records } = useDb(db, "facilities", { scope: { field: "facilityTypeId", value: type } });
+One composable, not two. `useDbList`/`useDbRecord` are split only because that is what exists
+today; both have zero consumers. A naive merge would still return two shapes (`records` vs
+`record`), which moves the split from the function name into the type. Collapsing it properly
+means one return shape with the single-record case as a computed:
 
-// one record by primary key
+```ts
+const { records } = useDb(db, "facilities", { scope: { field: "facilityTypeId", value: type } });
 const { first: facility, hydrated } = useDb(db, "facilities", { equals: { facilityId: id } });
 ```
 
 Reading one row through `equals` on the primary key costs nothing extra: Dexie resolves
-`where(pk).equals(v)` through the index, the same work `get()` does, and returns an array of
-at most one. `dbClient.liveOne` is therefore not needed and is not part of the API;
-`dbClient.get()` remains for promise-based primary-key reads in services and stores.
+`where(pk).equals(v)` through the index, the same work `get()` does. `dbClient.liveOne` is
+therefore not part of the API; `dbClient.get()` remains for promise-based pk reads.
 
-It subscribes through `dbClient.live`, unsubscribes on unmount, and re-subscribes when
-reactive options change — a gap in today's `useDbList`, which reads `options` once at setup
-and never watches them. `hydrated` keeps its current semantic from `useDbList.ts:30`:
-emitted at least once, and either rows are present or the bootstrap is idle. It carries real
-weight here, because `first === undefined` means either "no such row" or "not hydrated yet".
+It re-subscribes when reactive options change — a gap in today's `useDbList`, which reads
+`options` once at setup. `hydrated` keeps its semantic from `useDbList.ts:30`. Note that
+`first === undefined` means either "no such row" or "not hydrated yet".
 
-`useDb` ships with **zero consumers**. `seedIndex` uses `dbClient` directly and nothing else
-reads Dexie reactively today. It exists so that new code has a sanctioned way to do reactive
-reads instead of reaching for bare `liveQuery` — which is how the current duplication
-started.
+`useDb` ships with **zero consumers**. `useSeedData.ts` uses `dbClient` directly and nothing
+else reads Dexie reactively today. It exists so new code has a sanctioned way to do reactive
+reads instead of reaching for bare `liveQuery` — which is how the current duplication started.
+
+### `useSeedData()` — the component entry point
 
 ```ts
-// apps/order-manager/src/db/useSeedData.ts
-function useSeedData()  // seedIndex getters wrapped in computeds over the version ref
+function useSeedData()  // the module's getters, wrapped so computeds track slice changes
 ```
 
-Method names match today's getters — `describe`, `statusDescription`, `enumDescription`,
-`statusAge`, `facilityName`, `geoName`, `getCountries`, `getStates`, `getStatesForCountry`,
-`allowedTransitions`, `getEnumsByType`, `getEnumsByParentType`, and the rest — so a
+Method names match today's getters — `describe`, `statusDescription`, `facilityName`,
+`geoName`, `getCountries`, `allowedTransitions`, `getEnumsByType`, and the rest — so a
 component migration is `useSeedStore()` → `useSeedData()` with call sites unchanged.
-Non-component callers import the plain functions from `seedIndex` directly.
+Non-component callers import the same plain functions from the same file.
 
-Datasets that consumers currently read as raw state get named accessors rather than exposed
-slice maps, so `ids`/`byId` does not leak back into 42 files:
+Four getters were Pinia *properties* and become functions, so their call sites gain `()`:
+`getCountries`, `getStates`, `getShipmentMethodOptions`, `orderIdentificationTypeOptions`.
+
+Datasets consumers read as raw state get named accessors rather than exposed maps, so
+`ids`/`byId` does not leak back into 42 files:
 
 | Today | Becomes |
 | --- | --- |
@@ -286,18 +328,32 @@ slice maps, so `ids`/`byId` does not leak back into 42 files:
 | `seedStore.facilities` | `facilities()` |
 | `seedStore.productStoreFacilitiesByStoreId[id]` | `productStoreFacilities(id)` |
 | `seedStore.shopifyShopLocations.byId` | `shopifyShopLocations()` |
+| `(seed as any).partyRelationshipTypes.ids` | `partyRelationshipTypes()` |
+| `(seed as any).roleTypes.ids` | `roleTypes()` |
+
+### The Shopify catalog gap
+
+`shopifyShop` and `shopifyShopLocation` have registered common sync domains but are missing
+from `ORDER_MANAGER_SYNC_CATALOG`, so they never sync. `views/CreateOrder.vue:327` and
+`views/OrderDetail.vue:1163` work today only because the REST loaders fill the store.
+Dropping the REST path without adding these two entries breaks those screens. They are added
+as part of this work, taking the catalog to 29 entries. The catalog still drives what the
+worker syncs and what Settings displays — it just no longer drives what is held in memory.
+
 
 ### Boot flow
 
 ```
 postLogin / authenticated boot
-  startAppDbSync(token)            // worker: the only fetcher
-  seedIndex.hydrate(catalog, db)   // read 29 tables once, subscribe per table
-                                   // slices fill as the worker's domains land
+  startAppDbSync(token)     // worker: the only fetcher
+                            // no seed wiring at all — slices build on demand
 
 postLogout
-  seedIndex.reset()                // unsubscribe all, clear slices
-  clearLocalDb(db)                 // unchanged
+  resetSeedData()           // unsubscribe every live slice, drop them
+  clearLocalDb(db)          // unchanged
+
+OMS switch
+  resetSeedData()           // next access rebuilds against the new database
 ```
 
 `loadInitialSeedData` and every `load*` action are deleted. The worker is the only fetcher,
@@ -307,12 +363,14 @@ exists.
 
 ### Tables with no readers
 
-Six tables have no reader anywhere in the app: `facilityGroups`, `groupFacilities`,
-`productStoreEmailSettings`, `productStoreFacilities`, `productStoreFacilityGroups`,
-`productStoreShipmentMethods`. They keep syncing (Settings shows their status) and, under
-"index everything", they get slices like every other catalog table. If their footprint
-later proves to matter, adding an opt-out flag to `SyncDomainCatalogItem` is a one-line
-change — deliberately deferred rather than designed in now.
+Five tables have no reader anywhere in the app: `facilityGroups`, `groupFacilities`,
+`productStoreEmailSettings`, `productStoreFacilityGroups`, `productStoreShipmentMethods`.
+They keep syncing, and Settings keeps showing their status — but because slices are lazy,
+they are never read into memory and never subscribed. Lazy loading makes this correct by
+construction; no opt-out flag is needed.
+
+(`productStoreFacilities` *is* read — `views/CreateOrder.vue:318` and
+`components/fulfillment/FacilityInventoryModal.vue:412` — so it gets a slice on demand.)
 
 ## Dead code removed
 
@@ -323,7 +381,7 @@ change — deliberately deferred rather than designed in now.
 - `defineDbEntity`, `DbEntity` — superseded by `dbClient` plus the catalog.
 - `useDbList`, `useDbRecord` — zero consumers today; replaced by the single `useDb`.
 - `geoProjection.wellKnownText` — declared, never read.
-- Getters with zero call sites, not carried over to `seedIndex`:
+- Getters with zero call sites, not carried over to `useSeedData.ts`:
   `contactPurposeDescription`, `communicationEventTypeDescription`,
   `returnTypeDescription`, `returnItemTypeDescription`, `roleTypeDescription`,
   `getCarrierOptions`, `getProductStoreShipmentMethodOptions`. Their underlying tables stay
@@ -345,11 +403,12 @@ Each step should land green before the next starts.
    refill. No Dexie version bump is needed, because indexed fields do not change.
 4. **Catalog.** Add `shopifyShop` and `shopifyShopLocation` to
    `ORDER_MANAGER_SYNC_CATALOG`. Verify both sync and populate.
-5. **`seedIndex` + `useSeedData`.** Build them and wire `hydrate`/`reset` into `App.vue`,
-   `postLogin` and `postLogout`, running *alongside* the existing store. Both paths live at
-   once; the index is verified against the store's values.
+5. **`useSeedData.ts`.** Build the module and wire `resetSeedData()` into `postLogout`,
+   running *alongside* the existing store. Both paths live at once; the slices are verified
+   against the store's values. No boot wiring is needed — slices are lazy.
 6. **Migrate consumers**, 42 files. Components take `useSeedData()`; stores, services and
-   utils import `seedIndex` functions directly. Mechanical, since the names match.
+   utils import the plain functions from the same module. Add `ensureLoaded` at the six
+   stamping sites. Mechanical otherwise, since the names match.
 7. **Delete the seed store** and its REST loaders. Remove
    `startAppDbSync(token, () => …populateFromDb())` callbacks in `App.vue:73` and
    `user.ts:175`.
@@ -364,9 +423,11 @@ additive so the index can be validated before anything depends on it.
   - `dbClient` against a real Dexie instance under `fake-indexeddb` (new devDependency):
     round-trip `put`/`get`, `bulkPut`/`getMany`, `query` with each option, `count`, `clear`,
     and `live` emitting on write.
-  - `seedIndex`: hydrate from a seeded database; a write to one table rebuilds only that
-    slice; the debounce collapses a burst of batched writes into one rebuild; `reset()`
-    unsubscribes; secondary indexes are correct; a miss returns the raw id.
+  - `useSeedData.ts`: a cold getter returns the raw id and triggers a load; the value is
+    correct on the next tick; a write to one table replaces only that slice; the debounce
+    collapses a burst of batched writes into one rebuild; `ensureLoaded` resolves only after
+    the named tables are populated; `resetSeedData()` unsubscribes; secondary indexes are
+    correct.
   - `projectRow` no longer emits `raw` and still emits `syncedAt` and synthetic keys.
 - `tests/store/seed.spec.ts` is deleted; its intent — "seed data comes from bounded REST
   endpoints, never generic entity endpoints" — moves to an assertion over the sync domain
@@ -399,14 +460,20 @@ worker's messages already name the domain. Rejected because it only sees writers
 broadcast: any direct Dexie write leaves the index silently stale, with no error. Dexie's
 own change tracking has no such hole.
 
-**A separate `seedIndexConfig.ts`.** Rejected in favour of reusing
-`ORDER_MANAGER_SYNC_CATALOG`, so adding a domain remains a one-file change.
+**A separate index config, or driving the index from the catalog.** Both rejected once
+slices became lazy: the set of indexed tables is now simply the set of tables something
+asked for, so there is nothing to configure.
+
+**Eager hydration of every catalog table at boot.** Rejected in favour of lazy slices: it
+loads tables a session never touches (all 1,388 geo rows for a user who never opens a
+country picker) and adds a boot step to both `App.vue` and `postLogin`. Lazy loading costs
+one rule — `ensureLoaded` at the six stamping sites — and removes the wiring entirely.
 
 ## Not doing
 
 - Migrating `order`, `orderDetail`, `customer` or `productCache` onto Dexie. Each deserves
   its own spec.
-- Promoting `seedIndex` to `common/db`. It stays in `order-manager` until a second app
+- Promoting `useSeedData.ts` to `common/db`. It stays in `order-manager` until a second app
   needs it.
 - Reconciling `DEFAULT_COMMON_SYNC_CATALOG` with the app catalogs.
 - Prioritising label-critical domains in the worker's sync order. Worth revisiting if the
