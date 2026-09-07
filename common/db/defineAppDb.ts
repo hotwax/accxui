@@ -34,6 +34,23 @@ export interface ComposedAppSchema {
   statusCatalog: SyncDomainCatalogItem[];
 }
 
+/**
+ * Validates that no two seed entities claim the same table.
+ * Throws if a clash is found.
+ */
+export function assertDistinctSeedTables(entities: SeedEntity[]): void {
+  const byTable = new Map<string, SeedEntity>();
+  for (const entity of entities) {
+    const clash = byTable.get(entity.table);
+    if(clash) {
+      throw new Error(
+        `[db] defineAppDb: seed entities "${clash.name}" and "${entity.name}" both claim table "${entity.table}".`,
+      );
+    }
+    byTable.set(entity.table, entity);
+  }
+}
+
 export function composeAppSchema(def: AppDbDefinition): ComposedAppSchema {
   if(!def.suffix) {
     throw new Error("[db] defineAppDb: a non-empty `suffix` is required.");
@@ -41,14 +58,10 @@ export function composeAppSchema(def: AppDbDefinition): ComposedAppSchema {
 
   const seed = seedEntitiesFor(def.seed);
 
+  assertDistinctSeedTables(seed);
+
   const byTable = new Map<string, SeedEntity>();
   for (const entity of seed) {
-    const clash = byTable.get(entity.table);
-    if(clash) {
-      throw new Error(
-        `[db] defineAppDb: seed entities "${clash.name}" and "${entity.name}" both claim table "${entity.table}".`,
-      );
-    }
     byTable.set(entity.table, entity);
   }
 

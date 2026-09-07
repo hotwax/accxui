@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { composeAppSchema } from "../db/defineAppDb";
+import { composeAppSchema, assertDistinctSeedTables } from "../db/defineAppDb";
 
 describe("composeAppSchema", () => {
   it("includes only the picked seed tables", () => {
@@ -57,6 +57,12 @@ describe("composeAppSchema validation", () => {
     expect(() =>
       composeAppSchema({ suffix: "TestDB", seed: ["nope" as any], schema: {} }),
     ).toThrow(/unknown seed entity "nope"/i);
+  });
+
+  it("throws when two picked seed entities claim the same table", () => {
+    const entity1 = { name: "foo", table: "shared", schema: "id", label: "Foo", projection: {} };
+    const entity2 = { name: "bar", table: "shared", schema: "id", label: "Bar", projection: {} };
+    expect(() => assertDistinctSeedTables([entity1, entity2])).toThrow(/seed entities "foo" and "bar" both claim table "shared"/i);
   });
 
   it("throws when an own table collides with a PICKED seed table", () => {
