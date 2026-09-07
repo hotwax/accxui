@@ -120,7 +120,6 @@ export const geoProjection: EntityProjection = {
     geoCode: "text",
     geoCodeAlpha2: "text",
     geoCodeAlpha3: "text",
-    wellKnownText: "text",
   },
 };
 
@@ -257,6 +256,9 @@ export const shopifyShopProjection: EntityProjection = {
     productStoreId: "text",
     shopifyShopId: "text",
     name: "text",
+    // Read by views/OrderDetail.vue to build the Shopify admin order link.
+    myshopifyDomain: "text",
+    domain: "text",
     systemMessageRemoteId: "text",
   },
 };
