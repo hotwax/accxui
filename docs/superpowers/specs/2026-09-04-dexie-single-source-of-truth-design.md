@@ -243,6 +243,27 @@ Every such site in the app is already inside an async function, so the module ex
 export async function ensureLoaded(tables: string[]): Promise<void>
 ```
 
+**`ensureLoaded` waits for the data to exist, not merely for a read to finish.** On a fresh
+login the table is empty, so awaiting the read alone would resolve instantly and stamp a raw
+id permanently. `snapshotDomain.ts:111` already writes a `loginSync:<domain>` marker into
+`syncMeta` after each domain syncs, and the catalog maps table → domain, so:
+
+```ts
+async function ensureLoaded(tables) {
+  await Promise.all(tables.map(async (table) => {
+    await waitForDomainSync(table, { timeoutMs: 5000 });  // instant if already marked
+    await loadAndSubscribe(table);
+  }));
+}
+```
+
+The timeout is load-bearing: if a domain's sync fails or stalls, the caller must not hang.
+After the bound it proceeds with whatever is present, and the value self-corrects on the
+next fetch. Net effect — **computeds never wait; stamped values wait for real data.**
+
+This is not a new problem. `store/order.ts:56` stamps today too; it is masked because the
+REST path usually wins the race at `postLogin`. Removing that path exposes it.
+
 Call it before stamping:
 
 ```ts

@@ -1176,10 +1176,41 @@ describe('useSeedData module', () => {
   });
 
   it('ensureLoaded resolves only once the named tables are populated', async () => {
+    await dbClient(db).put('syncMeta', { key: 'loginSync:status', synced: true, timestamp: 1 });
+    await dbClient(db).put('syncMeta', { key: 'loginSync:facility', synced: true, timestamp: 1 });
+
     await seed.ensureLoaded(['statuses', 'facilities']);
     expect(seed.statusDescription('ORDER_APPROVED')).toBe('Approved');
     expect(seed.facilityName('F1')).toBe('Main Warehouse');
   });
+
+  it('ensureLoaded waits for the domain to sync, then sees the rows', async () => {
+    const empty = new BaseDB(`useSeedDataCold-${n++}`, COMMON_DB_SCHEMA);
+    await empty.open();
+    seed.__setDbResolver(() => empty);
+
+    let resolved = false;
+    const pending = seed.ensureLoaded(['facilities']).then(() => { resolved = true; });
+
+    await flush(80);
+    expect(resolved).toBe(false);            // no rows, no marker -> still waiting
+
+    await dbClient(empty).bulkPut('facilities', [{ facilityId: 'LATE', facilityName: 'Late Facility', syncedAt: 9 }]);
+    await dbClient(empty).put('syncMeta', { key: 'loginSync:facility', synced: true, timestamp: 9 });
+
+    await pending;
+    expect(resolved).toBe(true);
+    expect(seed.facilityName('LATE')).toBe('Late Facility');
+  });
+
+  it('ensureLoaded gives up after the timeout rather than hanging', async () => {
+    const empty = new BaseDB(`useSeedDataStalled-${n++}`, COMMON_DB_SCHEMA);
+    await empty.open();
+    seed.__setDbResolver(() => empty);
+
+    await seed.ensureLoaded(['facilities']);   // never synced; must still resolve
+    expect(seed.facilityName('F1')).toBe('F1');
+  }, 10000);
 
   it('describe falls through statuses, enums then lookup tables', async () => {
     await seed.ensureLoaded(['statuses', 'enums', 'roleTypes']);
@@ -1314,8 +1345,9 @@ import { shallowRef, type ShallowRef } from "vue";
 import type { Subscription } from "dexie";
 import { commonUtil } from "@common";
 import type { BaseDB, DbClient } from "@common/db";
-import { dbClient } from "@common/db";
+import { dbClient, hasSyncedThisLogin } from "@common/db";
 import { getOrderManagerDb } from "@/db/orderManagerDb";
+import { ORDER_MANAGER_SYNC_CATALOG } from "@/config/appSyncConfig";
 
 type Row = Record<string, any>;
 
@@ -1458,14 +1490,54 @@ const rowOf = (table: string, id: string): Row | undefined => (id ? sliceOf(tabl
 
 // ── Public lifecycle ──────────────────────────────────────────────────────────────────
 
+/** table -> sync domain name, so ensureLoaded can wait for the right loginSync marker. */
+const domainOfTable = new Map(ORDER_MANAGER_SYNC_CATALOG.map((entry) => [entry.table, entry.name]));
+
+/**
+ * Resolve once the table's domain has synced at least once this login, or once the bound
+ * elapses. Bounded on purpose: a failed or stalled domain must never hang a caller.
+ */
+async function waitForDomainSync(table: string, timeoutMs = 5000): Promise<void> {
+  const domain = domainOfTable.get(table);
+  if (!domain) return;
+
+  const db = resolveDb();
+  if (await hasSyncedThisLogin(db, domain)) return;
+
+  await new Promise<void>((resolve) => {
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      try { subscription?.unsubscribe(); } catch { /* already closed */ }
+      resolve();
+    };
+
+    const timer = setTimeout(() => {
+      console.warn(`[seed] Timed out waiting for the ${domain} domain to sync.`);
+      finish();
+    }, timeoutMs);
+
+    const subscription = dbClient(db)
+      .live("syncMeta", { equals: { key: `loginSync:${domain}` } })
+      .subscribe({ next: (rows: Row[]) => { if (rows.length) finish(); }, error: finish });
+  });
+}
+
 /**
  * Await the named tables before reading a value that will be STAMPED INTO DATA rather than
  * re-read by a computed. A stamped raw id never self-corrects; a computed does.
+ *
+ * This waits for the data to EXIST, not merely for a read to finish. On a fresh login the
+ * table is empty, so awaiting the read alone would resolve instantly and stamp a raw id
+ * permanently.
  */
 export async function ensureLoaded(tables: string[]): Promise<void> {
-  await Promise.all(tables.map((table) => {
+  await Promise.all(tables.map(async (table) => {
     if (!slices.has(table)) slices.set(table, shallowRef(new Map<string, Row>()));
-    return loadAndSubscribe(table);
+    await waitForDomainSync(table);
+    await loadAndSubscribe(table);
   }));
 }
 
@@ -1739,8 +1811,10 @@ No boot wiring is added anywhere — slices build on demand.
 cd apps/order-manager && npx vitest run tests/db/useSeedData.spec.ts
 ```
 
-Expected: PASS, 11 tests. If a timing assertion is flaky, raise the `flush()` delay — do not
-lower `REBUILD_DEBOUNCE_MS`.
+Expected: PASS, 13 tests. If a timing assertion is flaky, raise the `flush()` delay — do not
+lower `REBUILD_DEBOUNCE_MS`. The timeout test runs against the real 5s bound, hence its
+`10000` ms vitest timeout; if that proves slow in CI, add an optional second argument to
+`ensureLoaded` for the bound and pass a short one from the test.
 
 - [ ] **Step 8: Run the full suite and commit**
 
