@@ -1,10 +1,10 @@
 /**
- * Standard HotWax OMS Entity Projections & Cache Schemas.
+ * Standard HotWax OMS Entity Projections & Database Schemas.
  */
 
 import type { EntityProjection } from "../types";
 
-export const COMMON_CACHE_SCHEMA: Record<string, string> = {
+export const COMMON_DB_SCHEMA: Record<string, string> = {
   statuses: "statusId, statusTypeId",
   enums: "enumId, enumTypeId, enumCode",
   enumTypes: "enumTypeId, parentTypeId",

@@ -2,7 +2,7 @@
  * Standard HotWax OMS Reference (Class B) Snapshot Domain Registrations.
  */
 
-import type { BaseCacheDB } from "../db";
+import type { BaseDB } from "../baseDb";
 import { registerSnapshotDomain } from "../sync/snapshotDomain";
 import {
   carrierProjection,
@@ -36,7 +36,7 @@ import {
   statusProjection,
 } from "./commonSeedEntities";
 
-export function registerCommonSeedDomains(getDb: (omsInstance: string) => BaseCacheDB): void {
+export function registerCommonSeedDomains(getDb: (omsInstance: string) => BaseDB): void {
   registerSnapshotDomain({
     name: "productStore",
     table: "productStores",

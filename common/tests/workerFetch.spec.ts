@@ -3,8 +3,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const workerRemoteApi = vi.hoisted(() => vi.fn());
 vi.mock("../core/workerRemoteApi", () => ({ default: workerRemoteApi }));
 
-import { pageAll } from "../cache/sync/workerFetch";
-import type { SyncContext } from "../cache/types";
+import { pageAll } from "../db/sync/workerFetch";
+import type { SyncContext } from "../db/types";
 
 const ctx = { token: "test-token", maargUrl: "https://example.hotwax.io/rest/s1/", now: 0 } as unknown as SyncContext;
 const keyOf = (record: any) => record?.id;
@@ -17,7 +17,7 @@ describe("pageAll", () => {
   });
 
   // Regression: an unpaged fetch that omits pageSize inherits Moqui's default of 20 rows, which
-  // silently truncated reference snapshots (contactMechPurposeTypes cached 20 of 56 records).
+  // silently truncated reference snapshots (contactMechPurposeTypes stored 20 of 56 records).
   it("asks for a full page even when it does not page", async () => {
     workerRemoteApi.mockResolvedValueOnce(rows(0, 56));
 

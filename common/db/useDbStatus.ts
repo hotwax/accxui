@@ -1,22 +1,23 @@
 import { computed, onUnmounted, ref } from "vue";
 import { liveQuery, type Subscription } from "dexie";
-import type { BaseCacheDB } from "./db";
-import { resyncDomain, resyncAll } from "./sync/appCacheBootstrap";
+import type { BaseDB } from "./baseDb";
+import { DB_SYNC_CHANNEL } from "./syncChannel";
+import { resyncDomain, resyncAll } from "./sync/appDbBootstrap";
 
-export interface CacheDomainCatalogItem {
+export interface SyncDomainCatalogItem {
   name: string;
   table: string;
   label: string;
   syncClass?: "A" | "B";
 }
 
-export interface CacheDomainStatus extends CacheDomainCatalogItem {
+export interface SyncDomainStatus extends SyncDomainCatalogItem {
   count: number;
   syncedAt: number | null;
   status: "success" | "empty" | "none";
 }
 
-export const DEFAULT_COMMON_CACHE_CATALOG: CacheDomainCatalogItem[] = [
+export const DEFAULT_COMMON_SYNC_CATALOG: SyncDomainCatalogItem[] = [
   { name: "productStore", table: "productStores", label: "Product Stores", syncClass: "B" },
   { name: "status", table: "statuses", label: "Statuses", syncClass: "B" },
   { name: "enum", table: "enums", label: "Enumerations", syncClass: "B" },
@@ -46,8 +47,8 @@ export const DEFAULT_COMMON_CACHE_CATALOG: CacheDomainCatalogItem[] = [
   { name: "shopifyShopLocation", table: "shopifyShopLocations", label: "Shopify Shop Locations", syncClass: "B" },
 ];
 
-export function useCacheStatus(db: BaseCacheDB, catalog: CacheDomainCatalogItem[] = DEFAULT_COMMON_CACHE_CATALOG) {
-  const domains = ref<CacheDomainStatus[]>([]);
+export function useDbStatus(db: BaseDB, catalog: SyncDomainCatalogItem[] = DEFAULT_COMMON_SYNC_CATALOG) {
+  const domains = ref<SyncDomainStatus[]>([]);
   const loaded = ref(false);
   const refreshing = ref<string | null>(null);
 
@@ -73,7 +74,7 @@ export function useCacheStatus(db: BaseCacheDB, catalog: CacheDomainCatalogItem[
     const markers = await db.syncMeta.toArray();
     const syncedAtByDomain = parseSyncedAt(markers);
 
-    const rows: CacheDomainStatus[] = [];
+    const rows: SyncDomainStatus[] = [];
     for (const entry of catalog) {
       const table = db.table(entry.table);
       const count = await table.count();
@@ -98,11 +99,11 @@ export function useCacheStatus(db: BaseCacheDB, catalog: CacheDomainCatalogItem[
 
   if (typeof BroadcastChannel !== "undefined") {
     try {
-      const channel = new BroadcastChannel("hotwax-cache-sync");
+      const channel = new BroadcastChannel(DB_SYNC_CHANNEL);
       channel.onmessage = async () => {
         const markers = await db.syncMeta.toArray();
         const syncedAtByDomain = parseSyncedAt(markers);
-        const rows: CacheDomainStatus[] = [];
+        const rows: SyncDomainStatus[] = [];
         for (const entry of catalog) {
           const table = db.table(entry.table);
           const count = await table.count();
