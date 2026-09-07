@@ -2,8 +2,6 @@
  * Shared Type Definitions for the AccxUI Local Database Framework.
  */
 
-import type { Observable } from "dexie";
-
 /** A stored row: indexed/normalized fields + untouched server object in raw. */
 export interface DbRow {
   [field: string]: unknown;
@@ -41,20 +39,6 @@ export interface QueryOptions {
   limit?: number;
   /** Sort order for indexed queries ('asc' | 'desc'). Default: 'desc' when dateField is specified. */
   order?: "asc" | "desc";
-}
-
-/** @deprecated Use QueryOptions. Removed with useDbList in Task 2. */
-export type LiveQueryOptions = QueryOptions;
-
-export interface DbEntity<T = Record<string, any>> {
-  table: string;
-  projection: EntityProjection;
-  /** Live reactive query over the table. */
-  live: (options?: LiveQueryOptions) => Observable<DbRow[]>;
-  /** Read a single record by primary key (instant lookup). */
-  get: (key: string) => Promise<T | undefined>;
-  /** Read all records matching options (promise-based snapshot). */
-  all: (options?: LiveQueryOptions) => Promise<T[]>;
 }
 
 export interface SyncContext {

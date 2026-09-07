@@ -7,7 +7,7 @@ export * from "./syncChannel";
 export * from "./projection";
 export * from "./baseDb";
 export * from "./dbClient";
-export * from "./useDbList";
+export * from "./useDb";
 export * from "./useDbStatus";
 export * from "./sync/syncRegistry";
 export * from "./sync/workerFetch";

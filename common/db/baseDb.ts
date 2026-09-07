@@ -2,8 +2,7 @@
  * Base Dexie Database wrapper and Entity definition engine.
  */
 
-import Dexie, { type Table, liveQuery, type Observable } from "dexie";
-import type { DbEntity, DbRow, EntityProjection, LiveQueryOptions } from "./types";
+import Dexie, { type Table } from "dexie";
 
 export class BaseDB extends Dexie {
   syncMeta!: Table<Record<string, any>, string>;
@@ -77,74 +76,4 @@ export async function ensureDbReady(db: BaseDB): Promise<void> {
       console.error(`[db] Rebuild failed for ${db.name}:`, rebuildErr);
     }
   }
-}
-
-/**
- * Define a stored entity with liveQuery and snapshot read methods.
- */
-export function defineDbEntity<T = Record<string, any>>(
-  db: BaseDB,
-  table: string,
-  projection: EntityProjection,
-): DbEntity<T> {
-  function buildQuery(tableRef: Table<DbRow, string>, options: LiveQueryOptions = {}) {
-    let collection: any;
-
-    if (options.scope) {
-      collection = tableRef.where(options.scope.field).equals(options.scope.value as any);
-    } else if (options.equals && Object.keys(options.equals).length > 0) {
-      const [firstKey, firstVal] = Object.entries(options.equals)[0];
-      collection = tableRef.where(firstKey).equals(firstVal as any);
-    } else if (options.dateField) {
-      if (options.since !== undefined && options.until !== undefined) {
-        collection = tableRef.where(options.dateField).between(options.since, options.until, true, true);
-      } else if (options.since !== undefined) {
-        collection = tableRef.where(options.dateField).aboveOrEqual(options.since);
-      } else if (options.until !== undefined) {
-        collection = tableRef.where(options.dateField).belowOrEqual(options.until);
-      } else {
-        collection = tableRef.toCollection();
-      }
-    } else {
-      collection = tableRef.toCollection();
-    }
-
-    if (options.order === "desc") {
-      collection = collection.reverse();
-    }
-
-    if (options.filter) {
-      const predicate = options.filter;
-      collection = collection.filter(predicate);
-    }
-
-    if (options.limit && options.limit > 0) {
-      collection = collection.limit(options.limit);
-    }
-
-    return collection;
-  }
-
-  return {
-    table,
-    projection,
-    live(options: LiveQueryOptions = {}): Observable<DbRow[]> {
-      return liveQuery(async () => {
-        const tableRef = db.table<DbRow, string>(table);
-        const query = buildQuery(tableRef, options);
-        return query.toArray();
-      });
-    },
-    async get(key: string): Promise<T | undefined> {
-      if (!key) return undefined;
-      const row = await db.table<DbRow, string>(table).get(key);
-      return (row?.raw as T) ?? (row as unknown as T);
-    },
-    async all(options: LiveQueryOptions = {}): Promise<T[]> {
-      const tableRef = db.table<DbRow, string>(table);
-      const query = buildQuery(tableRef, options);
-      const rows = await query.toArray();
-      return rows.map((r: DbRow) => (r.raw as T) ?? (r as unknown as T));
-    },
-  };
 }
