@@ -93,3 +93,78 @@ describe("composeAppSchema validation", () => {
     expect(() => composeAppSchema({ suffix: "", seed: [], schema: { foo: "id" } })).toThrow(/suffix/i);
   });
 });
+
+import { defineAppDb } from "../db/defineAppDb";
+
+describe("defineAppDb", () => {
+  const appDb = defineAppDb({
+    suffix: "TestDB",
+    seed: ["status", "carrier"],
+    schema: { auditLogs: "logId, createdAt" },
+    extendIndexes: { carriers: "groupName" },
+  });
+
+  it("names the database per OMS instance", () => {
+    expect(appDb.name("demo-oms")).toBe("demo-oms-TestDB");
+  });
+
+  it("throws rather than share a database across instances", () => {
+    expect(() => appDb.name("")).toThrow(/no OMS instance/i);
+  });
+
+  it("exposes the composed schema and the picks", () => {
+    expect(appDb.schema.carriers).toBe("partyId, groupName");
+    expect(appDb.seed.map((e) => e.name)).toEqual(["status", "carrier"]);
+    expect(appDb.statusCatalog.length).toBe(2);
+  });
+
+  it("lists the composed data tables; BaseDB adds syncMeta on top", () => {
+    expect(appDb.tableNames.sort()).toEqual(["auditLogs", "carriers", "statuses"]);
+    // BaseDB injects syncMeta, so the live handle reports one more.
+    expect(appDb.get("demo-oms").getTableNames()).toContain("syncMeta");
+  });
+
+  it("reuses one handle per instance and swaps on switch", () => {
+    const first = appDb.get("demo-oms");
+    expect(appDb.get("demo-oms")).toBe(first);
+    const second = appDb.get("other-oms");
+    expect(second).not.toBe(first);
+    expect(second.name).toBe("other-oms-TestDB");
+  });
+
+  it("throws from raw() until a resolver is registered", () => {
+    const bare = defineAppDb({ suffix: "BareDB", seed: [], schema: { foo: "id" } });
+    expect(() => bare.raw()).toThrow(/no OMS instance resolver/i);
+    bare.setOmsInstanceResolver(() => "demo-oms");
+    expect(bare.raw().name).toBe("demo-oms-BareDB");
+  });
+});
+
+import { registerSeedDomains } from "../db/sync/registerSeedDomains";
+import { clearSyncRegistry, getAllSyncDomains } from "../db/sync/syncRegistry";
+
+describe("registerSeedDomains", () => {
+  it("registers only the declared entities", () => {
+    clearSyncRegistry();
+    registerSeedDomains(defineAppDb({ suffix: "PickDB", seed: ["status", "enum"], schema: {} }));
+    expect(getAllSyncDomains().map((d) => d.name).sort()).toEqual(["enum", "status"]);
+  });
+
+  it("registers nothing when no seed entity is picked", () => {
+    clearSyncRegistry();
+    registerSeedDomains(defineAppDb({ suffix: "NoneDB", seed: [], schema: { foo: "id" } }));
+    expect(getAllSyncDomains()).toEqual([]);
+  });
+});
+
+import { DEFAULT_COMMON_SYNC_CATALOG } from "../db/useDbStatus";
+import { SEED_ENTITY_NAMES } from "../db/domains/seedEntities";
+
+describe("DEFAULT_COMMON_SYNC_CATALOG", () => {
+  it("derives one entry per seed entity, restoring the two the hand-written list lost", () => {
+    expect(DEFAULT_COMMON_SYNC_CATALOG.length).toBe(29);
+    expect(DEFAULT_COMMON_SYNC_CATALOG.length).toBe(SEED_ENTITY_NAMES.length);
+    expect(DEFAULT_COMMON_SYNC_CATALOG.map((e) => e.name)).toContain("carrierShipmentMethod");
+    expect(DEFAULT_COMMON_SYNC_CATALOG.map((e) => e.name)).toContain("productStoreEmailSetting");
+  });
+});

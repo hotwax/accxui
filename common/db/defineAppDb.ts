@@ -11,6 +11,8 @@
 
 import type { SyncDomainCatalogItem } from "./useDbStatus";
 import { type SeedEntity, type SeedEntityName, seedEntitiesFor } from "./domains/seedEntities";
+import { BaseDB } from "./baseDb";
+import { type DbClient, dbClient } from "./dbClient";
 
 export interface AppDbDefinition {
   /** Name suffix: "CompanyDB" produces `{omsInstance}-CompanyDB`. */
@@ -119,5 +121,77 @@ export function composeAppSchema(def: AppDbDefinition): ComposedAppSchema {
       label: entity.label,
       syncClass: "B" as const,
     })),
+  };
+}
+
+export interface AppDb {
+  /** `{omsInstance}-{suffix}`. Throws on an empty instance. */
+  name(omsInstance: string): string;
+  /** The database for an instance. Worker-safe: the instance is a parameter. */
+  get(omsInstance: string): BaseDB;
+  /** Register how the app finds the signed-in instance. Called once per JS realm at boot. */
+  setOmsInstanceResolver(resolve: () => string): void;
+  /** Raw Dexie handle for the signed-in instance. Main thread, or a worker after start(). */
+  raw(): BaseDB;
+  /** DbClient for the signed-in instance, resolved per call so reads follow a switch. */
+  client(): DbClient;
+  readonly schema: Record<string, string>;
+  readonly seed: SeedEntity[];
+  /** The composed data tables. Excludes `syncMeta`, which BaseDB injects — use `raw().getTableNames()` for that. */
+  readonly tableNames: string[];
+  readonly statusCatalog: SyncDomainCatalogItem[];
+}
+
+export function defineAppDb(def: AppDbDefinition): AppDb {
+  const composed = composeAppSchema(def);
+
+  class AppDatabase extends BaseDB {
+    constructor(dbName: string) {
+      super(dbName, composed.schema);
+    }
+  }
+
+  let activeDb: AppDatabase | null = null;
+  let resolveOmsInstance: (() => string) | null = null;
+
+  function name(omsInstance: string): string {
+    if(!omsInstance) {
+      throw new Error(`[db] Cannot open the ${def.suffix} database: no OMS instance.`);
+    }
+    return `${omsInstance}-${def.suffix}`;
+  }
+
+  function get(omsInstance: string): BaseDB {
+    const dbName = name(omsInstance);
+    if(activeDb?.name === dbName) {
+      return activeDb;
+    }
+    // Close the previous handle so a liveQuery still holding it stops serving the old tenant.
+    activeDb?.close();
+    activeDb = new AppDatabase(dbName);
+    return activeDb;
+  }
+
+  function raw(): BaseDB {
+    if(!resolveOmsInstance) {
+      throw new Error(
+        `[db] No OMS instance resolver registered for ${def.suffix}; call setOmsInstanceResolver at boot.`,
+      );
+    }
+    return get(resolveOmsInstance());
+  }
+
+  return {
+    name,
+    get,
+    setOmsInstanceResolver(resolve) {
+      resolveOmsInstance = resolve;
+    },
+    raw,
+    client: () => dbClient(raw()),
+    schema: composed.schema,
+    seed: composed.seed,
+    tableNames: Object.keys(composed.schema),
+    statusCatalog: composed.statusCatalog,
   };
 }

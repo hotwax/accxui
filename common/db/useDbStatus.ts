@@ -3,6 +3,7 @@ import { liveQuery, type Subscription } from "dexie";
 import type { BaseDB } from "./baseDb";
 import { DB_SYNC_CHANNEL } from "./syncChannel";
 import { resyncDomain, resyncAll } from "./sync/appDbBootstrap";
+import { SEED_ENTITIES, SEED_ENTITY_NAMES } from "./domains/seedEntities";
 
 export interface SyncDomainCatalogItem {
   name: string;
@@ -17,35 +18,13 @@ export interface SyncDomainStatus extends SyncDomainCatalogItem {
   status: "success" | "empty" | "none";
 }
 
-export const DEFAULT_COMMON_SYNC_CATALOG: SyncDomainCatalogItem[] = [
-  { name: "productStore", table: "productStores", label: "Product Stores", syncClass: "B" },
-  { name: "status", table: "statuses", label: "Statuses", syncClass: "B" },
-  { name: "enum", table: "enums", label: "Enumerations", syncClass: "B" },
-  { name: "enumType", table: "enumTypes", label: "Enumeration Types", syncClass: "B" },
-  { name: "facility", table: "facilities", label: "Facilities", syncClass: "B" },
-  { name: "facilityType", table: "facilityTypes", label: "Facility Types", syncClass: "B" },
-  { name: "facilityGroup", table: "facilityGroups", label: "Facility Groups", syncClass: "B" },
-  { name: "groupFacility", table: "groupFacilities", label: "Facility Group Members", syncClass: "B" },
-  { name: "geo", table: "geos", label: "Geographic Regions", syncClass: "B" },
-  { name: "geoAssoc", table: "geoAssocs", label: "Region Associations", syncClass: "B" },
-  { name: "carrier", table: "carriers", label: "Shipping Carriers", syncClass: "B" },
-  { name: "shipmentMethodType", table: "shipmentMethodTypes", label: "Shipment Methods", syncClass: "B" },
-  { name: "paymentMethodType", table: "paymentMethodTypes", label: "Payment Method Types", syncClass: "B" },
-  { name: "returnReason", table: "returnReasons", label: "Return Reasons", syncClass: "B" },
-  { name: "returnType", table: "returnTypes", label: "Return Types", syncClass: "B" },
-  { name: "returnItemType", table: "returnItemTypes", label: "Return Item Types", syncClass: "B" },
-  { name: "roleType", table: "roleTypes", label: "Role Types", syncClass: "B" },
-  { name: "orderAdjustmentType", table: "orderAdjustmentTypes", label: "Order Adjustment Types", syncClass: "B" },
-  { name: "contactMechPurposeType", table: "contactMechPurposeTypes", label: "Contact Purpose Types", syncClass: "B" },
-  { name: "communicationEventType", table: "communicationEventTypes", label: "Communication Types", syncClass: "B" },
-  { name: "partyRelationshipType", table: "partyRelationshipTypes", label: "Relationship Types", syncClass: "B" },
-  { name: "statusFlowTransition", table: "statusFlowTransitions", label: "Status Flow Transitions", syncClass: "B" },
-  { name: "productStoreFacility", table: "productStoreFacilities", label: "Store Facilities", syncClass: "B" },
-  { name: "productStoreFacilityGroup", table: "productStoreFacilityGroups", label: "Store Facility Groups", syncClass: "B" },
-  { name: "productStoreShipmentMethod", table: "productStoreShipmentMethods", label: "Store Shipment Methods", syncClass: "B" },
-  { name: "shopifyShop", table: "shopifyShops", label: "Shopify Shops", syncClass: "B" },
-  { name: "shopifyShopLocation", table: "shopifyShopLocations", label: "Shopify Shop Locations", syncClass: "B" },
-];
+/** Every seed domain, derived from SEED_ENTITIES. Prefer `appDb.statusCatalog`. */
+export const DEFAULT_COMMON_SYNC_CATALOG: SyncDomainCatalogItem[] = SEED_ENTITY_NAMES.map((name) => ({
+  name,
+  table: SEED_ENTITIES[name].table,
+  label: SEED_ENTITIES[name].label,
+  syncClass: "B" as const,
+}));
 
 export function useDbStatus(db: BaseDB, catalog: SyncDomainCatalogItem[] = DEFAULT_COMMON_SYNC_CATALOG) {
   const domains = ref<SyncDomainStatus[]>([]);
