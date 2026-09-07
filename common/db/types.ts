@@ -24,7 +24,7 @@ export interface EntityProjection {
   rename?: Record<string, string>;
 }
 
-export interface LiveQueryOptions {
+export interface QueryOptions {
   /** Filter by an indexed field via where(scope.field).equals(scope.value). */
   scope?: { field: string; value: unknown };
   /** Multiple equalities resolved through an indexed field. */
@@ -42,6 +42,9 @@ export interface LiveQueryOptions {
   /** Sort order for indexed queries ('asc' | 'desc'). Default: 'desc' when dateField is specified. */
   order?: "asc" | "desc";
 }
+
+/** @deprecated Use QueryOptions. Removed with useDbList in Task 2. */
+export type LiveQueryOptions = QueryOptions;
 
 export interface DbEntity<T = Record<string, any>> {
   table: string;

@@ -6,6 +6,7 @@ export * from "./types";
 export * from "./syncChannel";
 export * from "./projection";
 export * from "./baseDb";
+export * from "./dbClient";
 export * from "./useDbList";
 export * from "./useDbStatus";
 export * from "./sync/syncRegistry";
