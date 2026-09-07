@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Make Dexie the only source of Order Manager seed data — one thin operations layer (`dbClient`), one in-memory lookup index fed only from Dexie (`seedIndex`), one reactive composable (`useDb`) — and delete the seed Pinia store with its parallel REST fetchers.
+**Goal:** Make Dexie the only source of Order Manager seed data — one thin operations layer (`dbClient`), one module of lazily built lookup slices fed only from Dexie (`useSeedData.ts`), one reactive composable (`useDb`) — and delete the seed Pinia store with its parallel REST fetchers.
 
-**Architecture:** The sync worker becomes the only fetcher of seed data. `dbClient` wraps Dexie with plain async ops usable from the worker, services, stores and composables. `seedIndex` is a plain (non-Pinia, non-composable) module holding an in-memory index of every catalog table, hydrated once at boot and refreshed by one debounced `liveQuery` per table; it serves the synchronous lookups that Vue computeds and non-component code require. `useSeedData` wraps it for template reactivity. Stored rows drop their `raw` payload copy, so the projection becomes the contract.
+**Architecture:** The sync worker becomes the only fetcher of seed data. `dbClient` wraps Dexie with plain async ops usable from the worker, services, stores and composables. `useSeedData.ts` is a single plain module (not Pinia, not a composable) holding one reactive slice per table, **created lazily on first access** and kept fresh by a debounced `liveQuery`; it serves the synchronous lookups Vue computeds and non-component code require, and exports `useSeedData()` for components. There is no boot hydration and no index config. Lazy loading means a stamped-into-data lookup could keep a cold raw id, so the module also exports `ensureLoaded(tables)` for the six sites that stamp. Stored rows drop their `raw` payload copy, so the projection becomes the contract.
 
 **Tech Stack:** Vue 3 (`<script setup>`, Composition API), Pinia, Dexie 4 (`liveQuery`), Comlink web worker, Vitest + jsdom, `fake-indexeddb` (new), pnpm workspace with catalog protocol.
 
@@ -12,16 +12,16 @@
 
 - **Two git repos, both already on branch `seed-data-read`:** `accxui` at the workspace root (owns `common/`) and `apps/order-manager` (a nested repo). Commit to each separately. A task touching both commits in both.
 - **The sync worker must never import `commonUtil` or the `@common` barrel.** Vite emits the worker chunk as a single iife; pulling in the barrel breaks the build. `dbClient` therefore takes `BaseDB` as a parameter and never resolves the active OMS itself.
-- **No composables inside Pinia stores.** Shared logic goes in a plain module. This is why `seedIndex` is a plain module and not a composable.
+- **No composables inside Pinia stores.** Shared logic goes in a plain module. This is why `useSeedData.ts` exposes plain functions alongside its composable, and why stores import the plain ones.
 - **Tests for `common/db` code live in `apps/order-manager/tests/db/`.** The root repo has no working vitest config — `npx vitest` from the workspace root fails to collect — and `common/tests/` is orphaned (never runs; several specs already fail). The order-manager runner resolves `@common` → `../../common` via `vite.config.js:46`, so tests placed there exercise the real `common/db` source.
 - **Test baseline to preserve: 89 files / 462 tests passing** in `apps/order-manager`. The full suite takes ~15 minutes. Run targeted files during a task (`npx vitest run tests/db/dbClient.spec.ts`) and the full suite only at the commit step of each task.
 - **Typecheck and lint are pre-broken repo-wide.** Do not treat existing `vue-tsc`/`eslint` failures as regressions; only ensure you add no new ones in files you touch.
-- **Do not touch** the `order`, `orderDetail`, `customer` or `productCache` Pinia stores beyond the specific seed call sites listed in Tasks 8–11. Do not touch `inventory-count` or `company`. Do not touch `DEFAULT_COMMON_SYNC_CATALOG`.
+- **Do not touch** the `order`, `orderDetail`, `customer` or `productCache` Pinia stores beyond the specific seed call sites listed in Tasks 7–10. Do not touch `inventory-count` or `company`. Do not touch `DEFAULT_COMMON_SYNC_CATALOG`.
 - **Uncommitted `.gitignore` and `pnpm-lock.yaml` edits pre-exist this work.** Leave them alone; never `git add -A` at the workspace root.
 
 ### Getter mapping — old store API to new API
 
-Every migration task uses this table. Components call these through `useSeedData()`; stores, services and utils import the same names directly from `@/db/seedIndex`.
+Every migration task uses this table. Components call these through `useSeedData()`; stores, services and utils import the same names as plain functions from the same file, `@/db/useSeedData`.
 
 | Old (`useSeedStore()`) | New | Notes |
 | --- | --- | --- |
@@ -37,7 +37,7 @@ Every migration task uses this table. Components call these through `useSeedData
 | `orderIdentificationTypeDescription(id)` | same name | unchanged |
 | `geoName(id)` · `getGeoIdByCode(c)` · `getStatesForCountry(c)` | same names | unchanged |
 
-**Bare getters that become functions — every call site needs `()` added.** In Pinia these were properties; in `seedIndex` they are plain functions:
+**Bare getters that become functions — every call site needs `()` added.** In Pinia these were properties; in `useSeedData.ts` they are plain functions:
 
 | Old | New |
 | --- | --- |
@@ -51,21 +51,21 @@ renders a function object instead of a list and fails silently — check those f
 
 | File:line | Getter | Task |
 | --- | --- | --- |
-| `src/components/AddressModal.vue:80` | `getCountries` | 9 |
-| `src/components/AddContactModal.vue:238` | `getCountries` | 9 |
-| `src/components/AddContactModal.vue:329` | `getStates` | 9 |
-| `src/views/BadAddressOrders.vue:125` | `getShipmentMethodOptions` | 9 |
-| `src/views/BadAddressOrders.vue:128` | `getCountries` | 9 |
-| `src/components/OrderQueueList.vue:230` | `getShipmentMethodOptions` | 10 |
-| `src/views/SwapOrders.vue:161` | `getShipmentMethodOptions` | 10 |
-| `src/views/OrderSearch.vue:242` | `getShipmentMethodOptions` | 10 |
-| `src/views/HoldOrders.vue:145` | `getShipmentMethodOptions` | 10 |
-| `src/views/OrderDetail.vue:806` | `getCountries` — **in template** | 11 |
-| `src/views/OrderDetail.vue:962` | `getCountries` — **in template** | 11 |
-| `src/views/OrderDetail.vue:2818` | `getStates` | 11 |
-| `src/components/orders/ManageOrderIdentificationsModal.vue:161` | `orderIdentificationTypeOptions` | 11 |
+| `src/components/AddressModal.vue:80` | `getCountries` | 8 |
+| `src/components/AddContactModal.vue:238` | `getCountries` | 8 |
+| `src/components/AddContactModal.vue:329` | `getStates` | 8 |
+| `src/views/BadAddressOrders.vue:125` | `getShipmentMethodOptions` | 8 |
+| `src/views/BadAddressOrders.vue:128` | `getCountries` | 8 |
+| `src/components/OrderQueueList.vue:230` | `getShipmentMethodOptions` | 9 |
+| `src/views/SwapOrders.vue:161` | `getShipmentMethodOptions` | 9 |
+| `src/views/OrderSearch.vue:242` | `getShipmentMethodOptions` | 9 |
+| `src/views/HoldOrders.vue:145` | `getShipmentMethodOptions` | 9 |
+| `src/views/OrderDetail.vue:806` | `getCountries` — **in template** | 10 |
+| `src/views/OrderDetail.vue:962` | `getCountries` — **in template** | 10 |
+| `src/views/OrderDetail.vue:2818` | `getStates` | 10 |
+| `src/components/orders/ManageOrderIdentificationsModal.vue:161` | `orderIdentificationTypeOptions` | 10 |
 
-Re-run this before declaring Task 11 done — it must return nothing but `()`-suffixed calls:
+Re-run this before declaring Task 10 done — it must return nothing but `()`-suffixed calls:
 
 ```bash
 cd apps/order-manager
@@ -83,7 +83,8 @@ grep -rnE "\.(getCountries|getStates|getShipmentMethodOptions|orderIdentificatio
 | `productStoreFacilitiesByStoreId[id].byId` | `productStoreFacilities(id)` | returns `Row[]` |
 | `geoAssocStatus(c)` | **deleted** | geoAssocs are fully synced; use `ready()` if a gate is needed |
 | `loadFacilities()` · `loadGeos()` · `loadGeoAssocs(c)` · `loadShopifyShops()` · `loadEnumType(t)` · `loadEnumsByParentType(p)` · `loadProductStoreSeedData(id)` · `loadInitialSeedData(ids)` | **deleted — remove the call** | the worker syncs all of it |
-| `initSeedDb()` · `populateFromDb()` · `subscribeToDbUpdates()` · `resetSeedData()` | `seedIndex.hydrate(db, catalog)` / `seedIndex.reset()` | boot wiring only |
+| `initSeedDb()` · `populateFromDb()` · `subscribeToDbUpdates()` | **deleted** — slices are lazy, there is no boot step |
+| `resetSeedData()` | `resetSeedData()` from `@/db/useSeedData` | logout and OMS switch only |
 | `createOrderIdentificationType(p)` | `createOrderIdentificationType(p)` in `@/services/orderIdentification` | moves to a service |
 
 **Getters with zero call sites — do not port:** `contactPurposeDescription`, `communicationEventTypeDescription`, `returnTypeDescription`, `returnItemTypeDescription`, `roleTypeDescription`, `getCarrierOptions`, `getProductStoreShipmentMethodOptions`. Their tables stay indexed because `describe()` falls back through them.
@@ -110,15 +111,14 @@ grep -rnE "\.(getCountries|getStates|getShipmentMethodOptions|orderIdentificatio
 
 | File | Responsibility |
 | --- | --- |
-| `src/db/seedIndex.ts` *(create)* | Plain module: slices, secondary indexes, sync getters, hydrate/reset. |
-| `src/db/useSeedData.ts` *(create)* | Thin composable exposing `seedIndex` getters with reactivity. |
+| `src/db/useSeedData.ts` *(create)* | The whole seed layer in one module: lazy reactive slices, secondary indexes, plain sync getters, `ensureLoaded`, `resetSeedData`, and the `useSeedData()` composable. |
 | `src/db/orderManagerDb.ts` *(modify)* | Add the `omDb()` convenience wrapper. |
 | `src/config/appSyncConfig.ts` *(modify)* | Add `shopifyShop`, `shopifyShopLocation`. |
 | `src/services/orderIdentification.ts` *(create)* | `createOrderIdentificationType` — the one seed write. |
 | `src/store/seed.ts` *(delete)* | |
 | `src/App.vue` · `src/store/user.ts` *(modify)* | Boot wiring. |
-| 40 consumer files *(modify)* | Tasks 8–11. |
-| `tests/db/*.spec.ts` *(create)* | Tests for `dbClient`, `useDb`, `seedIndex`, projection. |
+| 40 consumer files *(modify)* | Tasks 7–10. |
+| `tests/db/*.spec.ts` *(create)* | Tests for `dbClient`, `useDb`, `useSeedData`, projection. |
 | `tests/store/seed.spec.ts` *(delete)* | Replaced by `tests/db/syncDomainUrls.spec.ts`. |
 
 ---
@@ -1030,7 +1030,7 @@ git commit -m "test(db): assert stored rows carry no raw payload"
 - Consumes: `SyncDomainCatalogItem` from `@common/db`.
 - Produces: `ORDER_MANAGER_SYNC_CATALOG` with 29 entries. Task 6 hydrates one index slice per entry.
 
-**Context:** `shopifyShop` and `shopifyShopLocation` are registered in `common/db/domains/commonSeedDomains.ts` but absent from the app catalog, so they never sync. `views/CreateOrder.vue:327` and `views/OrderDetail.vue:1163` work today only because the REST loaders fill the store. Without this task, Task 12 breaks those screens.
+**Context:** `shopifyShop` and `shopifyShopLocation` are registered in `common/db/domains/commonSeedDomains.ts` but absent from the app catalog, so they never sync. `views/CreateOrder.vue:327` and `views/OrderDetail.vue:1163` work today only because the REST loaders fill the store. Without this task, Task 11 breaks those screens.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1097,44 +1097,50 @@ git commit -m "fix(sync): sync the shopify shop and location domains"
 
 ---
 
-### Task 6: `seedIndex` — the in-memory lookup index
+### Task 6: `useSeedData.ts` — lazy reactive slices
 
 **Files:**
-- Create: `apps/order-manager/src/db/seedIndex.ts`
-- Modify: `apps/order-manager/src/db/orderManagerDb.ts`
-- Test: `apps/order-manager/tests/db/seedIndex.spec.ts`
+- Create: `apps/order-manager/src/db/useSeedData.ts`
+- Create: `apps/order-manager/src/services/orderIdentification.ts`
+- Modify: `apps/order-manager/src/db/orderManagerDb.ts`, `apps/order-manager/src/store/user.ts`
+- Test: `apps/order-manager/tests/db/useSeedData.spec.ts`
 
 **Interfaces:**
-- Consumes: `dbClient`, `BaseDB`, `SyncDomainCatalogItem` from `@common/db`; `ORDER_MANAGER_SYNC_CATALOG`.
-- Produces: `omDb()`, and from `seedIndex`: `hydrate(db, catalog)`, `reset()`, `ready()`, `seedVersion` (a `Ref<number>`), plus every getter in the Global Constraints mapping table. Tasks 7–12 consume these exact names.
+- Consumes: `dbClient`, `BaseDB` from `@common/db`; `getOrderManagerDb`.
+- Produces: from `@/db/useSeedData` — `useSeedData()`, `ensureLoaded(tables)`,
+  `resetSeedData()`, `seedVersionOf(table)`, and every plain getter in the Global
+  Constraints mapping table. Also `createOrderIdentificationType` from
+  `@/services/orderIdentification`. Tasks 7–11 consume these exact names.
+
+**Design note:** there is no separate index module, no catalog wiring and no boot hydration.
+A slice is created the first time something asks for its table: the getter returns the raw
+id immediately, an async read starts, and when it lands the slice's `shallowRef` is
+replaced, so any computed that read it re-evaluates. Only tables a session touches are ever
+loaded. The one rule this imposes is `ensureLoaded`, applied in Task 7.
+
+**Note:** the seed Pinia store still exists and is still wired in after this task. Both paths
+run side by side so the slices can be validated before anything depends on them. Task 11
+removes the store.
 
 - [ ] **Step 1: Write the failing test**
 
-Create `apps/order-manager/tests/db/seedIndex.spec.ts`:
+Create `apps/order-manager/tests/db/useSeedData.spec.ts`:
 
 ```ts
 import 'fake-indexeddb/auto';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { defineComponent, h, nextTick } from 'vue';
+import { mount } from '@vue/test-utils';
 import { BaseDB, COMMON_DB_SCHEMA, dbClient } from '@common/db';
-import * as seedIndex from '@/db/seedIndex';
+import * as seed from '@/db/useSeedData';
+import { useSeedData } from '@/db/useSeedData';
 
-const CATALOG = [
-  { name: 'status', table: 'statuses', label: 'Statuses' },
-  { name: 'enum', table: 'enums', label: 'Enums' },
-  { name: 'enumType', table: 'enumTypes', label: 'Enum Types' },
-  { name: 'facility', table: 'facilities', label: 'Facilities' },
-  { name: 'geo', table: 'geos', label: 'Geos' },
-  { name: 'geoAssoc', table: 'geoAssocs', label: 'Geo Assocs' },
-  { name: 'roleType', table: 'roleTypes', label: 'Role Types' },
-  { name: 'statusFlowTransition', table: 'statusFlowTransitions', label: 'Transitions' },
-];
-
-const flush = () => new Promise((r) => setTimeout(r, 250));
+const flush = (ms = 250) => new Promise((r) => setTimeout(r, ms));
 let n = 0;
 let db: BaseDB;
 
-async function seed() {
-  db = new BaseDB(`seedIndexTest-${n++}`, COMMON_DB_SCHEMA);
+async function seedDb() {
+  db = new BaseDB(`useSeedDataTest-${n++}`, COMMON_DB_SCHEMA);
   await db.open();
   const c = dbClient(db);
   await c.bulkPut('statuses', [
@@ -1145,19 +1151,13 @@ async function seed() {
     { enumId: 'WEB_CHANNEL', enumTypeId: 'ORDER_SALES_CHANNEL', description: 'Web', syncedAt: 1 },
     { enumId: 'WE_PICK', enumTypeId: 'WePurposeChild', description: 'Picking', syncedAt: 1 },
   ]);
-  await c.bulkPut('enumTypes', [
-    { enumTypeId: 'WePurposeChild', parentTypeId: 'WorkEffortPurposeType', syncedAt: 1 },
-  ]);
-  await c.bulkPut('facilities', [
-    { facilityId: 'F1', facilityName: 'Main Warehouse', facilityTypeId: 'WAREHOUSE', syncedAt: 1 },
-  ]);
+  await c.bulkPut('enumTypes', [{ enumTypeId: 'WePurposeChild', parentTypeId: 'WorkEffortPurposeType', syncedAt: 1 }]);
+  await c.bulkPut('facilities', [{ facilityId: 'F1', facilityName: 'Main Warehouse', facilityTypeId: 'WAREHOUSE', syncedAt: 1 }]);
   await c.bulkPut('geos', [
     { geoId: 'USA', geoName: 'United States', geoCodeAlpha2: 'US', geoTypeEnumId: 'GEOT_COUNTRY', syncedAt: 1 },
     { geoId: 'USA_CA', geoName: 'California', geoCode: 'CA', geoTypeEnumId: 'GEOT_STATE', syncedAt: 1 },
   ]);
-  await c.bulkPut('geoAssocs', [
-    { geoAssocKey: 'USA|USA_CA', geoId: 'USA', toGeoId: 'USA_CA', syncedAt: 1 },
-  ]);
+  await c.bulkPut('geoAssocs', [{ geoAssocKey: 'USA|USA_CA', geoId: 'USA', toGeoId: 'USA_CA', syncedAt: 1 }]);
   await c.bulkPut('roleTypes', [{ roleTypeId: 'CARRIER', description: 'Carrier', syncedAt: 1 }]);
   await c.bulkPut('statusFlowTransitions', [
     { transitionKey: 'ORDER_CREATED|ORDER_APPROVED', statusId: 'ORDER_CREATED', toStatusId: 'ORDER_APPROVED', transitionSequence: 1, syncedAt: 1 },
@@ -1165,86 +1165,102 @@ async function seed() {
   return c;
 }
 
-describe('seedIndex', () => {
-  beforeEach(async () => { await seed(); await seedIndex.hydrate(db, CATALOG as any); });
-  afterEach(() => { seedIndex.reset(); });
+describe('useSeedData module', () => {
+  beforeEach(async () => { await seedDb(); seed.__setDbResolver(() => db); });
+  afterEach(() => { seed.resetSeedData(); });
 
-  it('is ready after hydrate', () => {
-    expect(seedIndex.ready()).toBe(true);
+  it('a cold getter returns the raw id, then resolves on the next tick', async () => {
+    expect(seed.facilityName('F1')).toBe('F1');
+    await flush();
+    expect(seed.facilityName('F1')).toBe('Main Warehouse');
   });
 
-  it('resolves status and enum descriptions', () => {
-    expect(seedIndex.statusDescription('ORDER_APPROVED')).toBe('Approved');
-    expect(seedIndex.enumDescription('WEB_CHANNEL')).toBe('Web');
-    expect(seedIndex.statusAge('ORDER_APPROVED')).toBe(5);
+  it('ensureLoaded resolves only once the named tables are populated', async () => {
+    await seed.ensureLoaded(['statuses', 'facilities']);
+    expect(seed.statusDescription('ORDER_APPROVED')).toBe('Approved');
+    expect(seed.facilityName('F1')).toBe('Main Warehouse');
   });
 
-  it('describe falls through statuses, enums then lookup tables', () => {
-    expect(seedIndex.describe('ORDER_APPROVED')).toBe('Approved');
-    expect(seedIndex.describe('WEB_CHANNEL')).toBe('Web');
-    expect(seedIndex.describe('CARRIER')).toBe('Carrier');
+  it('describe falls through statuses, enums then lookup tables', async () => {
+    await seed.ensureLoaded(['statuses', 'enums', 'roleTypes']);
+    expect(seed.describe('ORDER_APPROVED')).toBe('Approved');
+    expect(seed.describe('WEB_CHANNEL')).toBe('Web');
+    expect(seed.describe('CARRIER')).toBe('Carrier');
   });
 
-  it('returns the raw id on a miss', () => {
-    expect(seedIndex.describe('NOT_A_THING')).toBe('NOT_A_THING');
-    expect(seedIndex.facilityName('NOPE')).toBe('NOPE');
-    expect(seedIndex.describe('')).toBe('');
+  it('returns the raw id on a genuine miss', async () => {
+    await seed.ensureLoaded(['statuses', 'enums', 'facilities']);
+    expect(seed.describe('NOT_A_THING')).toBe('NOT_A_THING');
+    expect(seed.facilityName('NOPE')).toBe('NOPE');
+    expect(seed.describe('')).toBe('');
   });
 
-  it('resolves facilities and geos', () => {
-    expect(seedIndex.facilityName('F1')).toBe('Main Warehouse');
-    expect(seedIndex.geoName('USA')).toBe('United States');
-    expect(seedIndex.getGeoIdByCode('US')).toBe('USA');
-    expect(seedIndex.getCountries().map((g: any) => g.geoId)).toEqual(['USA']);
-    expect(seedIndex.getStates().map((g: any) => g.geoId)).toEqual(['USA_CA']);
+  it('resolves geos and builds the geoAssoc secondary index', async () => {
+    await seed.ensureLoaded(['geos', 'geoAssocs']);
+    expect(seed.geoName('USA')).toBe('United States');
+    expect(seed.getGeoIdByCode('US')).toBe('USA');
+    expect(seed.getCountries().map((g: any) => g.geoId)).toEqual(['USA']);
+    expect(seed.getStates().map((g: any) => g.geoId)).toEqual(['USA_CA']);
+    expect(seed.getStatesForCountry('USA').map((g: any) => g.geoId)).toEqual(['USA_CA']);
+    expect(seed.getStatesForCountry('IND')).toEqual([]);
   });
 
-  it('builds the geoAssoc secondary index', () => {
-    expect(seedIndex.getStatesForCountry('USA').map((g: any) => g.geoId)).toEqual(['USA_CA']);
-    expect(seedIndex.getStatesForCountry('IND')).toEqual([]);
+  it('builds the status and enum type secondary indexes', async () => {
+    await seed.ensureLoaded(['statuses', 'enums', 'enumTypes']);
+    expect(seed.getStatusItemsByType('ORDER_STATUS')).toHaveLength(2);
+    expect(seed.getEnumsByType('ORDER_SALES_CHANNEL')).toHaveLength(1);
+    expect(seed.getEnumsByParentType('WorkEffortPurposeType').map((e: any) => e.enumId)).toEqual(['WE_PICK']);
   });
 
-  it('builds the status and enum type secondary indexes', () => {
-    expect(seedIndex.getStatusItemsByType('ORDER_STATUS')).toHaveLength(2);
-    expect(seedIndex.getEnumsByType('ORDER_SALES_CHANNEL')).toHaveLength(1);
-    expect(seedIndex.getEnumsByParentType('WorkEffortPurposeType').map((e: any) => e.enumId)).toEqual(['WE_PICK']);
-  });
-
-  it('resolves status flow transitions with descriptions', () => {
-    const transitions = seedIndex.allowedTransitions('ORDER_CREATED');
+  it('resolves status flow transitions with descriptions', async () => {
+    await seed.ensureLoaded(['statuses', 'statusFlowTransitions']);
+    const transitions = seed.allowedTransitions('ORDER_CREATED');
     expect(transitions).toHaveLength(1);
     expect(transitions[0].toStatusDescription).toBe('Approved');
   });
 
-  it('rebuilds a slice when its table changes, and bumps the version', async () => {
-    const before = seedIndex.seedVersion.value;
+  it('replaces a slice when its table changes', async () => {
+    await seed.ensureLoaded(['facilities']);
     await dbClient(db).put('facilities', { facilityId: 'F2', facilityName: 'Overflow', syncedAt: 2 });
     await flush();
-
-    expect(seedIndex.facilityName('F2')).toBe('Overflow');
-    expect(seedIndex.seedVersion.value).toBeGreaterThan(before);
+    expect(seed.facilityName('F2')).toBe('Overflow');
   });
 
   it('collapses a burst of writes into one rebuild', async () => {
-    const before = seedIndex.seedVersion.value;
+    await seed.ensureLoaded(['facilities']);
     const c = dbClient(db);
     await c.put('facilities', { facilityId: 'A', facilityName: 'A', syncedAt: 2 });
     await c.put('facilities', { facilityId: 'B', facilityName: 'B', syncedAt: 2 });
     await c.put('facilities', { facilityId: 'C', facilityName: 'C', syncedAt: 2 });
     await flush();
-
-    expect(seedIndex.facilityName('C')).toBe('C');
-    expect(seedIndex.seedVersion.value - before).toBeLessThanOrEqual(2);
+    expect(seed.facilityName('C')).toBe('C');
   });
 
-  it('reset clears slices and stops reacting to writes', async () => {
-    seedIndex.reset();
-    expect(seedIndex.ready()).toBe(false);
-    expect(seedIndex.facilityName('F1')).toBe('F1');
+  it('resetSeedData drops slices and stops reacting to writes', async () => {
+    await seed.ensureLoaded(['facilities']);
+    seed.resetSeedData();
+    expect(seed.facilityName('F1')).toBe('F1');
 
     await dbClient(db).put('facilities', { facilityId: 'F9', facilityName: 'Late', syncedAt: 3 });
     await flush();
-    expect(seedIndex.facilityName('F9')).toBe('F9');
+    // The slice was dropped, so the write is not observed until something asks again.
+    expect(seed.facilityName('F9')).toBe('F9');
+  });
+
+  it('a component computed self-corrects when the slice fills', async () => {
+    const C = defineComponent({
+      setup() {
+        const s = useSeedData();
+        return () => h('div', s.facilityName('F1'));
+      },
+    });
+    const w = mount(C);
+    expect(w.text()).toBe('F1');
+
+    await flush();
+    await nextTick();
+    expect(w.text()).toBe('Main Warehouse');
+    w.unmount();
   });
 });
 ```
@@ -1252,10 +1268,10 @@ describe('seedIndex', () => {
 - [ ] **Step 2: Run the test to verify it fails**
 
 ```bash
-cd apps/order-manager && npx vitest run tests/db/seedIndex.spec.ts
+cd apps/order-manager && npx vitest run tests/db/useSeedData.spec.ts
 ```
 
-Expected: FAIL — `@/db/seedIndex` does not exist.
+Expected: FAIL — `@/db/useSeedData` does not exist.
 
 - [ ] **Step 3: Add the `omDb()` wrapper**
 
@@ -1274,41 +1290,46 @@ export function omDb(): DbClient {
 }
 ```
 
-- [ ] **Step 4: Implement `seedIndex`**
+- [ ] **Step 4: Implement the module**
 
-Create `apps/order-manager/src/db/seedIndex.ts`:
+Create `apps/order-manager/src/db/useSeedData.ts`:
 
 ```ts
 /**
- * In-memory lookup index over the local database's seed tables.
+ * Seed lookups, backed entirely by the local database.
  *
- * A plain module, not a composable and not a Pinia store: the synchronous lookups it serves
- * are needed from Vue computeds, from plain utils, and from inside store actions. A plain
- * module import works in all of those; a composable works in none of them but components.
+ * One module owns the state, the subscriptions, the synchronous getters and the composable.
+ * There is no separate index module and no boot hydration: a slice is created the first time
+ * something asks for its table, so only tables a session actually touches are ever read.
  *
- * Dexie is the source of truth. This index is derived, read-only, and has exactly one
- * writer: the slice rebuild triggered by a liveQuery on each table. Nothing here fetches.
+ * A plain module rather than a composable or a store, because `store/order.ts`,
+ * `utils/badAddressState.ts` and `services/order.ts` need synchronous lookups outside any
+ * component. Components use `useSeedData()`; everything else imports the plain functions.
+ *
+ * Dexie is the source of truth. These slices are derived and read-only, with exactly one
+ * writer: the liveQuery subscription per table. Nothing here fetches from the network.
  */
 
-import { ref } from "vue";
+import { shallowRef, type ShallowRef } from "vue";
 import type { Subscription } from "dexie";
-import type { BaseDB, DbClient, SyncDomainCatalogItem } from "@common/db";
-import { dbClient } from "@common/db";
 import { commonUtil } from "@common";
+import type { BaseDB, DbClient } from "@common/db";
+import { dbClient } from "@common/db";
+import { getOrderManagerDb } from "@/db/orderManagerDb";
 
 type Row = Record<string, any>;
 
 /** Trailing debounce. The enum domain writes in 500-row batches; without this each batch rebuilds. */
 const REBUILD_DEBOUNCE_MS = 150;
 
-const slices = new Map<string, Map<string, Row>>();
-const subscriptions: Subscription[] = [];
+const slices = new Map<string, ShallowRef<Map<string, Row>>>();
+const subscriptions = new Map<string, Subscription>();
 const timers = new Map<string, ReturnType<typeof setTimeout>>();
+const loading = new Map<string, Promise<void>>();
 
-/** Bumped on every slice rebuild. The single reactive cell the whole index exposes. */
-export const seedVersion = ref(0);
-
-let hydrated = false;
+/** Overridable in tests so a slice can be built against a fixture database. */
+let resolveDb: () => BaseDB = () => getOrderManagerDb(commonUtil.getOMSInstanceName());
+export function __setDbResolver(resolver: () => BaseDB) { resolveDb = resolver; }
 
 // ── Secondary indexes, rebuilt with their source slice ────────────────────────────────
 let statusesByType = new Map<string, Row[]>();
@@ -1318,29 +1339,11 @@ let geoAssocsByCountry = new Map<string, string[]>();
 let carrierShipmentMethodsByParty = new Map<string, Row[]>();
 let transitionsByStatus = new Map<string, Row[]>();
 
-// ── Internals ─────────────────────────────────────────────────────────────────────────
+// ── Slice plumbing ────────────────────────────────────────────────────────────────────
 
-function sliceOf(table: string): Map<string, Row> {
-  let slice = slices.get(table);
-  if (!slice) {
-    slice = new Map();
-    slices.set(table, slice);
-  }
-  return slice;
+function keyFieldOf(db: BaseDB, table: string): string {
+  return (db.table(table).schema.primKey.keyPath as string) || "id";
 }
-
-const rowsOf = (table: string): Row[] => [...sliceOf(table).values()];
-const rowOf = (table: string, id: string): Row | undefined => (id ? sliceOf(table).get(id) : undefined);
-
-const firstValue = (item: Row | undefined, fields: string[]) =>
-  fields.map((field) => item?.[field]).find(Boolean) || "";
-
-function itemDescription(item: Row | undefined, id: string, fields = ["description", "enumName", "name"]) {
-  return firstValue(item, fields) || id;
-}
-
-const carrierLabel = (carrier: Row) =>
-  [carrier.firstName, carrier.lastName].filter(Boolean).join(" ") || carrier.groupName || carrier.partyId;
 
 function groupBy(rows: Row[], keyField: string): Map<string, Row[]> {
   const grouped = new Map<string, Row[]>();
@@ -1355,14 +1358,14 @@ function groupBy(rows: Row[], keyField: string): Map<string, Row[]> {
 }
 
 /** Rebuild whichever secondary indexes derive from this table. */
-function rebuildSecondary(table: string) {
+function rebuildSecondary(table: string, rows: Row[]) {
   if (table === "statuses") {
-    statusesByType = groupBy(rowsOf("statuses"), "statusTypeId");
+    statusesByType = groupBy(rows, "statusTypeId");
   } else if (table === "enums") {
-    enumsByType = groupBy(rowsOf("enums"), "enumTypeId");
+    enumsByType = groupBy(rows, "enumTypeId");
   } else if (table === "enumTypes") {
     const byParent = new Map<string, string[]>();
-    for (const type of rowsOf("enumTypes")) {
+    for (const type of rows) {
       if (!type.parentTypeId || !type.enumTypeId) continue;
       const bucket = byParent.get(type.parentTypeId);
       if (bucket) { if (!bucket.includes(type.enumTypeId)) bucket.push(type.enumTypeId); }
@@ -1371,7 +1374,7 @@ function rebuildSecondary(table: string) {
     enumChildTypesByParent = byParent;
   } else if (table === "geoAssocs") {
     const byCountry = new Map<string, string[]>();
-    for (const assoc of rowsOf("geoAssocs")) {
+    for (const assoc of rows) {
       if (!assoc.geoId || !assoc.toGeoId) continue;
       const bucket = byCountry.get(assoc.geoId);
       if (bucket) { if (!bucket.includes(assoc.toGeoId)) bucket.push(assoc.toGeoId); }
@@ -1379,100 +1382,125 @@ function rebuildSecondary(table: string) {
     }
     geoAssocsByCountry = byCountry;
   } else if (table === "carrierShipmentMethods") {
-    carrierShipmentMethodsByParty = groupBy(rowsOf("carrierShipmentMethods"), "partyId");
+    carrierShipmentMethodsByParty = groupBy(rows, "partyId");
   } else if (table === "statusFlowTransitions") {
-    transitionsByStatus = groupBy(rowsOf("statusFlowTransitions"), "statusId");
+    transitionsByStatus = groupBy(rows, "statusId");
   }
 }
 
-function rebuildSlice(table: string, keyField: string, rows: Row[]) {
-  const slice = new Map<string, Row>();
+function applyRows(table: string, keyField: string, rows: Row[]) {
+  const next = new Map<string, Row>();
   for (const row of rows) {
     const key = row[keyField];
-    if (key) slice.set(String(key), row);
+    if (key) next.set(String(key), row);
   }
-  slices.set(table, slice);
-  rebuildSecondary(table);
-  seedVersion.value += 1;
+  // Replacing the ref's value is what makes dependent computeds re-run.
+  slices.get(table)!.value = next;
+  rebuildSecondary(table, rows);
 }
 
-/** Primary-key field name for a table, read from the Dexie schema. */
-function keyFieldOf(db: BaseDB, table: string): string {
-  return (db.table(table).schema.primKey.keyPath as string) || "id";
-}
+/** Read the table once, then keep it fresh. Idempotent per table. */
+function loadAndSubscribe(table: string): Promise<void> {
+  const inFlight = loading.get(table);
+  if (inFlight) return inFlight;
 
-// ── Lifecycle ─────────────────────────────────────────────────────────────────────────
+  const promise = (async () => {
+    const db = resolveDb();
+    const client: DbClient = dbClient(db);
+    const keyField = keyFieldOf(db, table);
+
+    try {
+      applyRows(table, keyField, await client.all(table));
+    } catch (error) {
+      console.warn(`[seed] Initial read failed for ${table}:`, error);
+    }
+
+    if (subscriptions.has(table)) return;
+
+    try {
+      const subscription = client.live(table).subscribe({
+        next: (rows: Row[]) => {
+          const pending = timers.get(table);
+          if (pending) clearTimeout(pending);
+          timers.set(table, setTimeout(() => {
+            timers.delete(table);
+            if (slices.has(table)) applyRows(table, keyField, rows);
+          }, REBUILD_DEBOUNCE_MS));
+        },
+        error: (error: any) => console.error(`[seed] liveQuery error on ${table}:`, error),
+      });
+      subscriptions.set(table, subscription);
+    } catch (error) {
+      console.warn(`[seed] Failed to subscribe to ${table}:`, error);
+    }
+  })();
+
+  loading.set(table, promise);
+  return promise;
+}
 
 /**
- * Read every catalog table once, then subscribe to each for changes.
- * Safe to call twice — a second call resets first, so a login after an authenticated boot
- * does not stack duplicate subscriptions.
+ * The rows for a table. Creating the slice on first access is what makes loading lazy.
+ * Reading `.value` is also what registers the reactive dependency for a computed.
  */
-export async function hydrate(db: BaseDB, catalog: SyncDomainCatalogItem[]): Promise<void> {
-  reset();
-
-  const client: DbClient = dbClient(db);
-
-  await Promise.all(
-    catalog.map(async (entry) => {
-      try {
-        const rows = await client.all(entry.table);
-        rebuildSlice(entry.table, keyFieldOf(db, entry.table), rows);
-      } catch (error) {
-        console.warn(`[seedIndex] Initial read failed for ${entry.table}:`, error);
-      }
-    }),
-  );
-
-  for (const entry of catalog) {
-    const keyField = keyFieldOf(db, entry.table);
-    try {
-      const subscription = client.live(entry.table).subscribe({
-        next: (rows: Row[]) => {
-          const pending = timers.get(entry.table);
-          if (pending) clearTimeout(pending);
-          timers.set(
-            entry.table,
-            setTimeout(() => {
-              timers.delete(entry.table);
-              rebuildSlice(entry.table, keyField, rows);
-            }, REBUILD_DEBOUNCE_MS),
-          );
-        },
-        error: (error: any) => console.error(`[seedIndex] liveQuery error on ${entry.table}:`, error),
-      });
-      subscriptions.push(subscription);
-    } catch (error) {
-      console.warn(`[seedIndex] Failed to subscribe to ${entry.table}:`, error);
-    }
+function sliceOf(table: string): Map<string, Row> {
+  let slice = slices.get(table);
+  if (!slice) {
+    slice = shallowRef(new Map<string, Row>());
+    slices.set(table, slice);
+    void loadAndSubscribe(table);
   }
-
-  hydrated = true;
+  return slice.value;
 }
 
-/** Tear down every subscription and drop every slice. Call on logout and before an OMS switch. */
-export function reset(): void {
-  for (const subscription of subscriptions) {
+const rowsOf = (table: string): Row[] => [...sliceOf(table).values()];
+const rowOf = (table: string, id: string): Row | undefined => (id ? sliceOf(table).get(id) : undefined);
+
+// ── Public lifecycle ──────────────────────────────────────────────────────────────────
+
+/**
+ * Await the named tables before reading a value that will be STAMPED INTO DATA rather than
+ * re-read by a computed. A stamped raw id never self-corrects; a computed does.
+ */
+export async function ensureLoaded(tables: string[]): Promise<void> {
+  await Promise.all(tables.map((table) => {
+    if (!slices.has(table)) slices.set(table, shallowRef(new Map<string, Row>()));
+    return loadAndSubscribe(table);
+  }));
+}
+
+/** Drop every slice and subscription. Call on logout and before an OMS switch. */
+export function resetSeedData(): void {
+  for (const subscription of subscriptions.values()) {
     try { subscription.unsubscribe(); } catch { /* already closed */ }
   }
-  subscriptions.length = 0;
+  subscriptions.clear();
 
   for (const timer of timers.values()) clearTimeout(timer);
   timers.clear();
 
+  loading.clear();
   slices.clear();
+
   statusesByType = new Map();
   enumsByType = new Map();
   enumChildTypesByParent = new Map();
   geoAssocsByCountry = new Map();
   carrierShipmentMethodsByParty = new Map();
   transitionsByStatus = new Map();
-
-  hydrated = false;
-  seedVersion.value += 1;
 }
 
-export const ready = (): boolean => hydrated;
+// ── Shared helpers ────────────────────────────────────────────────────────────────────
+
+const firstValue = (item: Row | undefined, fields: string[]) =>
+  fields.map((field) => item?.[field]).find(Boolean) || "";
+
+function itemDescription(item: Row | undefined, id: string, fields = ["description", "enumName", "name"]) {
+  return firstValue(item, fields) || id;
+}
+
+const carrierLabel = (carrier: Row) =>
+  [carrier.firstName, carrier.lastName].filter(Boolean).join(" ") || carrier.groupName || carrier.partyId;
 
 // ── Statuses and enums ────────────────────────────────────────────────────────────────
 
@@ -1481,12 +1509,20 @@ export const statusDescription = (statusId: string) => itemDescription(rowOf("st
 export const statusAge = (statusId: string): number => Number(rowOf("statuses", statusId)?.statusAge ?? 0);
 export const enumDescription = (enumId: string) => itemDescription(rowOf("enums", enumId), enumId);
 
-export const getStatusItemsByType = (typeId: string): Row[] => statusesByType.get(typeId) ?? [];
-export const getEnumsByType = (typeId: string): Row[] => enumsByType.get(typeId) ?? [];
-export const getEnumsByParentType = (parentTypeId: string): Row[] =>
-  (enumChildTypesByParent.get(parentTypeId) ?? []).flatMap((childTypeId) => getEnumsByType(childTypeId));
+export const getStatusItemsByType = (typeId: string): Row[] => {
+  sliceOf("statuses");                       // ensure the slice exists and is tracked
+  return statusesByType.get(typeId) ?? [];
+};
+export const getEnumsByType = (typeId: string): Row[] => {
+  sliceOf("enums");
+  return enumsByType.get(typeId) ?? [];
+};
+export const getEnumsByParentType = (parentTypeId: string): Row[] => {
+  sliceOf("enumTypes");
+  return (enumChildTypesByParent.get(parentTypeId) ?? []).flatMap((childTypeId) => getEnumsByType(childTypeId));
+};
 
-/** Lookup tables describe() falls through, in priority order after statuses and enums. */
+/** Lookup tables describe() falls through, after statuses and enums. */
 const DESCRIBE_FALLBACK_TABLES = [
   "contactMechPurposeTypes", "roleTypes", "paymentMethodTypes", "communicationEventTypes",
   "returnReasons", "returnTypes", "returnItemTypes", "orderAdjustmentTypes",
@@ -1506,7 +1542,7 @@ export function describe(id: string): string {
   return id;
 }
 
-// ── Product stores, facilities ────────────────────────────────────────────────────────
+// ── Product stores and facilities ─────────────────────────────────────────────────────
 
 export const productStores = (): Row[] => rowsOf("productStores");
 export const productStore = (productStoreId: string) => rowOf("productStores", productStoreId);
@@ -1532,19 +1568,19 @@ export const carrierName = (partyId: string) => {
 };
 
 export const shipmentMethodTypes = (): Row[] => rowsOf("shipmentMethodTypes");
-export const shipmentMethod = (shipmentMethodTypeId: string) => rowOf("shipmentMethodTypes", shipmentMethodTypeId);
-export const shipmentMethodDescription = (shipmentMethodTypeId: string) =>
-  itemDescription(rowOf("shipmentMethodTypes", shipmentMethodTypeId), shipmentMethodTypeId, [
-    "description", "shipmentMethodTypeId",
-  ]);
+export const shipmentMethod = (id: string) => rowOf("shipmentMethodTypes", id);
+export const shipmentMethodDescription = (id: string) =>
+  itemDescription(rowOf("shipmentMethodTypes", id), id, ["description", "shipmentMethodTypeId"]);
 export const getShipmentMethodOptions = (): Array<{ id: string; label: string }> =>
   rowsOf("shipmentMethodTypes").map((row) => ({
     id: row.shipmentMethodTypeId,
     label: itemDescription(row, row.shipmentMethodTypeId, ["description", "shipmentMethodTypeId"]),
   }));
 
-export const shippingMethodsByCarrier = (carrierPartyId: string): Row[] =>
-  carrierPartyId ? carrierShipmentMethodsByParty.get(carrierPartyId) ?? [] : [];
+export const shippingMethodsByCarrier = (carrierPartyId: string): Row[] => {
+  sliceOf("carrierShipmentMethods");
+  return carrierPartyId ? carrierShipmentMethodsByParty.get(carrierPartyId) ?? [] : [];
+};
 
 // ── Simple lookup descriptions ────────────────────────────────────────────────────────
 
@@ -1588,16 +1624,19 @@ export const getStates = (): Row[] =>
     .filter((geo) => geo.geoTypeEnumId === "GEOT_STATE" || geo.geoTypeEnumId === "GEOT_PROVINCE")
     .sort(byGeoName);
 
-export const getStatesForCountry = (countryGeoId: string): Row[] =>
-  (geoAssocsByCountry.get(countryGeoId) ?? [])
+export const getStatesForCountry = (countryGeoId: string): Row[] => {
+  sliceOf("geoAssocs");
+  return (geoAssocsByCountry.get(countryGeoId) ?? [])
     .map((geoId) => rowOf("geos", geoId))
     .filter(Boolean)
     .sort(byGeoName) as Row[];
+};
 
 // ── Status flow ───────────────────────────────────────────────────────────────────────
 
-export const allowedTransitions = (statusId: string) =>
-  (transitionsByStatus.get(statusId) ?? [])
+export const allowedTransitions = (statusId: string) => {
+  sliceOf("statusFlowTransitions");
+  return (transitionsByStatus.get(statusId) ?? [])
     .map((transition) => {
       const toStatusDescription = itemDescription(rowOf("statuses", transition.toStatusId), transition.toStatusId);
       return {
@@ -1612,194 +1651,42 @@ export const allowedTransitions = (statusId: string) =>
       if (leftSequence !== rightSequence) return leftSequence - rightSequence;
       return (left.toStatusId || "").localeCompare(right.toStatusId || "");
     });
-```
+};
 
-- [ ] **Step 5: Run the test to verify it passes**
+// ── Component entry point ─────────────────────────────────────────────────────────────
 
-```bash
-cd apps/order-manager && npx vitest run tests/db/seedIndex.spec.ts
-```
-
-Expected: PASS, 11 tests. If the debounce test is flaky, raise the `flush()` delay — do not lower `REBUILD_DEBOUNCE_MS`.
-
-- [ ] **Step 6: Run the full suite and commit**
-
-```bash
-cd apps/order-manager && npx vitest run
-```
-
-Expected: 95 files / ~500 tests passing.
-
-```bash
-cd apps/order-manager
-git add src/db/seedIndex.ts src/db/orderManagerDb.ts tests/db/seedIndex.spec.ts
-git commit -m "feat(db): add seedIndex, a Dexie-fed in-memory lookup index"
-```
-
----
-
-### Task 7: `useSeedData` and boot wiring
-
-**Files:**
-- Create: `apps/order-manager/src/db/useSeedData.ts`, `apps/order-manager/src/services/orderIdentification.ts`
-- Modify: `apps/order-manager/src/App.vue`, `apps/order-manager/src/store/user.ts`
-- Test: `apps/order-manager/tests/db/useSeedData.spec.ts`
-
-**Interfaces:**
-- Consumes: everything `seedIndex` exports (Task 6); `ORDER_MANAGER_SYNC_CATALOG` (Task 5); `getOrderManagerDb`.
-- Produces: `useSeedData()` returning the getters plus `ready: ComputedRef<boolean>`; `createOrderIdentificationType(payload)`. Tasks 8–11 consume `useSeedData()`.
-
-**Note:** the seed Pinia store still exists after this task and is still wired in. Both paths run side by side so the index can be validated before anything depends on it. Task 12 removes the store.
-
-- [ ] **Step 1: Write the failing test**
-
-Create `apps/order-manager/tests/db/useSeedData.spec.ts`:
-
-```ts
-import 'fake-indexeddb/auto';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { defineComponent, h, nextTick } from 'vue';
-import { mount } from '@vue/test-utils';
-import { BaseDB, COMMON_DB_SCHEMA, dbClient } from '@common/db';
-import * as seedIndex from '@/db/seedIndex';
-import { useSeedData } from '@/db/useSeedData';
-
-const CATALOG = [{ name: 'facility', table: 'facilities', label: 'Facilities' }];
-const flush = () => new Promise((r) => setTimeout(r, 250));
-let n = 0;
-let db: BaseDB;
-
-describe('useSeedData', () => {
-  beforeEach(async () => {
-    db = new BaseDB(`useSeedDataTest-${n++}`, COMMON_DB_SCHEMA);
-    await db.open();
-    await dbClient(db).bulkPut('facilities', [{ facilityId: 'F1', facilityName: 'Main', syncedAt: 1 }]);
-    await seedIndex.hydrate(db, CATALOG as any);
-  });
-  afterEach(() => seedIndex.reset());
-
-  it('exposes the seedIndex getters', () => {
-    let seed: any;
-    const C = defineComponent({ setup() { seed = useSeedData(); return () => h('div'); } });
-    const w = mount(C);
-    expect(seed.facilityName('F1')).toBe('Main');
-    expect(seed.ready.value).toBe(true);
-    w.unmount();
-  });
-
-  it('re-renders a computed when the underlying slice changes', async () => {
-    const C = defineComponent({
-      setup() {
-        const seed = useSeedData();
-        return () => h('div', seed.facilityName('F2'));
-      },
-    });
-    const w = mount(C);
-    expect(w.text()).toBe('F2');
-
-    await dbClient(db).put('facilities', { facilityId: 'F2', facilityName: 'Overflow', syncedAt: 2 });
-    await flush();
-    await nextTick();
-
-    expect(w.text()).toBe('Overflow');
-    w.unmount();
-  });
-});
-```
-
-- [ ] **Step 2: Run the test to verify it fails**
-
-```bash
-cd apps/order-manager && npx vitest run tests/db/useSeedData.spec.ts
-```
-
-Expected: FAIL — `@/db/useSeedData` does not exist.
-
-- [ ] **Step 3: Implement `useSeedData`**
-
-Create `apps/order-manager/src/db/useSeedData.ts`:
-
-```ts
 /**
- * Reactive wrapper over seedIndex for components.
- *
- * Every getter is re-exported through a closure that reads `seedVersion` first, so a slice
- * rebuild invalidates any computed or render function that called it. Non-component code
- * (stores, services, utils) must import from `@/db/seedIndex` directly instead — the plain
- * functions have no reactive dependency and no component scope.
+ * The same getters, for components. Reading any of them inside a computed or a render
+ * function registers a dependency on the underlying slice ref, so the computed re-runs when
+ * that slice fills or changes. Non-component callers import the plain functions above.
  */
-
-import { computed } from "vue";
-import * as seedIndex from "@/db/seedIndex";
-
-/** Wrap a getter so reading it registers a dependency on the index version. */
-function reactive<T extends (...args: any[]) => any>(getter: T): T {
-  return ((...args: Parameters<T>) => {
-    // Touch the version ref so Vue tracks this call.
-    void seedIndex.seedVersion.value;
-    return getter(...args);
-  }) as T;
-}
-
 export function useSeedData() {
   return {
-    ready: computed(() => {
-      void seedIndex.seedVersion.value;
-      return seedIndex.ready();
-    }),
+    describe, status, statusDescription, statusAge, enumDescription,
+    getStatusItemsByType, getEnumsByType, getEnumsByParentType,
 
-    describe: reactive(seedIndex.describe),
-    status: reactive(seedIndex.status),
-    statusDescription: reactive(seedIndex.statusDescription),
-    statusAge: reactive(seedIndex.statusAge),
-    enumDescription: reactive(seedIndex.enumDescription),
-    getStatusItemsByType: reactive(seedIndex.getStatusItemsByType),
-    getEnumsByType: reactive(seedIndex.getEnumsByType),
-    getEnumsByParentType: reactive(seedIndex.getEnumsByParentType),
+    productStores, productStore, productStoreName,
+    facilities, facility, facilityName, facilityType, productStoreFacilities,
 
-    productStores: reactive(seedIndex.productStores),
-    productStore: reactive(seedIndex.productStore),
-    productStoreName: reactive(seedIndex.productStoreName),
+    carriers, carrier, carrierName,
+    shipmentMethodTypes, shipmentMethod, shipmentMethodDescription,
+    getShipmentMethodOptions, shippingMethodsByCarrier,
 
-    facilities: reactive(seedIndex.facilities),
-    facility: reactive(seedIndex.facility),
-    facilityName: reactive(seedIndex.facilityName),
-    facilityType: reactive(seedIndex.facilityType),
-    productStoreFacilities: reactive(seedIndex.productStoreFacilities),
+    paymentMethodDescription, returnReasonDescription, orderAdjustmentTypeDescription,
+    partyRelationshipTypes, roleTypes,
 
-    carriers: reactive(seedIndex.carriers),
-    carrier: reactive(seedIndex.carrier),
-    carrierName: reactive(seedIndex.carrierName),
-    shipmentMethodTypes: reactive(seedIndex.shipmentMethodTypes),
-    shipmentMethod: reactive(seedIndex.shipmentMethod),
-    shipmentMethodDescription: reactive(seedIndex.shipmentMethodDescription),
-    getShipmentMethodOptions: reactive(seedIndex.getShipmentMethodOptions),
-    shippingMethodsByCarrier: reactive(seedIndex.shippingMethodsByCarrier),
+    orderIdentificationTypeDescription, orderIdentificationTypeOptions,
+    shopifyShops, shopifyShopLocations,
 
-    paymentMethodDescription: reactive(seedIndex.paymentMethodDescription),
-    returnReasonDescription: reactive(seedIndex.returnReasonDescription),
-    orderAdjustmentTypeDescription: reactive(seedIndex.orderAdjustmentTypeDescription),
-    partyRelationshipTypes: reactive(seedIndex.partyRelationshipTypes),
-    roleTypes: reactive(seedIndex.roleTypes),
+    geoName, getGeoIdByCode, getCountries, getStates, getStatesForCountry,
+    allowedTransitions,
 
-    orderIdentificationTypeDescription: reactive(seedIndex.orderIdentificationTypeDescription),
-    orderIdentificationTypeOptions: reactive(seedIndex.orderIdentificationTypeOptions),
-
-    shopifyShops: reactive(seedIndex.shopifyShops),
-    shopifyShopLocations: reactive(seedIndex.shopifyShopLocations),
-
-    geoName: reactive(seedIndex.geoName),
-    getGeoIdByCode: reactive(seedIndex.getGeoIdByCode),
-    getCountries: reactive(seedIndex.getCountries),
-    getStates: reactive(seedIndex.getStates),
-    getStatesForCountry: reactive(seedIndex.getStatesForCountry),
-
-    allowedTransitions: reactive(seedIndex.allowedTransitions),
+    ensureLoaded,
   };
 }
 ```
 
-- [ ] **Step 4: Move the one seed write to a service**
+- [ ] **Step 5: Move the one seed write to a service**
 
 Create `apps/order-manager/src/services/orderIdentification.ts`:
 
@@ -1807,8 +1694,8 @@ Create `apps/order-manager/src/services/orderIdentification.ts`:
 /**
  * The single write against seed data: creating an order identification type.
  *
- * Writes go to the server, then the worker refetches the affected row into the local
- * database. seedIndex picks the change up through its liveQuery — nothing reloads a store.
+ * The write goes to the server, then the worker refetches the affected row into the local
+ * database. The enums slice picks the change up through its liveQuery — nothing reloads.
  */
 
 import { api, logger } from "@common";
@@ -1829,58 +1716,31 @@ export async function createOrderIdentificationType(payload: { enumId: string; d
 }
 ```
 
-- [ ] **Step 5: Hydrate the index at boot, alongside the existing store**
+- [ ] **Step 6: Reset the slices on logout**
 
-In `apps/order-manager/src/App.vue`, add the imports:
-
-```ts
-import * as seedIndex from '@/db/seedIndex';
-import { getOrderManagerDb } from '@/db/orderManagerDb';
-import { ORDER_MANAGER_SYNC_CATALOG } from '@/config/appSyncConfig';
-import { commonUtil } from '@common';
-```
-
-Immediately after the existing `await useSeedStore().initSeedDb();` line (`src/App.vue:65`), add:
+In `apps/order-manager/src/store/user.ts`, add the import:
 
 ```ts
-  // Dexie-backed lookup index. Runs alongside the seed store until the store is removed.
-  await seedIndex.hydrate(getOrderManagerDb(commonUtil.getOMSInstanceName()), ORDER_MANAGER_SYNC_CATALOG);
+import { resetSeedData } from "@/db/useSeedData";
 ```
 
-In `apps/order-manager/src/store/user.ts`, add the same imports, then after the existing `await useSeedStore().initSeedDb();` (`src/store/user.ts:181`):
+and in `postLogout`, immediately before the existing `useSeedStore().resetSeedData();` at
+`src/store/user.ts:195`:
 
 ```ts
-        await seedIndex.hydrate(getOrderManagerDb(commonUtil.getOMSInstanceName()), ORDER_MANAGER_SYNC_CATALOG);
+      resetSeedData();
 ```
 
-And in `postLogout`, immediately before the existing `useSeedStore().resetSeedData();` (`src/store/user.ts:195`):
+No boot wiring is added anywhere — slices build on demand.
 
-```ts
-      seedIndex.reset();
-```
-
-- [ ] **Step 6: Run the test to verify it passes**
+- [ ] **Step 7: Run the test to verify it passes**
 
 ```bash
 cd apps/order-manager && npx vitest run tests/db/useSeedData.spec.ts
 ```
 
-Expected: PASS, 2 tests.
-
-- [ ] **Step 7: Verify in the running app**
-
-```bash
-cd apps/order-manager && pnpm dev
-```
-
-Log in, open the browser console and confirm no `[seedIndex]` warnings appear. In the console, check the index populated:
-
-```js
-// paste in the devtools console
-(await import('/src/db/seedIndex.ts')).facilityName(Object.keys((await import('/src/db/seedIndex.ts')))[0] && 'ANY_KNOWN_FACILITY_ID')
-```
-
-Simpler check: the Settings screen still shows sync status for all 29 domains, including the two Shopify rows added in Task 5.
+Expected: PASS, 11 tests. If a timing assertion is flaky, raise the `flush()` delay — do not
+lower `REBUILD_DEBOUNCE_MS`.
 
 - [ ] **Step 8: Run the full suite and commit**
 
@@ -1888,37 +1748,56 @@ Simpler check: the Settings screen still shows sync status for all 29 domains, i
 cd apps/order-manager && npx vitest run
 ```
 
-Expected: 96 files / ~502 tests passing.
+Expected: 95 files / ~500 tests passing.
 
 ```bash
 cd apps/order-manager
-git add src/db/useSeedData.ts src/services/orderIdentification.ts src/App.vue src/store/user.ts tests/db/useSeedData.spec.ts
-git commit -m "feat(db): add useSeedData and hydrate seedIndex at boot"
+git add src/db/useSeedData.ts src/db/orderManagerDb.ts src/services/orderIdentification.ts src/store/user.ts tests/db/useSeedData.spec.ts
+git commit -m "feat(db): add useSeedData with lazy Dexie-backed lookup slices"
 ```
 
 ---
 
-### Task 8: Migrate stores, services and utils
+### Task 7: Migrate stores, services and utils, with `ensureLoaded`
 
 **Files:**
 - Modify: `src/store/order.ts:47,56,67`, `src/store/orderDetail.ts:28,726-727`, `src/store/customer.ts:326,374`, `src/store/customerService.ts:1058-1059`, `src/store/productStore.ts:141`, `src/services/order.ts:3,793,798`, `src/utils/badAddressState.ts:24,32-33`, `src/utils/OrderActionValidator.ts:66`
-- Test: existing `tests/store/order.spec.ts`, `tests/store/orderDetail.spec.ts`, `tests/services/*.spec.ts`
+- Test: existing `tests/store/order.spec.ts`, `tests/store/orderDetail.spec.ts`, `tests/services/*.spec.ts`, `tests/utils/badAddressState.spec.ts`
 
 **Interfaces:**
-- Consumes: `seedIndex` named exports (Task 6).
-- Produces: no new interfaces. These 11 call sites import plain functions, never `useSeedData`.
+- Consumes: the plain getters and `ensureLoaded` from `@/db/useSeedData` (Task 6).
+- Produces: no new interfaces.
 
-**Why plain imports here:** these run outside component setup. `useSeedData()` returns closures that touch a ref — harmless, but pointless outside a reactive scope, and `getActivePinia()` guards like `src/services/order.ts:798` disappear entirely because `seedIndex` needs no Pinia.
+**The rule this task applies.** A lookup read inside a computed self-corrects when its slice
+fills. A lookup whose result is **stamped into data** is evaluated once and never revisited,
+so a cold slice leaves a raw id there permanently. Every stamping site must `await
+ensureLoaded([...])` first. Sites that only feed computeds must not — adding awaits there is
+pointless work.
 
-- [ ] **Step 1: Migrate `src/store/order.ts`**
+**Self-correcting, leave alone:** `orderDetail.ts`'s `adjustmentDisplayLabel` is called only
+from the Pinia getters `totals` (`:663`), `adjustmentsByExternalId` (`:578`) and
+`itemStatusEventsByOrderId` (`:425`). Pinia getters are computeds, so they re-run when the
+slice fills.
+
+- [ ] **Step 1: Migrate `src/store/order.ts` (stamping site)**
 
 Replace the `useSeedStore` import with:
 
 ```ts
-import { productStore as seedProductStore, shipmentMethod as seedShipmentMethod } from "@/db/seedIndex";
+import { ensureLoaded, productStore as seedProductStore, shipmentMethod as seedShipmentMethod } from "@/db/useSeedData";
 ```
 
-Delete the `const seedStore = useSeedStore();` line (`:47`) and rewrite the two decorated fields:
+Delete `const seedStore = useSeedStore();` at `:47` and add the await immediately before the
+`docs.map(...)` that follows it:
+
+```ts
+  // Stamped onto row data, so it cannot self-correct later — load the slices first.
+  await ensureLoaded(["productStores", "shipmentMethodTypes"]);
+
+  const orders = docs.map((doc: any) => {
+```
+
+Then rewrite the two decorated fields:
 
 ```ts
       productStoreName: (() => {
@@ -1934,15 +1813,14 @@ Delete the `const seedStore = useSeedStore();` line (`:47`) and rewrite the two 
       })(),
 ```
 
-- [ ] **Step 2: Migrate `src/store/orderDetail.ts`**
-
-Replace the import and the two call sites:
+- [ ] **Step 2: Migrate `src/store/orderDetail.ts` (no await needed)**
 
 ```ts
-import { orderAdjustmentTypeDescription, shippingMethodsByCarrier } from "@/db/seedIndex";
+import { orderAdjustmentTypeDescription, shippingMethodsByCarrier } from "@/db/useSeedData";
 ```
 
-Line 28 becomes `|| orderAdjustmentTypeDescription(adj.orderAdjustmentTypeId)`, and lines 726-727 collapse to:
+Line 28 becomes `|| orderAdjustmentTypeDescription(adj.orderAdjustmentTypeId)`, and lines
+726-727 collapse to:
 
 ```ts
         return shippingMethodsByCarrier(carrierPartyId);
@@ -1950,22 +1828,26 @@ Line 28 becomes `|| orderAdjustmentTypeDescription(adj.orderAdjustmentTypeId)`, 
 
 - [ ] **Step 3: Migrate the remaining non-component files**
 
-| File | Change |
-| --- | --- |
-| `src/store/customer.ts:326,374` | `const seed = useSeedStore();` → delete; `seed.statusAge(x)` → `statusAge(x)`; import `{ statusAge } from "@/db/seedIndex"` |
-| `src/store/customerService.ts:1058-1059` | `const seedStore = useSeedStore() as any; seedStore.getEnumsByType('PP_SORT_PARAM_TYPE')` → `getEnumsByType('PP_SORT_PARAM_TYPE')`; import from `@/db/seedIndex` |
-| `src/store/productStore.ts:141` | delete the `await useSeedStore().loadProductStoreSeedData(payload.productStoreId);` line and the `useSeedStore` import — the worker's fan-out domains already cover every store |
-| `src/services/order.ts:793,798` | `useSeedStore().facilityType(id)?.parentTypeId` → `facilityType(id)?.parentTypeId`; delete the `getActivePinia() ? useSeedStore() : undefined` guard at `:798` and use the plain functions; drop the now-unused `getActivePinia` import if nothing else uses it |
-| `src/utils/badAddressState.ts:24,32-33` | delete `const seedStore = useSeedStore();`; `seedStore.getGeoIdByCode(x)` → `getGeoIdByCode(x)`; import from `@/db/seedIndex` |
-| `src/utils/OrderActionValidator.ts:66` | comment-only reference to `productStoreSettingsByStoreId`; update the comment to note the setting is read from `productStore.ts`, not the seed store |
+| File | Change | `ensureLoaded`? |
+| --- | --- | --- |
+| `src/store/customer.ts:326` | delete `const seed = useSeedStore();`; `seed.statusAge(x)` → `statusAge(x)`; import from `@/db/useSeedData` | **yes** — `await ensureLoaded(["statuses"])` at the top of `async loadCustomerDashboard` |
+| `src/store/customer.ts:374` | same swap | **yes** — `await ensureLoaded(["statuses"])` before the `await Promise.all(result.orders…)` block |
+| `src/store/customerService.ts:1058-1059` | `const seedStore = useSeedStore() as any; seedStore.getEnumsByType('PP_SORT_PARAM_TYPE')` → `getEnumsByType('PP_SORT_PARAM_TYPE')` | **yes** — `await ensureLoaded(["enums"])` before the `sortConditions.map(...)` that builds `sortRules` |
+| `src/store/productStore.ts:141` | delete the `await useSeedStore().loadProductStoreSeedData(...)` line and the `useSeedStore` import — the worker's fan-out domains already cover every store | no |
+| `src/services/order.ts:793,798` | `useSeedStore().facilityType(id)?.parentTypeId` → `facilityType(id)?.parentTypeId`; **delete both `getActivePinia()` guards** (`:792` and `:798`) — there is no Pinia to guard; drop the `getActivePinia` import if unused | **yes** — `await ensureLoaded(["facilityTypes"])` in the async function that calls `allocationDocuments` |
+| `src/utils/badAddressState.ts:24,32-33` | delete `const seedStore = useSeedStore();`; `seedStore.getGeoIdByCode(x)` → `getGeoIdByCode(x)` | no — handled at the caller in Task 8 |
+| `src/utils/OrderActionValidator.ts:66` | comment-only reference to `productStoreSettingsByStoreId`; update it to note the setting is read from `productStore.ts` | no |
 
 - [ ] **Step 4: Run the affected tests**
 
 ```bash
-cd apps/order-manager && npx vitest run tests/store/order.spec.ts tests/store/orderDetail.spec.ts tests/services tests/utils
+cd apps/order-manager && npx vitest run tests/store/order.spec.ts tests/store/orderDetail.spec.ts tests/store/customer.spec.ts tests/services tests/utils
 ```
 
-Expected: PASS. If a spec mocked `@/store/seed`, replace that mock with a `vi.mock('@/db/seedIndex', () => ({ ... }))` returning the same values the old mock returned.
+Expected: PASS. Where a spec mocked `@/store/seed`, replace it with
+`vi.mock('@/db/useSeedData', () => ({ ensureLoaded: vi.fn(async () => {}), /* …the getters that spec used */ }))`
+returning the same values the old mock returned. `ensureLoaded` must always be mocked as an
+async no-op, or the store action will hang waiting on a real Dexie read.
 
 - [ ] **Step 5: Confirm no seed-store references remain in non-component code**
 
@@ -1973,7 +1855,7 @@ Expected: PASS. If a spec mocked `@/store/seed`, replace that mock with a `vi.mo
 cd apps/order-manager && grep -rn "useSeedStore" src/store src/services src/utils
 ```
 
-Expected: only `src/store/user.ts` (boot wiring, removed in Task 12) and `src/store/seed.ts` itself.
+Expected: only `src/store/user.ts` (boot wiring, removed in Task 11) and `src/store/seed.ts`.
 
 - [ ] **Step 6: Run the full suite and commit**
 
@@ -1981,17 +1863,18 @@ Expected: only `src/store/user.ts` (boot wiring, removed in Task 12) and `src/st
 cd apps/order-manager && npx vitest run
 ```
 
-Expected: 96 files / ~502 tests passing.
+Expected: 95 files / ~500 tests passing.
 
 ```bash
 cd apps/order-manager
 git add src/store src/services src/utils
-git commit -m "refactor(seed): read lookups from seedIndex in stores, services and utils"
+git commit -m "refactor(seed): read lookups from useSeedData in stores, services and utils"
 ```
 
 ---
 
-### Task 9: Migrate geography components and delete the on-demand geo loaders
+
+### Task 8: Migrate geography components and delete the on-demand geo loaders
 
 **Files:**
 - Modify: `src/components/AddressModal.vue:67,80-81,90`, `src/components/AddContactModal.vue:197,206,238-259`, `src/components/tasks/BadAddressTaskCard.vue`, `src/views/BadAddressOrders.vue`
@@ -2036,34 +1919,58 @@ Delete the loading gate at `:246` and the two loader calls at `:252` and `:258-2
 
 | File | Change |
 | --- | --- |
-| `src/components/tasks/BadAddressTaskCard.vue` | `useSeedStore()` → `useSeedData()`; `carrierName`, `facilityName`, `getStatesForCountry`, `shipmentMethodDescription` keep their names; **delete** the `loadGeoAssocs` call |
+| `src/components/tasks/BadAddressTaskCard.vue` | `useSeedStore()` → `useSeedData()`; `carrierName`, `facilityName`, `getStatesForCountry`, `shipmentMethodDescription` keep their names; **delete** both `loadGeoAssocs` calls; **make `hydrate()` async and await `ensureLoaded`** — see the next step |
 | `src/views/BadAddressOrders.vue` | `useSeedStore()` → `useSeedData()`; `getEnumsByType` keeps its name |
 
-- [ ] **Step 4: Confirm the geo loaders are gone**
+- [ ] **Step 4: Await the geo slices in `BadAddressTaskCard.vue` (stamping site)**
+
+`buildAddressState(props.task)` resolves geo codes and the result is stamped into the
+`addressState` ref at `src/components/tasks/BadAddressTaskCard.vue:170-176`. A stamped raw
+id never self-corrects, so the slices must be loaded first. `hydrate()` is already deferred
+past first paint in `onMounted`, so making it async changes nothing visible:
+
+```ts
+import { ensureLoaded } from '@/db/useSeedData';
+
+async function hydrate() {
+  if (addressState.value) return;
+  await ensureLoaded(['geos', 'geoAssocs']);
+  addressState.value = buildAddressState(props.task);
+}
+```
+
+The two `seedStore.loadGeoAssocs(...)` calls that sat between `buildAddressState` and the
+assignment are deleted — `geoAssocs` is a fully synced domain, so `ensureLoaded` covers it.
+
+Update `tests/utils/badAddressState.spec.ts` if it asserts on resolved geo ids: it calls
+`buildAddressState` directly, so it needs `await ensureLoaded(['geos'])` against a seeded
+fixture database, or a `vi.mock('@/db/useSeedData')` stubbing `getGeoIdByCode`.
+
+- [ ] **Step 5: Confirm the geo loaders are gone**
 
 ```bash
 cd apps/order-manager && grep -rn "loadGeoAssocs\|loadGeos\|geoAssocStatus" src
 ```
 
-Expected: only `src/store/seed.ts` (deleted in Task 12).
+Expected: only `src/store/seed.ts` (deleted in Task 11).
 
-- [ ] **Step 5: Run the tests and commit**
+- [ ] **Step 6: Run the tests and commit**
 
 ```bash
 cd apps/order-manager && npx vitest run
 ```
 
-Expected: 96 files / ~502 tests passing.
+Expected: 95 files / ~500 tests passing.
 
 ```bash
 cd apps/order-manager
 git add src/components/AddressModal.vue src/components/AddContactModal.vue src/components/tasks/BadAddressTaskCard.vue src/views/BadAddressOrders.vue
-git commit -m "refactor(seed): read geo lookups from seedIndex, drop per-country loading"
+git commit -m "refactor(seed): read geo lookups from useSeedData, drop per-country loading"
 ```
 
 ---
 
-### Task 10: Migrate list views
+### Task 9: Migrate list views
 
 **Files:**
 - Modify: `src/views/OpenOrders.vue:151-163`, `src/views/InflightOrders.vue:149-162`, `src/views/PackedOrders.vue`, `src/views/HoldOrders.vue`, `src/views/FraudOrders.vue`, `src/views/SwapOrders.vue`, `src/views/OrderSearch.vue`, `src/views/Returns.vue`, `src/views/Funnel.vue:792`, `src/components/OrderQueueList.vue`
@@ -2129,7 +2036,7 @@ git commit -m "refactor(seed): read list-view lookups from useSeedData"
 
 ---
 
-### Task 11: Migrate detail views, modals and task cards
+### Task 10: Migrate detail views, modals and task cards
 
 **Files:**
 - Modify: `src/views/OrderDetail.vue` (35 sites), `src/views/ReturnDetail.vue`, `src/views/CustomerDetail.vue`, `src/views/CreateOrder.vue:318,327`, `src/components/orders/CloneOrderModal.vue:175-176`, `src/components/orders/ManageOrderIdentificationsModal.vue`, `src/components/orders/CreateIdentificationTypeModal.vue`, `src/components/orders/RejectItemsModal.vue`, `src/components/orders/RiskAssessmentModal.vue`, `src/components/fulfillment/EditShippingMethodModal.vue:88-91`, `src/components/fulfillment/FacilityInventoryModal.vue:376,412,414`, `src/components/inventory/ProductInventoryModal.vue:29`, `src/components/swaps/CustomSwapModal.vue`, `src/components/tasks/FraudTaskCard.vue`, `src/components/tasks/SwapTaskCard.vue`, `src/components/tasks/AddOrderTaskModal.vue`, `src/components/AddRelationshipModal.vue:176,192-199`, `src/components/RelationshipHistoryModal.vue:76,109,119`
@@ -2192,7 +2099,7 @@ and replace `useSeedStore().createOrderIdentificationType(payload)` with `create
 cd apps/order-manager && grep -rn "useSeedStore" src
 ```
 
-Expected: only `src/store/seed.ts`, `src/App.vue` and `src/store/user.ts` — all handled in Task 12.
+Expected: only `src/store/seed.ts`, `src/App.vue` and `src/store/user.ts` — all handled in Task 11.
 
 - [ ] **Step 6: Run the full suite and commit**
 
@@ -2210,7 +2117,7 @@ git commit -m "refactor(seed): read detail and modal lookups from useSeedData"
 
 ---
 
-### Task 12: Delete the seed store and verify end to end
+### Task 11: Delete the seed store and verify end to end
 
 **Files:**
 - Delete: `apps/order-manager/src/store/seed.ts`, `apps/order-manager/tests/store/seed.spec.ts`
@@ -2218,7 +2125,7 @@ git commit -m "refactor(seed): read detail and modal lookups from useSeedData"
 - Create: `apps/order-manager/tests/db/syncDomainUrls.spec.ts`
 
 **Interfaces:**
-- Consumes: `seedIndex.hydrate` / `reset` (Task 6), `ORDER_MANAGER_SYNC_CATALOG` (Task 5).
+- Consumes: `resetSeedData` (Task 6), `ORDER_MANAGER_SYNC_CATALOG` (Task 5).
 - Produces: no `useSeedStore` anywhere in the app.
 
 - [ ] **Step 1: Preserve the bounded-endpoints guarantee**
@@ -2285,7 +2192,8 @@ In `src/store/user.ts`, delete the `useSeedStore` import, `await useSeedStore().
           });
 ```
 
-`seedIndex.hydrate(...)` and `seedIndex.reset()` from Task 7 stay exactly where they are.
+The `resetSeedData()` call added in Task 6 stays exactly where it is. Nothing replaces
+`initSeedDb()` — slices build on demand, so there is no boot step at all.
 
 - [ ] **Step 4: Delete the store and its spec**
 
@@ -2341,8 +2249,8 @@ git status --short   # expect only the pre-existing .gitignore / pnpm-lock.yaml 
 
 ## Self-review notes
 
-**Spec coverage.** Every section of the spec maps to a task: `dbClient` → 1; single `useDb` → 2; projection audit and `wellKnownText` → 3; drop `raw` and `shapeVersion` → 4; catalog and the Shopify domains → 5; `seedIndex` → 6; `useSeedData`, boot wiring and the `createOrderIdentificationType` write → 7; the 42 consumer files → 8–11; store deletion, the moved bounded-endpoint assertion and manual verification → 12. The spec's execution order (its seven steps) is preserved, with its step 6 split across Tasks 8–11 so each cluster is independently reviewable.
+**Spec coverage.** Every section of the spec maps to a task: `dbClient` → 1; single `useDb` → 2; projection audit and `wellKnownText` → 3; drop `raw` and `shapeVersion` → 4; catalog and the Shopify domains → 5; `useSeedData.ts`, `ensureLoaded`, `resetSeedData` and the `createOrderIdentificationType` write → 6; the 42 consumer files → 7–10; store deletion, the moved bounded-endpoint assertion and manual verification → 11. The spec's execution order is preserved, with its consumer-migration step split across Tasks 7–10 so each cluster is independently reviewable.
 
-**Deliberate deviations from the spec.** The spec names `seedIndexConfig.ts`; the catalog is reused instead, as agreed after the spec was written — no separate config file exists in this plan. The spec's `omit` mechanism is gone for the same reason: `wellKnownText` is removed from the projection itself in Task 3.
+**Deliberate deviations from the spec.** None — the spec was updated to match this plan before it was written. Both describe lazy slices inside a single `useSeedData.ts`, with no index config, no catalog-driven indexing and no boot hydration. `wellKnownText` is removed from the projection itself in Task 3 rather than omitted at index time.
 
 **Known risk.** Task 4 clears every local database once on first load after deploy. Users will see a brief re-sync. This is intentional and is the only way to evict stale `raw` blobs without a Dexie version bump.
