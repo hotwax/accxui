@@ -8,6 +8,7 @@ export * from "./projection";
 export * from "./baseDb";
 export * from "./dbClient";
 export * from "./useDb";
+export * from "./useSeedData";
 export * from "./useDbStatus";
 export * from "./sync/syncRegistry";
 export * from "./sync/workerFetch";
