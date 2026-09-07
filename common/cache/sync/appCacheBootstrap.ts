@@ -22,6 +22,8 @@ export interface BootstrapConfig {
   workerFactory: () => Worker;
   token: string;
   maargUrl: string;
+  /** OMS instance whose cache is being synced. Forwarded to the worker. */
+  omsInstance: string;
   db: BaseCacheDB;
   domains?: string[];
   baseTickMs?: number;
@@ -41,6 +43,7 @@ export async function startCacheBootstrap(config: BootstrapConfig): Promise<void
     await harnessProxy.start({
       token: config.token,
       maargUrl: config.maargUrl,
+      omsInstance: config.omsInstance,
       domains: config.domains,
       baseTickMs: config.baseTickMs,
     });
@@ -95,6 +98,8 @@ export async function resyncDomain(domain: string): Promise<void> {
       syncId: `manual-${domain}-${Date.now()}`,
       token,
       maargUrl,
+      omsInstance: commonUtil.getOMSInstanceName(),
+      now: Date.now(),
       trigger: "manual",
     });
   }
@@ -122,6 +127,8 @@ export async function resyncAll(): Promise<void> {
         syncId: `manual-all-${Date.now()}`,
         token,
         maargUrl,
+        omsInstance: commonUtil.getOMSInstanceName(),
+        now: Date.now(),
         trigger: "manual",
       });
     } catch (err) {

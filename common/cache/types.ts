@@ -57,6 +57,8 @@ export interface CachedEntity<T = Record<string, any>> {
 export interface SyncContext {
   token: string;
   now: number;
+  /** OMS instance being synced. Caches are per-OMS, and the worker cannot read it from cookies. */
+  omsInstance: string;
   [key: string]: unknown;
 }
 

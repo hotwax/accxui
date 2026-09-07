@@ -43,11 +43,11 @@ function keyOfRecord(record: any, config: SnapshotDomainConfig): string | undefi
   return key === undefined || key === null || key === "" ? undefined : String(key);
 }
 
-export function registerSnapshotDomain(config: SnapshotDomainConfig, getDb: () => BaseCacheDB): void {
+export function registerSnapshotDomain(config: SnapshotDomainConfig, getDb: (omsInstance: string) => BaseCacheDB): void {
   registerSyncDomain({
     name: config.name,
     async sync(ctx: SyncContext) {
-      const db = getDb();
+      const db = getDb(ctx.omsInstance);
       if (ctx.trigger !== "manual" && await hasSyncedThisLogin(db, config.name)) return;
 
       let rawRecords: any[] = [];
@@ -113,7 +113,7 @@ export function registerSnapshotDomain(config: SnapshotDomainConfig, getDb: () =
     },
 
     async refetchOne(pk: Record<string, unknown>, ctx: SyncContext) {
-      const db = getDb();
+      const db = getDb(ctx.omsInstance);
       const tableRef = db.table<CachedRow, string>(config.table);
 
       if (config.byPk) {
