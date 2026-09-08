@@ -1921,7 +1921,56 @@ git commit -m "feat(db)!: give the 9 composite seed entities real Dexie compound
 
 `COMMON_DB_SCHEMA` is deleted — `commonSchema.stores` is the replacement, and no app imports it.
 
-- [ ] **Step 1: Rewrite `defineAppDb.spec.ts`**
+- [ ] **Step 1: Extend `defineEntity` to accept compound secondary indexes**
+
+Company's tables carry compound SECONDARY indexes (`[configId+createdDate]` and nine more), and its
+comments record measured findings about why each exists. `defineEntity` validates each `indexes`
+entry against `fields`, and `[a+b]` is not a field name, so it must learn the form now — before any
+Company task needs it.
+
+Add to `common/tests/defineEntity.spec.ts`:
+
+```ts
+  it("accepts a compound secondary index and emits it verbatim", () => {
+    const entity = defineEntity({
+      primaryKey: "logId",
+      fields: { logId: "text", configId: "text", createdDate: "date" },
+      indexes: ["configId", "[configId+createdDate]"],
+    });
+
+    expect(entity.schema).toBe("logId, configId, [configId+createdDate]");
+  });
+
+  it("throws when a compound index names an unprojected field", () => {
+    expect(() => defineEntity({
+      primaryKey: "logId",
+      fields: { logId: "text", configId: "text" },
+      indexes: ["[configId+createdDate]"],
+    })).toThrow(/compound index "\[configId\+createdDate\]" names "createdDate"/);
+  });
+```
+
+Run `pnpm vitest run common/tests/defineEntity.spec.ts`, confirm both fail, then add this inside the
+index loop in `common/db/defineEntity.ts` — after the duplicate-index and pk-restatement checks,
+before the plain-field check:
+
+```ts
+    const compound = /^\[([A-Za-z0-9_]+(?:\+[A-Za-z0-9_]+)+)\]$/.exec(index);
+    if(compound) {
+      for (const member of compound[1].split("+")) {
+        if(!(member in def.fields)) {
+          throw new Error(
+            `[db] defineEntity: compound index "${index}" names "${member}", which is not declared in \`fields\`.`,
+          );
+        }
+      }
+      continue; // emitted verbatim; members are individually indexed only if also listed separately
+    }
+```
+
+Confirm both pass (18 tests total in this file now).
+
+- [ ] **Step 2: Rewrite `defineAppDb.spec.ts`**
 
 Replace the `composeAppSchema` and `composeAppSchema validation` describe blocks — that function is
 gone; `defineSchema.spec.ts` covers its replacements. Keep every `defineAppDb` and
@@ -2032,12 +2081,12 @@ Keep the existing `describe("defineAppDb", ...)` block (naming per instance, ref
 database, handle reuse, closing the superseded handle, `raw()` throwing without a resolver) exactly
 as it is, changing only its `defineAppDb({...})` construction to `{ suffix, schema: ownSchema }`.
 
-- [ ] **Step 2: Run test to verify it fails**
+- [ ] **Step 3: Run test to verify it fails**
 
 Run: `pnpm vitest run common/tests/defineAppDb.spec.ts`
 Expected: FAIL — `defineAppDb` still requires `seed` and rejects an `AppSchema` as `schema`.
 
-- [ ] **Step 3: Rewrite `defineAppDb.ts`**
+- [ ] **Step 4: Rewrite `defineAppDb.ts`**
 
 Replace the definition and the composition half of the file:
 
@@ -2128,7 +2177,7 @@ and change only the returned object's tail:
 Delete `composeAppSchema`, `assertDistinctSeedTables`, `ComposedAppSchema` and the
 `seedEntitiesFor`/`SeedEntity` imports.
 
-- [ ] **Step 4: Rewrite `registerSeedDomains.ts`**
+- [ ] **Step 5: Rewrite `registerSeedDomains.ts`**
 
 ```ts
 /**
@@ -2154,7 +2203,7 @@ export function registerSeedDomains(appDb: AppDb): void {
 }
 ```
 
-- [ ] **Step 5: Rewrite `commonSeedDomains.ts`**
+- [ ] **Step 6: Rewrite `commonSeedDomains.ts`**
 
 ```ts
 /**
@@ -2179,7 +2228,7 @@ export function registerCommonSeedDomains(getDb: (omsInstance: string) => BaseDB
 }
 ```
 
-- [ ] **Step 6: Delete the superseded modules and update the barrel**
+- [ ] **Step 7: Delete the superseded modules and update the barrel**
 
 ```bash
 git rm common/db/domains/seedEntities.ts common/db/domains/commonSeedEntities.ts \
@@ -2198,14 +2247,14 @@ export * from "./domains/seedSources";
 and delete `export * from "./domains/seedEntities";` and
 `export * from "./domains/commonSeedEntities";`.
 
-- [ ] **Step 7: Run the full framework suite**
+- [ ] **Step 8: Run the full framework suite**
 
 Run: `pnpm vitest run common/tests`
 Expected: PASS for every db spec — `defineEntity` 18 (16 from Task 1 plus 2 added in Task 12), `defineSchema` 15, `projection` 19,
 `dbClient` 5, `snapshotDomain.keys` 4, `commonSchema` 6, `defineAppDb` (retargeted). Only the two
 pre-existing failures remain: `commonUtil.spec.ts` (4) and `useSolrSearch.spec.ts`.
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
 git add -A common/db common/tests
@@ -2591,61 +2640,12 @@ segment of the existing schema string becomes `primaryKey`, the remaining segmen
 measured findings about why each exists. `defineEntity` validates each `indexes` entry against
 `fields`, and `[a+b]` is not a field name — so `defineEntity` needs to accept them.
 
-**Extend `defineEntity` (Repo A) for this**, rather than working around it in Company: an `indexes`
-entry matching `/^\[[A-Za-z0-9_+]+\]$/` is a compound index; validate that **each `+`-separated
-member** is a declared field, and emit it verbatim. Add this to `common/db/defineEntity.ts` with
-tests in `common/tests/defineEntity.spec.ts`, and commit it to the ROOT repo as part of this task
-(two commits, two repos):
+Repo A **Task 9 already extended `defineEntity`** to accept these: an `indexes` entry matching
+`/^\[[A-Za-z0-9_+]+\]$/` is a compound index, each `+`-separated member is validated against
+`fields`, and the entry is emitted verbatim. So declare them in `indexes` exactly as they appear in
+`COMPANY_SCHEMA` today and they will pass through unchanged.
 
-```ts
-    const compound = /^\[([A-Za-z0-9_]+(?:\+[A-Za-z0-9_]+)+)\]$/.exec(index);
-    if(compound) {
-      for (const member of compound[1].split("+")) {
-        if(!(member in def.fields)) {
-          throw new Error(
-            `[db] defineEntity: compound index "${index}" names "${member}", which is not declared in \`fields\`.`,
-          );
-        }
-      }
-      continue; // emitted verbatim; the members are individually indexed only if listed separately
-    }
-```
-
-Place it inside the index loop, after the duplicate and pk-restatement checks and before the
-plain-field check. Root-repo tests to add:
-
-```ts
-  it("accepts a compound secondary index and emits it verbatim", () => {
-    const entity = defineEntity({
-      primaryKey: "logId",
-      fields: { logId: "text", configId: "text", createdDate: "date" },
-      indexes: ["configId", "[configId+createdDate]"],
-    });
-
-    expect(entity.schema).toBe("logId, configId, [configId+createdDate]");
-  });
-
-  it("throws when a compound index names an unprojected field", () => {
-    expect(() => defineEntity({
-      primaryKey: "logId",
-      fields: { logId: "text", configId: "text" },
-      indexes: ["[configId+createdDate]"],
-    })).toThrow(/compound index "\[configId\+createdDate\]" names "createdDate"/);
-  });
-```
-
-- [ ] **Step 1: Extend `defineEntity` in the root repo, test-first**
-
-Add the two tests above to `common/tests/defineEntity.spec.ts`, run
-`pnpm vitest run common/tests/defineEntity.spec.ts` from the repo ROOT and confirm they fail, add the
-implementation above, confirm they pass, then commit in the root repo:
-
-```bash
-git add common/db/defineEntity.ts common/tests/defineEntity.spec.ts
-git commit -m "feat(db): accept compound secondary indexes in defineEntity"
-```
-
-- [ ] **Step 2: Write the failing Company test**
+- [ ] **Step 1: Write the failing Company test**
 
 Create `apps/company/tests/db/companySchema.spec.ts`:
 
@@ -2690,12 +2690,12 @@ tables, its schema string copied **verbatim** from `COMPANY_SCHEMA` in `companyD
 are single-key, so their emitted string must be byte-identical to today's apart from whitespace
 normalization to `", "` between segments.
 
-- [ ] **Step 3: Run test to verify it fails**
+- [ ] **Step 2: Run test to verify it fails**
 
 Run: `cd apps/company && pnpm test:unit companySchema`
 Expected: FAIL — cannot resolve `@/db/companySchema`.
 
-- [ ] **Step 4: Create `companySchema.ts` with the 26 single-key tables**
+- [ ] **Step 3: Create `companySchema.ts` with the 26 single-key tables**
 
 ```ts
 /**
@@ -2723,13 +2723,13 @@ Carry across every explanatory comment from both source files. Several are load-
 `productUpdateHistories` note that it is a bounded window rather than a snapshot, and the
 `facilityGroupTypes` / `enumGroupMembers` / `facilityIdentifications` PK-UNVERIFIED warnings.
 
-- [ ] **Step 5: Run test to verify it passes**
+- [ ] **Step 4: Run test to verify it passes**
 
 Run: `cd apps/company && pnpm test:unit companySchema`
 Expected: PASS for the tables present. The `dataManagerLogs`/`syncRuns`/`systemMessages`
 compound-index assertions must pass in this task — all three are single-key tables.
 
-- [ ] **Step 6: Commit (Company repo)**
+- [ ] **Step 5: Commit (Company repo)**
 
 ```bash
 cd apps/company
