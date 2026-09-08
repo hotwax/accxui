@@ -10,6 +10,8 @@
 
 **Spec:** [docs/superpowers/specs/2026-09-08-define-entity-design.md](../specs/2026-09-08-define-entity-design.md)
 
+**Scope:** 15 tasks. Tasks 1-9 are the framework (`accxui` root), Task 10 is Order Manager, Tasks 11-15 are Company. Company's own 43 tables and 17 synthetic keys convert in this plan, not a later one.
+
 ## Global Constraints
 
 - **Three separate git repos, three separate commits.** `accxui` (root), `apps/order-manager`, `apps/company` are independent repositories. A framework change and an app change can never be one commit. All three are on branch `app-db-refined`.
@@ -71,10 +73,16 @@
 
 | File | Responsibility |
 |---|---|
-| **Modify** `src/db/companyDb.ts` | New `defineAppDb` signature; the 3 compound seed picks move into Company's own schema. |
-| **Modify** `src/workers/domains/registerSeedDomains.ts` | Down-convert `Entity` to Company's own `EntityProjection` shape. |
+| **Create** `src/db/companySchema.ts` | Company's 43 own tables as `defineSchema({ <table>: defineEntity({...}) })`. Replaces `COMPANY_SCHEMA` plus the projections in `cacheEntities.ts`. |
+| **Create** `tests/db/companySchema.spec.ts`, `tests/fixtures/companySchemaAfter.json` | Emitted-string fixture and pk/index-are-projected checks for all 43. |
+| **Modify** `src/utils/db/cacheProjection.ts` | Takes `Entity`; `keyField`, `buildKey` and its duplicate `FieldKind`/`EntityProjection`/coercers deleted. Keeps `CachedRow`'s `raw` and `cachedAt`. |
+| **Modify** `src/utils/db/appCacheDb.ts` | `remove(key: DbKey)`; `defineCachedEntity(table, entity)`; the prune keys rows via `entityKeyOf`. |
+| **Modify** `src/utils/db/cacheEntities.ts` | The 17 `buildKey`s and their synthetic key fields deleted; `defineCachedEntity` calls take entities from `companySchema`. |
+| **Modify** `src/workers/domains/snapshotDomain.ts` | Takes `Entity`; key extraction via `entityKeyOf`/`canonicalKey`. |
+| **Modify** `src/db/companyDb.ts` | Composes `mergeSchemas(commonSchema.pick([...]), companySchema)`. `COMPANY_SCHEMA` deleted. |
+| **Modify** `src/workers/domains/registerSeedDomains.ts` | Passes `Entity` straight through — no down-conversion needed once Company handles compound keys. |
 
-Company keeps its own `cacheProjection.ts`, `cacheEntities.ts` and `snapshotDomain.ts` untouched — it has a parallel copy of `EntityProjection` and does not use the framework's `projectRow`. Converting Company's own 43 tables and 46 projections is a **separate plan**.
+Company's stored row shape is deliberately NOT converged with the framework's: it keeps `raw` (read in 56 places) and `cachedAt`, so it retains its own `projectRow`/`projectRows`. Only the KEY concern converges on the framework.
 
 ---
 
@@ -347,7 +355,7 @@ than a spurious "not declared" error (`a` *is* declared).
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `pnpm vitest run common/tests/defineEntity.spec.ts`
-Expected: PASS — 18 tests.
+Expected: PASS — 16 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -2193,7 +2201,7 @@ and delete `export * from "./domains/seedEntities";` and
 - [ ] **Step 7: Run the full framework suite**
 
 Run: `pnpm vitest run common/tests`
-Expected: PASS for every db spec — `defineEntity` 18, `defineSchema` 15, `projection` 19,
+Expected: PASS for every db spec — `defineEntity` 18 (16 from Task 1 plus 2 added in Task 12), `defineSchema` 15, `projection` 19,
 `dbClient` 5, `snapshotDomain.keys` 4, `commonSchema` 6, `defineAppDb` (retargeted). Only the two
 pre-existing failures remain: `commonUtil.spec.ts` (4) and `useSolrSearch.spec.ts`.
 
@@ -2381,250 +2389,607 @@ git commit -m "feat(db)!: compose the Order Manager database from commonSchema"
 
 # Repo C — Company
 
-### Task 11: Keep Company compiling against the new framework
+Company's conversion is **in scope for this plan** (changed from the original draft, which shipped a
+transitional wrapper). It is five tasks because it touches four layers: its own projection module,
+its 43 table declarations, its storage/sync layer, and its database composition.
+
+**What must NOT change.** Company's stored row is `{ ...projectedFields, raw, cachedAt }` — it keeps
+the untouched server payload, unlike the framework's `{ ...projectedFields, syncedAt }`. `.raw` is
+read in 56 places across 20+ files and `cachedAt` in 3. Company therefore keeps its **own**
+`projectRow`/`projectRows` and its own `CachedRow`. Only the *key* concern converges on the
+framework. Do not "unify" Company onto the framework's `projectRow`; that would silently drop `raw`
+and rename `cachedAt`, and it is not what this plan asks for.
+
+---
+
+### Task 11: Company's `cacheProjection.ts` learns compound keys
 
 **Files:**
-- Modify: `apps/company/src/db/companyDb.ts:38-52` (`COMPANY_SEED_ENTITIES`), `:60-198` (`COMPANY_SCHEMA`), `:200-206` (the `defineAppDb` call)
-- Modify: `apps/company/src/workers/domains/registerSeedDomains.ts`
+- Modify: `apps/company/src/utils/db/cacheProjection.ts`
+- Test: `apps/company/tests/utils/cacheProjection.spec.ts`
 
 **Interfaces:**
-- Consumes: `defineAppDb`, `commonSchema`, `defineSchema`, `defineEntity`, `mergeSchemas`, `type Entity` from Repo A.
-- Produces: `companyDb` unchanged in name and shape. `registerCompanySeedDomains(entities: readonly SeedPick[])` where `SeedPick = { name: string; table: string; projection: Entity; source: SeedSource }`.
+- Consumes: `Entity` from `@common/db/defineEntity`; `DbKey` from `@common/db/types`; `canonicalKey`, `entityKeyOf` from `@common/db/projection` (Repo A Tasks 1 and 3).
+- Produces: `projectRow(raw, entity: Entity, now): CachedRow | null`, `projectRows(rawRows, entity: Entity, now): CachedRow[]`, `isUnkeyableFetch(rawRows, entity: Entity): boolean`, `diffStaleKeys(existing: readonly DbKey[], fresh: readonly DbKey[]): DbKey[]`. `EntityProjection`, `FieldKind` and `buildKey` are deleted from this module. `CachedRow`, `toMillis`, `toCount`, `toText`, `isEffectiveNow`, `newestValue`, `keepNewerThan` are unchanged.
 
-**This task is scoped to keeping Company green, not to converting it.** Company has its own
-`EntityProjection`, `projectRows`, `diffStaleKeys` and `snapshotDomain` in
-`src/utils/db/cacheProjection.ts` and `src/workers/domains/snapshotDomain.ts`, none of which
-understand compound keys. Converting Company's own 43 tables and 46 projections is a **separate
-plan**. Its two framework touchpoints are what change here.
+Company currently duplicates the framework's `FieldKind`, `EntityProjection`, `COERCE`, and
+`diffStaleKeys`. The duplication existed because the framework's row shape differs; the *key* logic
+does not differ, so it stops being duplicated here. Import `canonicalKey` and `entityKeyOf` from
+`@common/db/projection` rather than reimplementing them — that module imports only `./types` and
+`./defineEntity`, both pure, so it is safe for Company's worker bundle.
 
-Company picks 12 seed entities, and **three of them are now compound-key**: `groupFacility`,
-`geoAssoc`, `productStoreFacility`. Company's own snapshot pipeline cannot write those, so they move
-into `COMPANY_SCHEMA` with their current synthetic-key schema strings verbatim — exactly the
-precedent already set for `facilityGroup`, `carrier`, `carrierShipmentMethod` and `shopifyShop`,
-whose comments in this file explain why each is Company-declared rather than a seed pick.
+- [ ] **Step 1: Write the failing tests**
 
-- [ ] **Step 1: Write the failing test**
-
-Create `apps/company/tests/db/companySeedPicks.spec.ts`:
+In `apps/company/tests/utils/cacheProjection.spec.ts`, replace every construction of a projection
+literal (`{ keyField: "...", fields: {...}, buildKey: ... }`) with a `defineEntity({...})` call, and
+add these cases:
 
 ```ts
-import { describe, expect, it } from "vitest";
-import { companyDb } from "@/db/companyDb";
-
-describe("Company database composition", () => {
-  it("declares every table it declared before the defineEntity change", () => {
-    // Unchanged at 55: the 3 reclaimed picks moved from the seed side to Company's own side,
-    // so 43 own + 12 picks became 46 own + 9 picks.
-    expect(companyDb.tableNames).toHaveLength(55);
-  });
-
-  it("takes only single-key seed tables, since its own pipeline cannot write compound keys", () => {
-    for (const table of ["groupFacilities", "geoAssocs", "productStoreFacilities"]) {
-      const entity = companyDb.entities[table];
-
-      expect(entity, `${table} missing`).toBeTruthy();
-      expect(entity.primaryKeyFields, `${table} must stay single-key for now`).toHaveLength(1);
-    }
-  });
-
-  it("keeps the synthetic key column on the three tables it still owns", () => {
-    expect(companyDb.schema.groupFacilities).toMatch(/^memberKey,/);
-    expect(companyDb.schema.geoAssocs).toMatch(/^geoAssocKey,/);
-    expect(companyDb.schema.productStoreFacilities).toMatch(/^storeFacilityKey,/);
-  });
-});
-```
-
-Before editing anything, record `companyDb.tableNames.length` as it stands and assert that exact
-number, so the test says "unchanged" rather than trusting the 55 above.
-
-- [ ] **Step 2: Run test to verify it fails**
-
-Run: `cd apps/company && pnpm test:unit companySeedPicks`
-Expected: FAIL — `companyDb.entities` does not exist and `companyDb.ts` does not compile against the
-new `defineAppDb`.
-
-- [ ] **Step 3: Move the three compound picks into Company's own schema**
-
-In `apps/company/src/db/companyDb.ts`, replace `COMPANY_SEED_ENTITIES` with
-`COMPANY_SEED_TABLES`. Two changes at once: drop `groupFacility`, `geoAssoc` and
-`productStoreFacility`, and rewrite the nine survivors from singular DOMAIN names
-(`productStore`, `enum`, `facility`, …) to plural TABLE names (`productStores`, `enums`,
-`facilities`, …), because `commonSchema.pick` addresses tables, not domains:
-
-```ts
-/**
- * The 9 seed tables Company takes wholesale from the framework, named by TABLE, which is how
- * `commonSchema.pick` addresses them.
- *
- * `groupFacilities`, `geoAssocs` and `productStoreFacilities` were picks until the framework gave
- * them real Dexie compound primary keys. Company's own snapshot pipeline
- * (`src/utils/db/cacheProjection.ts`, `src/workers/domains/snapshotDomain.ts`) keys rows with a
- * single synthetic string and cannot write an array key, so those three are Company-declared below
- * with their original schema strings until Company's own conversion lands. Same reasoning, and same
- * shape, as `facilityGroups`/`carriers`/`carrierShipmentMethods`/`shopifyShops`.
- */
-const COMPANY_SEED_TABLES = [
-  "productStores",
-  "enums",
-  "enumTypes",
-  "facilities",
-  "facilityTypes",
-  "geos",
-  "shipmentMethodTypes",
-  "paymentMethodTypes",
-  "roleTypes",
-] as const;
-```
-
-Add the three tables to `COMPANY_SCHEMA`, copying each schema string verbatim from the framework's
-pre-conversion `SEED_ENTITIES` (recover them from `git show HEAD~4:common/db/domains/seedEntities.ts`
-in the root repo if needed):
-
-```ts
-  // --- reclaimed seed tables: Company's pipeline needs a single synthetic key (see COMPANY_SEED_TABLES) ---
-  groupFacilities: "memberKey, facilityGroupId, facilityId, fromDate, thruDate",
-  geoAssocs: "geoAssocKey, geoId, toGeoId, geoAssocTypeEnumId",
-  productStoreFacilities: "storeFacilityKey, productStoreId, facilityId",
-```
-
-- [ ] **Step 4: Convert `COMPANY_SCHEMA` to an `AppSchema` and update the `defineAppDb` call**
-
-`COMPANY_SCHEMA` is a `Record<string, string>` of raw Dexie strings and `defineAppDb` now wants an
-`AppSchema`. Company's own tables are not being converted in this plan, so wrap them without
-re-declaring their fields — add a helper above the call:
-
-```ts
-import { defineAppDb } from "@common/db/defineAppDb";
-import { defineSchema, mergeSchemas } from "@common/db/defineSchema";
 import { defineEntity } from "@common/db/defineEntity";
-import { commonSchema } from "@common/db/domains/commonSchema";
-import type { Entity } from "@common/db/defineEntity";
 
-/**
- * Wrap a raw Dexie schema string as an Entity, pending Company's own defineEntity conversion.
- *
- * `fields` is filled from the index list rather than from a real projection, so these entities
- * carry an ACCURATE key and index set but an incomplete field map. That is sound here because
- * Company projects through its own `cacheProjection.ts`, never the framework's `projectRow` —
- * nothing reads `entity.fields` for these tables. Company's own plan replaces this with real
- * `defineEntity` declarations.
- */
-function fromSchemaString(schema: string): Entity {
-  const parts = schema.split(",").map((part) => part.trim()).filter(Boolean);
-  const [keyPath, ...indexes] = parts;
-  const primaryKey = keyPath.startsWith("[")
-    ? keyPath.slice(1, -1).split("+").join(",")
-    : keyPath;
+describe("projectRow with a compound key", () => {
+  const groupFacility = defineEntity({
+    primaryKey: "facilityGroupId,facilityId,fromDate",
+    fields: {
+      facilityGroupId: "text", facilityId: "text", facilityName: "text",
+      fromDate: "date", thruDate: "date",
+    },
+    indexes: ["facilityGroupId", "facilityId", "fromDate", "thruDate"],
+  });
 
-  const declared = [...primaryKey.split(","), ...indexes].filter((f) => !f.startsWith("["));
-  const fields = Object.fromEntries(declared.map((field) => [field, "text" as const]));
+  it("stores the key members as real fields, with no synthetic column", () => {
+    const raw = { facilityGroupId: "GRP1", facilityId: "FAC1", fromDate: 1700000000000 };
+    const row = projectRow(raw, groupFacility, 500)!;
 
-  // Compound secondary indexes ("[a+b]") are not valid `indexes` entries for defineEntity, which
-  // validates each against `fields`; they are appended to the emitted string directly instead.
-  const plainIndexes = indexes.filter((index) => !index.startsWith("["));
-  const compoundIndexes = indexes.filter((index) => index.startsWith("["));
+    expect(row.facilityGroupId).toBe("GRP1");
+    expect(row.fromDate).toBe(1700000000000);
+    expect(row.memberKey).toBeUndefined();
+  });
 
-  const entity = defineEntity({ primaryKey, fields, indexes: plainIndexes });
+  it("keeps the untouched server payload and cachedAt", () => {
+    const raw = { facilityGroupId: "GRP1", facilityId: "FAC1", fromDate: 1, extra: "kept" };
+    const row = projectRow(raw, groupFacility, 500)!;
 
-  return compoundIndexes.length === 0
-    ? entity
-    : { ...entity, schema: [entity.schema, ...compoundIndexes].join(", ") };
-}
+    expect(row.raw).toEqual(raw);
+    expect(row.cachedAt).toBe(500);
+  });
 
-const companyOwnSchema = defineSchema(
-  Object.fromEntries(
-    Object.entries(COMPANY_SCHEMA).map(([table, schema]) => [table, fromSchemaString(schema)]),
-  ),
-);
+  it("returns null when any key member is missing", () => {
+    expect(projectRow({ facilityGroupId: "GRP1", facilityId: "FAC1" }, groupFacility, 1)).toBeNull();
+  });
 
-export const companyDb = defineAppDb({
-  suffix: "CompanyDB",
-  version: 1,
-  schema: mergeSchemas(commonSchema.pick([...COMPANY_SEED_TABLES]), companyOwnSchema),
+  it("flags a fetch it can key none of", () => {
+    expect(isUnkeyableFetch([{ wrong: "shape" }], groupFacility)).toBe(true);
+  });
 });
 
-export { COMPANY_SCHEMA, COMPANY_SEED_TABLES };
+describe("diffStaleKeys with compound keys", () => {
+  it("diffs array keys by value and returns the original array form", () => {
+    const stale = diffStaleKeys([["A", "1"], ["B", "2"]], [["B", "2"]]);
+
+    expect(stale).toEqual([["A", "1"]]);
+    expect(Array.isArray(stale[0])).toBe(true);
+  });
+
+  it("still diffs scalar keys", () => {
+    expect(diffStaleKeys(["A", "B"], ["B"])).toEqual(["A"]);
+  });
+});
 ```
 
-`fromSchemaString` must preserve Company's compound **secondary** indexes verbatim — 8 of its tables
-have them (`dataManagerLogs`, `systemMessages`, `serviceJobRuns`, `syncRuns`,
-`productUpdateHistories`, `shopifyInventoryAdjustmentDetails`, `inventoryChannels`,
-`netSuiteDecisionRules`, `netSuiteRuleGroupRuns`, `productStoreShippingMethods`) and losing one is a
-silent performance regression on the sync-monitoring screens whose comments in this file document
-measured findings.
+- [ ] **Step 2: Run tests to verify they fail**
 
-- [ ] **Step 5: Update Company's seed domain adapter**
+Run: `cd apps/company && pnpm test:unit cacheProjection`
+Expected: FAIL — `projectRow` still looks for `projection.keyField`, so the compound cases return
+rows keyed on `undefined` or throw.
 
-Replace `apps/company/src/workers/domains/registerSeedDomains.ts`'s import and signature. The long
-comment explaining why Company does **not** use the framework's `registerSeedDomains` stays verbatim
-— it is still true and still load-bearing:
+- [ ] **Step 3: Rewrite the key half of `cacheProjection.ts`**
+
+Replace the `FieldKind` type, the `EntityProjection` interface and `COERCE` with imports, keeping the
+`structured` behaviour note as a comment on the import (the framework's `COERCE` already has the same
+four kinds and the same `structured` pass-through):
 
 ```ts
 import type { Entity } from "@common/db/defineEntity";
-import type { SeedSource } from "@common/db/domains/seedSources";
-import { registerSnapshotDomain } from "./snapshotDomain";
+import type { DbKey, FieldKind } from "@common/db/types";
+import { canonicalKey, entityKeyOf, toCount, toMillis, toText } from "@common/db/projection";
 
-export interface SeedPick {
-  /** Sync domain name, from the framework's SEED_SOURCES. */
-  name: string;
-  table: string;
-  projection: Entity;
-  /** The framework's SEED_SOURCES[table].source, spread into the domain config below. */
-  source: SeedSource;
-}
+export type { FieldKind };
+```
 
+Delete Company's local `toMillis`/`toCount`/`toText` definitions and re-export the framework's
+instead, so there is one coercion implementation:
+
+```ts
+export { toCount, toMillis, toText };
+```
+
+Rewrite `projectRow` — the only difference from the framework's is the row tail:
+
+```ts
 /**
- * ... existing comment block, unchanged ...
+ * Project one raw server record into a cached row. Returns null when the record cannot be keyed —
+ * for a compound key that means ANY member failed to project.
  *
- * The framework's Entity carries `primaryKeyFields`; Company's own EntityProjection wants a single
- * `keyField`. Every table Company picks is single-key (see COMPANY_SEED_TABLES in companyDb.ts), so
- * the down-conversion below is exact — and the assertion makes a future compound pick a loud
- * failure rather than a table that silently never writes.
+ * Unlike the framework's `projectRow`, this keeps `raw` (the untouched server object) and stamps
+ * `cachedAt`. 56 read sites across the app reach into `row.raw`, so that field is load-bearing.
  */
-export function registerCompanySeedDomains(entities: readonly SeedPick[]): void {
-  for (const entity of entities) {
-    if(entity.projection.primaryKeyFields.length !== 1) {
-      throw new Error(
-        `[company] Seed pick "${entity.name}" has a compound primary key, which Company's own ` +
-        "snapshot pipeline cannot write. Declare it in COMPANY_SCHEMA instead.",
-      );
-    }
-
-    registerSnapshotDomain({
-      name: entity.name,
-      table: entity.table,
-      projection: {
-        keyField: entity.projection.primaryKeyFields[0],
-        fields: entity.projection.fields,
-        ...(entity.projection.rename ? { rename: entity.projection.rename } : {}),
-      },
-      ...entity.source,
-    } as Parameters<typeof registerSnapshotDomain>[0]);
+export function projectRow(
+  raw: Record<string, unknown>,
+  entity: Entity,
+  now: number,
+): CachedRow | null {
+  const row: Record<string, unknown> = {};
+  for (const [field, kind] of Object.entries(entity.fields)) {
+    const source = raw?.[field] !== undefined ? field : entity.rename?.[field] ?? field;
+    const value = COERCE[kind](raw?.[source]);
+    if (value !== undefined) row[field] = value;
   }
+
+  for (const field of entity.primaryKeyFields) {
+    if (row[field] === undefined) return null;
+  }
+
+  return { ...row, raw, cachedAt: now } as CachedRow;
 }
 ```
 
-Then update this function's caller to build `SeedPick[]` from `companyDb.entities` plus the
-framework's `SEED_SOURCES`. Find it with:
+Keep `COERCE` local only if the framework does not export it; if it does not, import the four
+coercers and build the same four-entry map, with the existing `structured` comment preserved
+verbatim — it documents a real bug (`String()` turning a nested payload into
+`"[object Object],[object Object]"`).
 
-```bash
-grep -rn "registerCompanySeedDomains" apps/company/src
+Retype `projectRows` and `isUnkeyableFetch` to take `entity: Entity`, and replace `diffStaleKeys`:
+
+```ts
+export function diffStaleKeys(existingKeys: readonly DbKey[], freshKeys: readonly DbKey[]): DbKey[] {
+  const fresh = new Set(freshKeys.map(canonicalKey));
+  return existingKeys.filter((key) => !fresh.has(canonicalKey(key)));
+}
 ```
 
-- [ ] **Step 6: Run the full Company suite**
+`isEffectiveNow`, `newestValue` and `keepNewerThan` are untouched. Keep every existing doc comment
+on them — several record measured live findings.
 
-Run: `cd apps/company && pnpm test:unit`
-Expected: PASS. This is the real gate — Company has the largest suite of the three repos. Record the
-total and compare it against the pre-task count; any drop means a spec stopped being collected rather
-than passing.
+- [ ] **Step 4: Run tests to verify they pass**
 
-- [ ] **Step 7: Commit (Company repo)**
+Run: `cd apps/company && pnpm test:unit cacheProjection`
+Expected: PASS.
+
+- [ ] **Step 5: Commit**
 
 ```bash
 cd apps/company
-git add src/db/companyDb.ts src/workers/domains/registerSeedDomains.ts tests/db/companySeedPicks.spec.ts
-git commit -m "fix(db): keep Company compiling against AppSchema-based defineAppDb"
+git add src/utils/db/cacheProjection.ts tests/utils/cacheProjection.spec.ts
+git commit -m "feat(db)!: key cached rows by Entity, supporting compound primary keys"
+```
+
+---
+
+### Task 12: Company's 26 single-key tables → `companySchema.ts`
+
+**Files:**
+- Create: `apps/company/src/db/companySchema.ts`
+- Test: `apps/company/tests/db/companySchema.spec.ts`, `apps/company/tests/fixtures/companySchemaAfter.json`
+
+**Interfaces:**
+- Consumes: `defineEntity`, `defineSchema` (Repo A Tasks 1–2).
+- Produces: `companySchema: AppSchema`. Task 13 extends it; Task 15 composes it.
+
+**The authority for what each table's key and indexes are is `COMPANY_SCHEMA` in
+`apps/company/src/db/companyDb.ts`** — the existing Dexie string per table. **The authority for each
+table's `fields` map is the matching projection in `apps/company/src/utils/db/cacheEntities.ts`.**
+Move both verbatim; add no field and change no `FieldKind`.
+
+For the 26 tables in this task, the conversion is mechanical, exactly as in Repo A Task 7: the first
+segment of the existing schema string becomes `primaryKey`, the remaining segments become `indexes`.
+
+**Compound SECONDARY indexes must be preserved.** Ten of Company's tables carry them
+(`dataManagerLogs`, `systemMessages`, `serviceJobRuns`, `syncRuns`, `productUpdateHistories`,
+`shopifyInventoryAdjustmentDetails`, `inventoryChannels`, `netSuiteDecisionRules`,
+`netSuiteRuleGroupRuns`, `productStoreShippingMethods`), and their comments in `companyDb.ts` record
+measured findings about why each exists. `defineEntity` validates each `indexes` entry against
+`fields`, and `[a+b]` is not a field name — so `defineEntity` needs to accept them.
+
+**Extend `defineEntity` (Repo A) for this**, rather than working around it in Company: an `indexes`
+entry matching `/^\[[A-Za-z0-9_+]+\]$/` is a compound index; validate that **each `+`-separated
+member** is a declared field, and emit it verbatim. Add this to `common/db/defineEntity.ts` with
+tests in `common/tests/defineEntity.spec.ts`, and commit it to the ROOT repo as part of this task
+(two commits, two repos):
+
+```ts
+    const compound = /^\[([A-Za-z0-9_]+(?:\+[A-Za-z0-9_]+)+)\]$/.exec(index);
+    if(compound) {
+      for (const member of compound[1].split("+")) {
+        if(!(member in def.fields)) {
+          throw new Error(
+            `[db] defineEntity: compound index "${index}" names "${member}", which is not declared in \`fields\`.`,
+          );
+        }
+      }
+      continue; // emitted verbatim; the members are individually indexed only if listed separately
+    }
+```
+
+Place it inside the index loop, after the duplicate and pk-restatement checks and before the
+plain-field check. Root-repo tests to add:
+
+```ts
+  it("accepts a compound secondary index and emits it verbatim", () => {
+    const entity = defineEntity({
+      primaryKey: "logId",
+      fields: { logId: "text", configId: "text", createdDate: "date" },
+      indexes: ["configId", "[configId+createdDate]"],
+    });
+
+    expect(entity.schema).toBe("logId, configId, [configId+createdDate]");
+  });
+
+  it("throws when a compound index names an unprojected field", () => {
+    expect(() => defineEntity({
+      primaryKey: "logId",
+      fields: { logId: "text", configId: "text" },
+      indexes: ["[configId+createdDate]"],
+    })).toThrow(/compound index "\[configId\+createdDate\]" names "createdDate"/);
+  });
+```
+
+- [ ] **Step 1: Extend `defineEntity` in the root repo, test-first**
+
+Add the two tests above to `common/tests/defineEntity.spec.ts`, run
+`pnpm vitest run common/tests/defineEntity.spec.ts` from the repo ROOT and confirm they fail, add the
+implementation above, confirm they pass, then commit in the root repo:
+
+```bash
+git add common/db/defineEntity.ts common/tests/defineEntity.spec.ts
+git commit -m "feat(db): accept compound secondary indexes in defineEntity"
+```
+
+- [ ] **Step 2: Write the failing Company test**
+
+Create `apps/company/tests/db/companySchema.spec.ts`:
+
+```ts
+import { describe, expect, it } from "vitest";
+import { companySchema } from "@/db/companySchema";
+import after from "../fixtures/companySchemaAfter.json";
+
+describe("companySchema", () => {
+  it("emits the intended Dexie string for every table it declares", () => {
+    for (const [table, schema] of Object.entries(after.schema)) {
+      expect(companySchema.stores[table], `${table}`).toBe(schema);
+    }
+  });
+
+  it("declares every primary-key field and every index member as a projected field", () => {
+    for (const [table, entity] of Object.entries(companySchema.entities)) {
+      for (const field of entity.primaryKeyFields) {
+        expect(entity.fields[field], `${table}: pk field ${field} not projected`).toBeTruthy();
+      }
+      for (const index of entity.indexes) {
+        const members = index.startsWith("[") ? index.slice(1, -1).split("+") : [index];
+        for (const member of members) {
+          expect(entity.fields[member], `${table}: index member ${member} not projected`).toBeTruthy();
+        }
+      }
+    }
+  });
+
+  it("preserves every compound secondary index", () => {
+    expect(companySchema.stores.dataManagerLogs).toContain("[configId+createdDate]");
+    expect(companySchema.stores.dataManagerLogs).toContain("[configId+finishDateTime]");
+    expect(companySchema.stores.syncRuns).toContain("[shopId+systemMessageTypeId+initDate]");
+    expect(companySchema.stores.syncRuns).toContain("[shopId+configId+initDate]");
+    expect(companySchema.stores.systemMessages).toContain("[systemMessageRemoteId+systemMessageTypeId+initDate]");
+  });
+});
+```
+
+Create `apps/company/tests/fixtures/companySchemaAfter.json` holding, for each of this task's 26
+tables, its schema string copied **verbatim** from `COMPANY_SCHEMA` in `companyDb.ts` — these tables
+are single-key, so their emitted string must be byte-identical to today's apart from whitespace
+normalization to `", "` between segments.
+
+- [ ] **Step 3: Run test to verify it fails**
+
+Run: `cd apps/company && pnpm test:unit companySchema`
+Expected: FAIL — cannot resolve `@/db/companySchema`.
+
+- [ ] **Step 4: Create `companySchema.ts` with the 26 single-key tables**
+
+```ts
+/**
+ * Company's own tables, each declared exactly once.
+ *
+ * Keyed by IndexedDB store name. Replaces the split between `COMPANY_SCHEMA`'s hand-written Dexie
+ * strings in `companyDb.ts` and the projections in `src/utils/db/cacheEntities.ts` — the two could
+ * disagree, and nothing checked them against each other.
+ *
+ * Deep imports, never the `@common/db` barrel: the sync worker reaches this file and Vite must emit
+ * that chunk as a single iife.
+ */
+
+import { defineEntity } from "@common/db/defineEntity";
+import { defineSchema } from "@common/db/defineSchema";
+
+export const companySchema = defineSchema({
+  // ... 26 entities, each defineEntity({ primaryKey, fields, indexes }) ...
+});
+```
+
+Carry across every explanatory comment from both source files. Several are load-bearing: the
+`syncRuns` block explaining why the shop-scoped cursor exists, the
+`shopifyInventoryAdjustmentDetails` block on its four-part identity, the
+`productUpdateHistories` note that it is a bounded window rather than a snapshot, and the
+`facilityGroupTypes` / `enumGroupMembers` / `facilityIdentifications` PK-UNVERIFIED warnings.
+
+- [ ] **Step 5: Run test to verify it passes**
+
+Run: `cd apps/company && pnpm test:unit companySchema`
+Expected: PASS for the tables present. The `dataManagerLogs`/`syncRuns`/`systemMessages`
+compound-index assertions must pass in this task — all three are single-key tables.
+
+- [ ] **Step 6: Commit (Company repo)**
+
+```bash
+cd apps/company
+git add src/db/companySchema.ts tests/db/companySchema.spec.ts tests/fixtures/companySchemaAfter.json
+git commit -m "feat(db): declare Company's single-key tables via defineEntity"
+```
+
+---
+
+### Task 13: Company's 17 compound-key tables
+
+**Files:**
+- Modify: `apps/company/src/db/companySchema.ts`
+- Modify: `apps/company/tests/fixtures/companySchemaAfter.json`
+- Modify: `apps/company/src/utils/db/cacheEntities.ts` (delete the 17 `buildKey`s and their synthetic key fields)
+
+**Interfaces:**
+- Consumes: Task 12's `companySchema`.
+- Produces: `companySchema` complete at 43 tables. `cacheEntities.ts` no longer defines any `buildKey`.
+
+**The 17 tables and their synthetic key fields**, from `keyField:` in `cacheEntities.ts`:
+
+`organizationRelationships` (`relationshipKey`), `groupFacilities` (`memberKey`), `shopifyLocations`
+(`locationKey`), `shopifyInventoryAdjustmentDetails` (`adjustmentKey`), `shopifyTypeMappings`
+(`typeMappingKey`), `inventoryEventDocuments` (`documentFeedKey`), `carrierShipmentMethods`
+(`carrierShipmentMethodKey`), `carrierFacilities` (`carrierFacilityKey`), `shopifyCarrierShipments`
+(`carrierShipmentKey`), `enumGroupMembers` (`enumGroupMemberKey`), `facilityIdentifications`
+(`facilityIdentificationKey`), `geoAssocs` (`geoAssocKey`), `productStoreFacilities`
+(`storeFacilityKey`), `systemMessageErrors` (`errorKey`), `productUpdateHistories` (`updateKey`),
+`facilityGroupProductStores` (`facilityGroupProductStoreKey`), `appVersions` (`appVersionKey`).
+
+**The conversion rule is mechanical and its source of truth is in the file.** Each projection's
+`buildKey` joins the composite fields with `|`, in order, and each projection's doc comment states
+the real entity PK in prose. For example:
+
+```ts
+/**
+ * FacilityGroupAndMember — date-effective association with a COMPOSITE natural key
+ * (facilityGroupId + facilityId + fromDate), so the cache stores a synthetic `memberKey`.
+ */
+buildKey: (raw) => `${group}|${facility}|${raw?.fromDate ?? ""}`
+```
+
+becomes `primaryKey: "facilityGroupId,facilityId,fromDate"`, with `memberKey` deleted from `fields`.
+
+For each of the 17: read its `buildKey`, take the fields it joins **in join order** as `primaryKey`,
+delete the synthetic field from `fields`, and set `indexes` to the old schema string's segments minus
+the synthetic key. Cross-check the result against the doc comment's stated PK; if the two disagree,
+STOP and report it rather than guessing — a disagreement means one of them is already wrong.
+
+**Where `buildKey` tolerated a missing trailing member** (the `?? ""` pattern — present in
+`groupFacilities`, `systemMessageErrors`, `facilityGroupProductStores` and others), a compound key
+cannot. Default to making the field a required key member, which is correct when the server
+genuinely always supplies it. Confirm each against a live response where one is available; where the
+endpoint returns an empty 200 (`enumGroupMembers`, `facilityIdentifications`) keep the implied key and
+carry the existing PK-UNVERIFIED comment across. If a field is genuinely optional, drop it from
+`primaryKey` and record why in the commit message — never reintroduce a synthetic column.
+
+**Where `buildKey` read an alternative source field** (a `a || b` fallback), express it as `rename`,
+as Repo A Task 8 did for `geoAssocs` and `productStoreShipmentMethods`.
+
+- [ ] **Step 1: Extend the fixture**
+
+For each of the 17, add its intended emitted string to
+`apps/company/tests/fixtures/companySchemaAfter.json`, in the form
+`"[<pk members joined by +>], <indexes>"`. Derive each from the rule above before writing any
+implementation — the fixture is the specification for this task.
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `cd apps/company && pnpm test:unit companySchema`
+Expected: FAIL — `companySchema.stores` is missing all 17.
+
+- [ ] **Step 3: Add the 17 entities and delete the 17 `buildKey`s**
+
+Append the 17 `defineEntity` calls to `companySchema.ts`, then remove from `cacheEntities.ts` every
+`buildKey` function and every synthetic key field in the corresponding `fields` maps. Leave the rest
+of `cacheEntities.ts` in place — Task 15 retargets what remains of it.
+
+- [ ] **Step 4: Run the tests**
+
+Run: `cd apps/company && pnpm test:unit companySchema cacheProjection`
+Expected: PASS. Add to `companySchema.spec.ts`:
+
+```ts
+  it("has no synthetic key column left anywhere", () => {
+    for (const [table, entity] of Object.entries(companySchema.entities)) {
+      expect(entity.fieldNames.filter((f) => /Key$/.test(f)), `${table}`).toEqual([]);
+    }
+  });
+```
+
+- [ ] **Step 5: Commit (Company repo)**
+
+```bash
+cd apps/company
+git add src/db/companySchema.ts src/utils/db/cacheEntities.ts tests/db/companySchema.spec.ts tests/fixtures/companySchemaAfter.json
+git commit -m "feat(db)!: give Company's 17 composite tables real Dexie compound keys"
+```
+
+---
+
+### Task 14: `appCacheDb.ts` and Company's `snapshotDomain.ts` learn array keys
+
+**Files:**
+- Modify: `apps/company/src/utils/db/appCacheDb.ts:134` (`remove`), `:174` (`defineCachedEntity`), `:191-198` (the prune), `:295-297`
+- Modify: `apps/company/src/workers/domains/snapshotDomain.ts:24` and its key-extraction sites
+- Test: `apps/company/tests/utils/cacheEntities.spec.ts` (or the nearest existing appCacheDb test), `apps/company/tests/workers/snapshotDomain.*.spec.ts`
+
+**Interfaces:**
+- Consumes: `DbKey`, `entityKeyOf`, `canonicalKey` (Repo A Task 3); Company's retyped `cacheProjection` (Task 11).
+- Produces: `CachedEntity.remove(key: DbKey)`, `defineCachedEntity(table, entity: Entity)`. No other signature changes.
+
+Three concrete sites in `appCacheDb.ts`:
+
+1. `remove(key: string)` in the `CachedEntity` interface and its implementation → `key: DbKey`, and
+   `dexieTable().delete(key as any)`.
+2. `defineCachedEntity(table: CacheTableName, projection: EntityProjection)` →
+   `(table: CacheTableName, entity: Entity)`, and the `Table<CachedRow, string>` generic →
+   `Table<CachedRow, DbKey>`.
+3. The prune at `:191-198` currently reads
+   `rows.map((row) => String(row[projection.keyField]))` against `primaryKeys()`. Replace the map
+   with `entityKeyOf`, dropping unkeyable rows, and leave `primaryKeys()` as-is — Dexie already
+   returns arrays for a compound-key store:
+
+```ts
+        const existingKeys = (scope
+          ? await dexieTable().where(scope.field).equals(scope.value as any).primaryKeys()
+          : await dexieTable().toCollection().primaryKeys()) as DbKey[];
+
+        const freshKeys: DbKey[] = [];
+        for (const row of rows) {
+          const key = entityKeyOf(row, entity);
+          if (key !== undefined) freshKeys.push(key);
+        }
+
+        const stale = diffStaleKeys(existingKeys, freshKeys);
+        if (stale.length) await dexieTable().bulkDelete(stale as any[]);
+```
+
+In Company's `src/workers/domains/snapshotDomain.ts`, change `projection: EntityProjection` to
+`projection: Entity` at `:24` and replace every `String(row[projection.keyField])` and any local
+`keyOfRecord` with `entityKeyOf` + `canonicalKey`, exactly as Repo A Task 6 did for the framework's
+copy. Where a key feeds a `Set` for dedup it must be `canonicalKey(...)` (a string); where it feeds
+`bulkDelete`/`delete`/`get` it must be the `DbKey` itself.
+
+The existing worker specs construct projection literals inline
+(`projection: { keyField: "jobName", fields: { jobName: "text" } }` and similar in
+`snapshotDomain.refetchEnvelope.spec.ts`, `snapshotDomain.wipeGuard.spec.ts`,
+`snapshotDomain.fanOutScope.spec.ts`, `organizationDomain.spec.ts`). Convert each to
+`defineEntity({ primaryKey: "...", fields: {...} })`. The one in `snapshotDomain.fanOutScope.spec.ts`
+uses `buildKey` for `storeMethodKey` — convert it to the equivalent compound `primaryKey`.
+
+- [ ] **Step 1: Convert the affected worker specs, run them, confirm they fail**
+
+Run: `cd apps/company && pnpm test:unit snapshotDomain organizationDomain`
+Expected: FAIL — `defineCachedEntity` and Company's `snapshotDomain` still expect `keyField`.
+
+- [ ] **Step 2: Apply the three `appCacheDb.ts` changes and the `snapshotDomain.ts` changes**
+
+As specified above.
+
+- [ ] **Step 3: Add a compound-key prune test**
+
+Add to the appCacheDb/cacheEntities spec a case proving the prune deletes by array key: seed a
+compound-key table with two rows, snapshot a fresh set containing only one, and assert the other is
+gone. This is the case that silently deleted everything if `diffStaleKeys` compared arrays by
+identity, so it is worth an explicit test.
+
+- [ ] **Step 4: Run the full Company suite**
+
+Run: `cd apps/company && pnpm test:unit`
+Expected: PASS. Record the total and compare against the pre-task count.
+
+- [ ] **Step 5: Commit (Company repo)**
+
+```bash
+cd apps/company
+git add src/utils/db/appCacheDb.ts src/workers/domains/snapshotDomain.ts tests/
+git commit -m "feat(db)!: store and prune Company's cached rows by compound key"
+```
+
+---
+
+### Task 15: Compose Company's database; return the three reclaimed seed picks
+
+**Files:**
+- Modify: `apps/company/src/db/companyDb.ts`
+- Modify: `apps/company/src/workers/domains/registerSeedDomains.ts`
+- Modify: `apps/company/src/utils/db/cacheEntities.ts` (its `defineCachedEntity` calls now pass entities from `companySchema`)
+- Test: `apps/company/tests/db/companyDb.spec.ts`
+
+**Interfaces:**
+- Consumes: `defineAppDb`, `commonSchema`, `mergeSchemas` (Repo A Tasks 2 and 9); `companySchema` (Tasks 12–13); `SEED_SOURCES` (Repo A Task 7).
+- Produces: `companyDb` unchanged in name and exported shape. `COMPANY_SCHEMA` is deleted — `companySchema` replaces it. `registerCompanySeedDomains(entities: readonly SeedPick[])` where `SeedPick = { name: string; table: string; projection: Entity; source: SeedSource }`.
+
+Because Company now handles compound keys, **`groupFacilities`, `geoAssocs` and
+`productStoreFacilities` stay framework seed picks** — the original draft's reclaiming of them into
+Company's own schema is no longer needed and must NOT be done. Company's pick list keeps all 12
+entries, rewritten from singular domain names to plural TABLE names, because `commonSchema.pick`
+addresses tables:
+
+```ts
+const COMPANY_SEED_TABLES = [
+  "productStores", "enums", "enumTypes", "facilities", "facilityTypes",
+  "groupFacilities", "geos", "geoAssocs", "shipmentMethodTypes",
+  "paymentMethodTypes", "roleTypes", "productStoreFacilities",
+] as const;
+```
+
+Those three tables must therefore NOT also appear in `companySchema` — `mergeSchemas` throws on a
+table claimed twice, which is the check that catches it. If Task 12 or 13 declared them in
+`companySchema`, remove them here and note it in the commit message.
+
+Compose:
+
+```ts
+export const companyDb = defineAppDb({
+  suffix: "CompanyDB",
+  version: 1,
+  schema: mergeSchemas(commonSchema.pick([...COMPANY_SEED_TABLES]), companySchema),
+});
+```
+
+Retarget `cacheEntities.ts`: every `defineCachedEntity("<table>", <table>Projection)` call becomes
+`defineCachedEntity("<table>", companySchema.entities["<table>"])`, and the now-unused projection
+consts are deleted. Keep every doc comment that sits on a `defineCachedEntity` call or explains a
+table's semantics; move a comment that documents an entity's *fields* to that entity in
+`companySchema.ts` rather than deleting it.
+
+Update `registerSeedDomains.ts` to accept `SeedPick[]` built from `companyDb.entities` plus the
+framework's `SEED_SOURCES`, and pass `entity.projection` straight through — no down-conversion is
+needed now, because Company's `snapshotDomain` takes an `Entity`. Keep the long comment explaining
+why Company does not use the framework's `registerSeedDomains`; it is still true and still
+load-bearing. Find its caller with `grep -rn "registerCompanySeedDomains" apps/company/src`.
+
+- [ ] **Step 1: Update `companyDb.spec.ts`, run it, confirm it fails**
+
+Assert that `companyDb.tableNames` still has the same count it had before this plan started (record
+the number first), that all 12 seed tables are present, and that
+`companyDb.entities.groupFacilities.primaryKeyFields` has length 3 — proving the seed pick, not a
+Company-local copy, is what got composed.
+
+Run: `cd apps/company && pnpm test:unit companyDb`
+Expected: FAIL.
+
+- [ ] **Step 2: Apply the changes above**
+
+- [ ] **Step 3: Run the full Company suite**
+
+Run: `cd apps/company && pnpm test:unit`
+Expected: PASS. This is the real gate — Company has the largest suite of the three repos. Compare the
+total against the pre-task count; a drop means a spec stopped being collected rather than passing.
+
+- [ ] **Step 4: Commit (Company repo)**
+
+```bash
+cd apps/company
+git add src/db/companyDb.ts src/db/companySchema.ts src/utils/db/cacheEntities.ts src/workers/domains/registerSeedDomains.ts tests/
+git commit -m "feat(db)!: compose the Company database from commonSchema and companySchema"
 ```
 
 ---
@@ -2635,12 +3000,17 @@ git commit -m "fix(db): keep Company compiling against AppSchema-based defineApp
 - [ ] `cd apps/order-manager && pnpm test:unit` — passes, at the same or higher test count as before.
 - [ ] `cd apps/company && pnpm test:unit` — passes, at the same or higher test count as before.
 - [ ] `grep -rn "buildKey\|EntityProjection" common/db` returns nothing.
+- [ ] `grep -rn "buildKey\|EntityProjection" apps/company/src` returns nothing.
+- [ ] `grep -rn "keyField" apps/company/src` returns nothing.
+- [ ] `apps/company/src/db/companyDb.ts` no longer defines `COMPANY_SCHEMA`; `companySchema.ts` owns the declarations.
+- [ ] Company's `.raw` and `cachedAt` row fields still exist — `grep -c "raw," apps/company/src/utils/db/cacheProjection.ts` is non-zero.
 - [ ] `grep -rn "memberKey\|geoAssocKey\|carrierShipmentMethodKey\|transitionKey\|storeFacilityKey\|storeFacilityGroupKey\|storeShipmentMethodKey\|locationKey\|emailSettingKey" common/db` returns nothing.
-- [ ] Three commits in three repos, all on `app-db-refined`.
+- [ ] Commits in all three repos, all on `app-db-refined`.
 - [ ] `common/tests/fixtures/seedBefore.json`'s `domainNames` assertion still passes — no domain was renamed.
 
 ## Deferred (not this plan)
 
-- **Company's own conversion.** Its 43 tables and 46 projections moving to `defineEntity`, its ~12 synthetic keys (`errorKey`, `updateKey`, `adjustmentKey`, `relationshipKey`, `appVersionKey`, `carrierFacilityKey`, `documentFeedKey`, `typeMappingKey`, `carrierShipmentKey`, `facilityGroupProductStoreKey`, `enumGroupMemberKey`, `facilityIdentificationKey`) becoming compound, teaching `cacheProjection.ts`/`snapshotDomain.ts` compound keys, and returning `groupFacilities`/`geoAssocs`/`productStoreFacilities` to seed picks. Carries two decisions the spec records but this plan cannot reach: `systemMessageErrors` making `errorDate` a required key member, and the three tables whose PKs are marked UNVERIFIED in `companyDb.ts` (`enumGroupMembers`, `facilityIdentifications`, `facilityGroupTypes`), whose endpoints return an empty 200 on the available instance. Its own spec and plan.
+- **Unifying Company onto the framework's `projectRow`.** Company's stored row keeps `raw` (the untouched server payload, read in 56 places) and stamps `cachedAt`; the framework's keeps neither. Converging the two row shapes is a separate, larger change and is explicitly NOT part of this plan — Tasks 11-15 converge only the KEY concern.
+- **Company's three PK-UNVERIFIED tables.** `enumGroupMembers`, `facilityIdentifications` and `facilityGroupTypes` return an empty 200 on the available OMS instance, so their natural keys still cannot be confirmed. Task 13 converts them to their implied compound keys and carries the warning comment across; confirming them needs an instance with data.
 - **Typed rows from `fieldNames`.** `Entity.fieldNames` makes a `Record<fieldName, ...>` row type derivable, which would let `useDb` return typed records instead of `Record<string, any>`. Out of scope; nothing here depends on it.
 - **Retiring `registerCommonSeedDomains`.** Now that `registerSeedDomains(appDb)` covers every case, the all-29 helper has no caller left in either app. Deleting it is a separate cleanup.
