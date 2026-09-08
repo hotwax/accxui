@@ -19,6 +19,15 @@
     "contactMechPurposeTypes": "contactMechPurposeTypeId",
     "communicationEventTypes": "communicationEventTypeId",
     "partyRelationshipTypes": "partyRelationshipTypeId",
-    "shopifyShops": "shopId, productStoreId, shopifyShopId"
+    "shopifyShops": "shopId, productStoreId, shopifyShopId",
+    "groupFacilities": "[facilityGroupId+facilityId+fromDate], facilityGroupId, facilityId, fromDate, thruDate",
+    "geoAssocs": "[geoId+toGeoId], geoId, toGeoId, geoAssocTypeEnumId",
+    "carrierShipmentMethods": "[partyId+shipmentMethodTypeId], partyId, shipmentMethodTypeId",
+    "statusFlowTransitions": "[statusFlowId+statusId+toStatusId], statusId, toStatusId, statusFlowId",
+    "productStoreFacilities": "[productStoreId+facilityId], productStoreId, facilityId",
+    "productStoreFacilityGroups": "[productStoreId+facilityGroupId], productStoreId, facilityGroupId",
+    "productStoreShipmentMethods": "productStoreShipMethId, productStoreId, shipmentMethodTypeId, partyId",
+    "productStoreEmailSettings": "[productStoreId+emailTypeEnumId], productStoreId, emailTypeEnumId",
+    "shopifyShopLocations": "[shopId+shopifyLocationId], shopId, facilityId, shopifyLocationId"
   }
 }

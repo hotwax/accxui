@@ -178,4 +178,120 @@ export const commonSchema = defineSchema({
     },
     indexes: ["productStoreId", "shopifyShopId"],
   }),
+
+  groupFacilities: defineEntity({
+    // Real compound key. OFBiz FacilityGroupMember is (facilityGroupId, facilityId, fromDate);
+    // the old synthetic `memberKey` joined those three into one string.
+    primaryKey: "facilityGroupId,facilityId,fromDate",
+    fields: {
+      facilityGroupId: "text",
+      facilityId: "text",
+      facilityName: "text",
+      facilityGroupName: "text",
+      facilityTypeId: "text",
+      fromDate: "date",
+      thruDate: "date",
+    },
+    indexes: ["facilityGroupId", "facilityId", "fromDate", "thruDate"],
+  }),
+
+  geoAssocs: defineEntity({
+    primaryKey: "geoId,toGeoId",
+    fields: {
+      geoId: "text",
+      toGeoId: "text",
+      geoAssocTypeEnumId: "text",
+    },
+    indexes: ["geoId", "toGeoId", "geoAssocTypeEnumId"],
+    // The list response names the far side `geoIdTo` on some routes.
+    rename: { toGeoId: "geoIdTo" },
+  }),
+
+  carrierShipmentMethods: defineEntity({
+    primaryKey: "partyId,shipmentMethodTypeId",
+    fields: {
+      partyId: "text",
+      shipmentMethodTypeId: "text",
+      roleTypeId: "text",
+      sequenceNumber: "count",
+    },
+    indexes: ["partyId", "shipmentMethodTypeId"],
+  }),
+
+  statusFlowTransitions: defineEntity({
+    primaryKey: "statusFlowId,statusId,toStatusId",
+    fields: {
+      statusId: "text",
+      toStatusId: "text",
+      statusFlowId: "text",
+      transitionSequence: "count",
+    },
+    indexes: ["statusId", "toStatusId", "statusFlowId"],
+  }),
+
+  productStoreFacilities: defineEntity({
+    primaryKey: "productStoreId,facilityId",
+    fields: {
+      productStoreId: "text",
+      facilityId: "text",
+      facilityName: "text",
+      facilityTypeId: "text",
+      sequenceNum: "count",
+      fromDate: "date",
+    },
+    indexes: ["productStoreId", "facilityId"],
+  }),
+
+  productStoreFacilityGroups: defineEntity({
+    primaryKey: "productStoreId,facilityGroupId",
+    fields: {
+      productStoreId: "text",
+      facilityGroupId: "text",
+      fromDate: "date",
+    },
+    indexes: ["productStoreId", "facilityGroupId"],
+  }),
+
+  productStoreShipmentMethods: defineEntity({
+    // OFBiz ProductStoreShipmentMeth is keyed by a SURROGATE id, not by the natural triple, and
+    // Company's own `productStoreShippingMethods` table already keys on it. The old synthetic
+    // `storeShipmentMethodKey` joined productStore + method + party, and tolerated NO party at
+    // all (`partyId || carrierPartyId || ""`), so a natural compound key would have had to either
+    // drop carrier-less rows or collide on them. The surrogate avoids both.
+    primaryKey: "productStoreShipMethId",
+    fields: {
+      productStoreShipMethId: "text",
+      productStoreId: "text",
+      shipmentMethodTypeId: "text",
+      partyId: "text",
+      carrierPartyId: "text",
+      description: "text",
+    },
+    indexes: ["productStoreId", "shipmentMethodTypeId", "partyId"],
+    // Some routes name the carrier only `carrierPartyId`; keep `partyId` populated either way.
+    rename: { partyId: "carrierPartyId" },
+  }),
+
+  productStoreEmailSettings: defineEntity({
+    primaryKey: "productStoreId,emailTypeEnumId",
+    fields: {
+      productStoreId: "text",
+      emailTypeEnumId: "text",
+      subject: "text",
+      bodyScreenLocation: "text",
+      systemMessageRemoteId: "text",
+    },
+    indexes: ["productStoreId", "emailTypeEnumId"],
+    rename: { emailTypeEnumId: "emailType" },
+  }),
+
+  shopifyShopLocations: defineEntity({
+    primaryKey: "shopId,shopifyLocationId",
+    fields: {
+      shopId: "text",
+      facilityId: "text",
+      shopifyLocationId: "text",
+    },
+    indexes: ["shopId", "facilityId", "shopifyLocationId"],
+  }),
 });
