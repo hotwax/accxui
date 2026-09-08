@@ -11,11 +11,11 @@
 
 import { liveQuery, type Observable, type Table } from "dexie";
 import type { BaseDB } from "./baseDb";
-import type { QueryOptions } from "./types";
+import type { DbKey, QueryOptions } from "./types";
 
 export interface DbClient {
-  get<T = Record<string, any>>(table: string, key: string): Promise<T | undefined>;
-  getMany<T = Record<string, any>>(table: string, keys: string[]): Promise<T[]>;
+  get<T = Record<string, any>>(table: string, key: DbKey): Promise<T | undefined>;
+  getMany<T = Record<string, any>>(table: string, keys: DbKey[]): Promise<T[]>;
   all<T = Record<string, any>>(table: string): Promise<T[]>;
   query<T = Record<string, any>>(table: string, options?: QueryOptions): Promise<T[]>;
   first<T = Record<string, any>>(table: string, options?: QueryOptions): Promise<T | undefined>;
@@ -23,8 +23,8 @@ export interface DbClient {
 
   put(table: string, record: unknown): Promise<void>;
   bulkPut(table: string, records: unknown[]): Promise<void>;
-  remove(table: string, key: string): Promise<void>;
-  bulkRemove(table: string, keys: string[]): Promise<void>;
+  remove(table: string, key: DbKey): Promise<void>;
+  bulkRemove(table: string, keys: DbKey[]): Promise<void>;
   clear(table: string): Promise<void>;
   transaction<T>(mode: "r" | "rw", tables: string[], fn: () => Promise<T>): Promise<T>;
 
@@ -65,12 +65,16 @@ function buildQuery(tableRef: Table<any, string>, options: QueryOptions = {}) {
 }
 
 export function dbClient(db: BaseDB): DbClient {
-  const tableOf = (table: string) => db.table<any, string>(table);
+  const tableOf = (table: string) => db.table<any, DbKey>(table);
 
   return {
     async get(table, key) {
-      if (!key) return undefined;
-      return tableOf(table).get(key);
+      // `!key` is wrong for a compound key: [] is truthy, and so is every valid array key.
+      const missing = key === undefined || key === null || key === ""
+        || (Array.isArray(key) && key.length === 0);
+      if (missing) return undefined;
+
+      return tableOf(table).get(key as any);
     },
     async getMany(table, keys) {
       if (!keys.length) return [];
