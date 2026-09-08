@@ -3,15 +3,16 @@
  */
 
 import { BaseDB, hasSyncedThisLogin, markSyncedThisLogin } from "../baseDb";
-import { diffStaleKeys, isUnkeyableFetch, projectRows } from "../projection";
-import type { DbRow, EntityProjection, SyncContext } from "../types";
+import type { Entity } from "../defineEntity";
+import { canonicalKey, diffStaleKeys, entityKeyOf, isUnkeyableFetch, projectRow, projectRows } from "../projection";
+import type { DbKey, DbRow, SyncContext } from "../types";
 import { registerSyncDomain } from "./syncRegistry";
 import { pageAll, unwrapCollection, workerGet } from "./workerFetch";
 
 export interface SnapshotDomainConfig {
   name: string;
   table: string;
-  projection: EntityProjection;
+  projection: Entity;
   listUrl: string;
   collectionKey?: string | null;
   listParams?: Record<string, unknown>;
@@ -36,11 +37,30 @@ export interface SnapshotDomainConfig {
   };
 }
 
-function keyOfRecord(record: any, config: SnapshotDomainConfig): string | undefined {
-  const key = config.projection.buildKey
-    ? config.projection.buildKey(record)
-    : record?.[config.projection.keyField];
-  return key === undefined || key === null || key === "" ? undefined : String(key);
+/**
+ * The cross-page dedup key pageAll needs: a canonical STRING, not a DbKey, because it goes into a
+ * Set. Derived by projecting the raw record first, so it is impossible for the dedup key and the
+ * key the row is eventually stored under to disagree.
+ *
+ * Exported so it can be tested directly; takes the Entity rather than the whole config so the test
+ * needs no fetch config to exercise it.
+ */
+export function snapshotKeyOf(record: any, entity: Entity): string | undefined {
+  const row = projectRow(record, entity, 0);
+  if (!row) return undefined;
+
+  const key = entityKeyOf(row, entity);
+  return key === undefined ? undefined : canonicalKey(key);
+}
+
+/** The stored keys of already-projected rows, dropping any that cannot be keyed. */
+function keysOfRows(rows: DbRow[], entity: Entity): DbKey[] {
+  const keys: DbKey[] = [];
+  for (const row of rows) {
+    const key = entityKeyOf(row, entity);
+    if (key !== undefined) keys.push(key);
+  }
+  return keys;
 }
 
 export function registerSnapshotDomain(config: SnapshotDomainConfig, getDb: (omsInstance: string) => BaseDB): void {
@@ -64,7 +84,7 @@ export function registerSnapshotDomain(config: SnapshotDomainConfig, getDb: (oms
             collectionKey: config.fanOut.collectionKey ?? config.collectionKey,
             batchSize: config.batchSize ?? 250,
             unpaged: config.unpaged,
-            keyOf: (r) => keyOfRecord(r, config),
+            keyOf: (r) => snapshotKeyOf(r, config.projection),
           });
           rawRecords.push(...fanRows);
         }
@@ -76,7 +96,7 @@ export function registerSnapshotDomain(config: SnapshotDomainConfig, getDb: (oms
           params: config.listParams,
           batchSize: config.batchSize ?? 250,
           unpaged: config.unpaged,
-          keyOf: (r) => keyOfRecord(r, config),
+          keyOf: (r) => snapshotKeyOf(r, config.projection),
         });
       }
 
@@ -86,17 +106,17 @@ export function registerSnapshotDomain(config: SnapshotDomainConfig, getDb: (oms
       }
 
       const freshRows = projectRows(rawRecords, config.projection, ctx.now);
-      const freshKeys = freshRows.map((r) => String(r[config.projection.keyField]));
+      const freshKeys = keysOfRows(freshRows, config.projection);
 
       await db.transaction("rw", [config.table, "syncMeta"], async () => {
-        const tableRef = db.table<DbRow, string>(config.table);
-        let existingKeys: string[] = [];
+        const tableRef = db.table<DbRow, DbKey>(config.table);
+        let existingKeys: DbKey[] = [];
 
         if (config.scopeOnSync) {
           const scoped = await tableRef.where(config.scopeOnSync.field).equals(config.scopeOnSync.value as any).toArray();
-          existingKeys = scoped.map((r) => String(r[config.projection.keyField]));
+          existingKeys = keysOfRows(scoped, config.projection);
         } else {
-          existingKeys = (await tableRef.toCollection().primaryKeys()) as string[];
+          existingKeys = (await tableRef.toCollection().primaryKeys()) as DbKey[];
         }
 
         const staleKeys = diffStaleKeys(existingKeys, freshKeys);
@@ -114,7 +134,7 @@ export function registerSnapshotDomain(config: SnapshotDomainConfig, getDb: (oms
 
     async refetchOne(pk: Record<string, unknown>, ctx: SyncContext) {
       const db = getDb(ctx.omsInstance);
-      const tableRef = db.table<DbRow, string>(config.table);
+      const tableRef = db.table<DbRow, DbKey>(config.table);
 
       if (config.byPk) {
         const target = config.byPk(pk);
@@ -138,19 +158,19 @@ export function registerSnapshotDomain(config: SnapshotDomainConfig, getDb: (oms
           collectionKey: config.collectionKey,
           params: scopeConfig.params,
           batchSize: config.batchSize ?? 250,
-          keyOf: (r) => keyOfRecord(r, config),
+          keyOf: (r) => snapshotKeyOf(r, config.projection),
         });
 
         const freshRows = projectRows(scopedRecords, config.projection, ctx.now);
-        const freshKeys = freshRows.map((r) => String(r[config.projection.keyField]));
+        const freshKeys = keysOfRows(freshRows, config.projection);
 
         await db.transaction("rw", [config.table], async () => {
-          let existingKeys: string[] = [];
+          let existingKeys: DbKey[] = [];
           if (scopeConfig.scope) {
             const scoped = await tableRef.where(scopeConfig.scope.field).equals(scopeConfig.scope.value as any).toArray();
-            existingKeys = scoped.map((r) => String(r[config.projection.keyField]));
+            existingKeys = keysOfRows(scoped, config.projection);
           } else {
-            existingKeys = (await tableRef.toCollection().primaryKeys()) as string[];
+            existingKeys = (await tableRef.toCollection().primaryKeys()) as DbKey[];
           }
 
           const staleKeys = diffStaleKeys(existingKeys, freshKeys);
