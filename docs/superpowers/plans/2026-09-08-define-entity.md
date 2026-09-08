@@ -2932,7 +2932,15 @@ git commit -m "feat(db): declare Company's single-key tables via defineEntity"
 **Files:**
 - Modify: `apps/company/src/db/companySchema.ts`
 - Modify: `apps/company/tests/fixtures/companySchemaAfter.json`
-- Modify: `apps/company/src/utils/db/cacheEntities.ts` (delete the 17 `buildKey`s and their synthetic key fields)
+- Modify: `apps/company/tests/db/companySchema.spec.ts`
+
+**Deliberately NOT `cacheEntities.ts`.** An earlier draft had this task delete its `buildKey`s here.
+That would break Company's projections mid-sequence: `cacheProjection.projectRow` still reads
+`keyField`/`buildKey` until Task 13, so removing a `buildKey` while leaving that reader in place
+makes `projectRow` fall back to a synthetic field that no longer exists, return `null`, and silently
+drop every row for those tables — with a red suite unable to show it. Task 15 deletes those
+projections wholesale when `cacheEntities.ts` retargets onto the composed entities, which is one
+coherent change instead of two broken halves.
 
 **Interfaces:**
 - Consumes: Task 12's `companySchema`.
@@ -3008,16 +3016,16 @@ implementation — the fixture is the specification for this task.
 Run: `cd apps/company && pnpm test:unit companySchema`
 Expected: FAIL — `companySchema.stores` is missing all 17.
 
-- [ ] **Step 3: Add the 17 entities and delete the 17 `buildKey`s**
+- [ ] **Step 3: Add the 14 entities**
 
-Append the 17 `defineEntity` calls to `companySchema.ts`, then remove from `cacheEntities.ts` every
-`buildKey` function and every synthetic key field in the corresponding `fields` maps. Leave the rest
-of `cacheEntities.ts` in place — Task 15 retargets what remains of it.
+Append the 14 `defineEntity` calls to `companySchema.ts`. Leave `cacheEntities.ts` completely
+untouched — Task 15 owns it.
 
 - [ ] **Step 4: Run the tests**
 
-Run: `cd apps/company && pnpm test:unit companySchema cacheProjection`
-Expected: PASS. Add to `companySchema.spec.ts`:
+Run: `cd apps/company && pnpm vitest run tests/db/companySchema.spec.ts`
+Expected: PASS, now covering all 43 tables. Do NOT run the full suite — 30 spec files still cannot
+collect until Task 15. Add to `companySchema.spec.ts`:
 
 ```ts
   it("has no synthetic key column left anywhere", () => {
@@ -3031,8 +3039,8 @@ Expected: PASS. Add to `companySchema.spec.ts`:
 
 ```bash
 cd apps/company
-git add src/db/companySchema.ts src/utils/db/cacheEntities.ts tests/db/companySchema.spec.ts tests/fixtures/companySchemaAfter.json
-git commit -m "feat(db)!: give Company's 17 composite tables real Dexie compound keys"
+git add src/db/companySchema.ts tests/db/companySchema.spec.ts tests/fixtures/companySchemaAfter.json
+git commit -m "feat(db)!: give Company's 14 composite tables real Dexie compound keys"
 ```
 
 ---
