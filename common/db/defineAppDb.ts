@@ -1,127 +1,31 @@
 /**
  * Declarative single-database creation for AccxUI apps.
  *
- * An app declares which seed entities it wants and which tables are its own; this module
- * composes the schema, creates one database per OMS instance, and exposes the accessors.
+ * An app composes an `AppSchema` — picked seed tables merged with its own via `mergeSchemas` — and
+ * this module creates one database per OMS instance from it, and exposes the accessors.
  *
  * Imports are deliberately narrow — `dexie`, `baseDb`, `dbClient` and plain seed data. It must
  * never import the `@common/db` barrel or anything pulling in `vue`, because app db modules are
  * imported by sync workers whose chunk Vite emits as a single iife.
  */
 
+import type { AppSchema } from "./defineSchema";
+import type { Entity } from "./defineEntity";
 import type { SyncDomainCatalogItem } from "./useDbStatus";
-import { type SeedEntity, type SeedEntityName, seedEntitiesFor } from "./domains/seedEntities";
+import { SEED_SOURCES } from "./domains/seedSources";
 import { BaseDB } from "./baseDb";
 import { type DbClient, dbClient } from "./dbClient";
 
 export interface AppDbDefinition {
   /** Name suffix: "CompanyDB" produces `{omsInstance}-CompanyDB`. */
   suffix: string;
-  /** Seed entities this app wants. Each contributes a table, a projection, a domain and a status row. */
-  seed: readonly SeedEntityName[];
-  /** The app's own tables, as Dexie schema strings. */
-  schema: Record<string, string>;
   /**
-   * Extra secondary indexes on a PICKED seed table, appended after the seed's own.
-   * The seed primary key and indexes are preserved, so a pick can be widened but never redefined.
+   * Dexie schema version. Additive changes — a new table, an added or removed secondary index —
+   * upgrade in place on a bump. A changed primary key cannot; see BaseDB's constructor.
    */
-  extendIndexes?: Record<string, string>;
-}
-
-export interface ComposedAppSchema {
-  /** Picked seed tables merged with the app's own. `syncMeta` is not included — BaseDB adds it. */
-  schema: Record<string, string>;
-  seed: SeedEntity[];
-  /** Derived from `seed`, so it can never list a different set. */
-  statusCatalog: SyncDomainCatalogItem[];
-}
-
-/**
- * Validates that no two seed entities claim the same table.
- * Throws if a clash is found.
- */
-export function assertDistinctSeedTables(entities: SeedEntity[]): void {
-  const byTable = new Map<string, SeedEntity>();
-  for (const entity of entities) {
-    const clash = byTable.get(entity.table);
-    if(clash) {
-      throw new Error(
-        `[db] defineAppDb: seed entities "${clash.name}" and "${entity.name}" both claim table "${entity.table}".`,
-      );
-    }
-    byTable.set(entity.table, entity);
-  }
-}
-
-export function composeAppSchema(def: AppDbDefinition): ComposedAppSchema {
-  if(!def.suffix) {
-    throw new Error("[db] defineAppDb: a non-empty `suffix` is required.");
-  }
-
-  const seed = seedEntitiesFor(def.seed);
-
-  assertDistinctSeedTables(seed);
-
-  const byTable = new Map<string, SeedEntity>();
-  for (const entity of seed) {
-    byTable.set(entity.table, entity);
-  }
-
-  if("syncMeta" in def.schema) {
-    throw new Error('[db] defineAppDb: "syncMeta" is provided by BaseDB and must not be declared.');
-  }
-
-  for (const table of Object.keys(def.schema)) {
-    const picked = byTable.get(table);
-    if(picked) {
-      throw new Error(
-        `[db] defineAppDb: table "${table}" is declared in \`schema\` but is already provided by ` +
-        `seed entity "${picked.name}". Use \`extendIndexes\` to add indexes to a picked seed table.`,
-      );
-    }
-  }
-
-  const schema: Record<string, string> = {};
-  for (const entity of seed) {
-    schema[entity.table] = entity.schema;
-  }
-
-  for (const [table, extra] of Object.entries(def.extendIndexes ?? {})) {
-    const picked = byTable.get(table);
-    if(!picked) {
-      throw new Error(
-        `[db] defineAppDb: extendIndexes names "${table}", which is not a picked seed table.`,
-      );
-    }
-
-    const existing = picked.schema.split(",").map((part) => part.trim()).filter(Boolean);
-    const primaryKey = existing[0];
-    const added = extra.split(",").map((part) => part.trim()).filter(Boolean);
-
-    for (const index of added) {
-      if(index === primaryKey) {
-        throw new Error(
-          `[db] defineAppDb: extendIndexes for "${table}" must not restate the primary key "${primaryKey}".`,
-        );
-      }
-    }
-
-    const merged = [...existing, ...added.filter((index) => !existing.includes(index))];
-    schema[table] = merged.join(", ");
-  }
-
-  Object.assign(schema, def.schema);
-
-  return {
-    schema,
-    seed,
-    statusCatalog: seed.map((entity) => ({
-      name: entity.name,
-      table: entity.table,
-      label: entity.label,
-      syncClass: "B" as const,
-    })),
-  };
+  version?: number;
+  /** The composed schema: `commonSchema.pick([...])` merged with the app's own via `mergeSchemas`. */
+  schema: AppSchema;
 }
 
 export interface AppDb {
@@ -136,18 +40,34 @@ export interface AppDb {
   /** DbClient for the signed-in instance, resolved per call so reads follow a switch. */
   client(): DbClient;
   readonly schema: Record<string, string>;
-  readonly seed: SeedEntity[];
-  /** The composed data tables. Excludes `syncMeta`, which BaseDB injects — use `raw().getTableNames()` for that. */
+  readonly entities: Record<string, Entity>;
+  /** The composed data tables. Excludes `syncMeta`, which BaseDB injects. */
   readonly tableNames: string[];
+  /** One entry per composed table that has a seed source. The app's own tables are absent. */
   readonly statusCatalog: SyncDomainCatalogItem[];
 }
 
 export function defineAppDb(def: AppDbDefinition): AppDb {
-  const composed = composeAppSchema(def);
+  if(!def.suffix) {
+    throw new Error("[db] defineAppDb: a non-empty `suffix` is required.");
+  }
+
+  const stores = def.schema.stores;
+  const version = def.version ?? 1;
+
+  // Derived from the composed tables, so it can never list a table the database does not have.
+  const statusCatalog: SyncDomainCatalogItem[] = Object.keys(stores)
+    .filter((table) => table in SEED_SOURCES)
+    .map((table) => ({
+      name: SEED_SOURCES[table as keyof typeof SEED_SOURCES].name,
+      table,
+      label: SEED_SOURCES[table as keyof typeof SEED_SOURCES].label,
+      syncClass: "B" as const,
+    }));
 
   class AppDatabase extends BaseDB {
     constructor(dbName: string) {
-      super(dbName, composed.schema);
+      super(dbName, stores, version);
     }
   }
 
@@ -189,9 +109,9 @@ export function defineAppDb(def: AppDbDefinition): AppDb {
     },
     raw,
     client: () => dbClient(raw()),
-    schema: composed.schema,
-    seed: composed.seed,
-    tableNames: Object.keys(composed.schema),
-    statusCatalog: composed.statusCatalog,
+    schema: stores,
+    entities: def.schema.entities,
+    tableNames: Object.keys(stores),
+    statusCatalog,
   };
 }

@@ -111,4 +111,22 @@ describe("defineEntity validation", () => {
       defineEntity({ primaryKey: "a", fields: { a: "text", b: "text" }, indexes: ["b", "b"] }),
     ).toThrow(/duplicate index "b"/);
   });
+
+  it("accepts a compound secondary index and emits it verbatim", () => {
+    const entity = defineEntity({
+      primaryKey: "logId",
+      fields: { logId: "text", configId: "text", createdDate: "date" },
+      indexes: ["configId", "[configId+createdDate]"],
+    });
+
+    expect(entity.schema).toBe("logId, configId, [configId+createdDate]");
+  });
+
+  it("throws when a compound index names an unprojected field", () => {
+    expect(() => defineEntity({
+      primaryKey: "logId",
+      fields: { logId: "text", configId: "text" },
+      indexes: ["[configId+createdDate]"],
+    })).toThrow(/compound index "\[configId\+createdDate\]" names "createdDate"/);
+  });
 });

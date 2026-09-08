@@ -1,18 +1,19 @@
 /**
  * Register all 29 seed domains. Kept for backwards compatibility.
  *
- * Prefer `registerSeedDomains(appDb)`, which registers exactly the entities the app declared.
+ * Prefer `registerSeedDomains(appDb)`, which registers exactly the tables the app composed.
  */
 
 import { registerSnapshotDomain } from "../sync/snapshotDomain";
 import type { BaseDB } from "../baseDb";
-import { SEED_ENTITIES, SEED_ENTITY_NAMES } from "./seedEntities";
+import { commonSchema } from "./commonSchema";
+import { SEED_SOURCES, SEED_TABLE_NAMES } from "./seedSources";
 
 export function registerCommonSeedDomains(getDb: (omsInstance: string) => BaseDB): void {
-  for (const name of SEED_ENTITY_NAMES) {
-    const entity = SEED_ENTITIES[name];
+  for (const table of SEED_TABLE_NAMES) {
+    const seed = SEED_SOURCES[table];
     registerSnapshotDomain(
-      { name: entity.name, table: entity.table, projection: entity.projection, ...entity.source },
+      { name: seed.name, table, projection: commonSchema.entities[table], ...seed.source },
       getDb,
     );
   }

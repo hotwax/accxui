@@ -97,6 +97,18 @@ export function defineEntity(def: EntityDefinition): Entity {
       );
     }
 
+    const compound = /^\[([A-Za-z0-9_]+(?:\+[A-Za-z0-9_]+)+)\]$/.exec(index);
+    if(compound) {
+      for (const member of compound[1].split("+")) {
+        if(!(member in def.fields)) {
+          throw new Error(
+            `[db] defineEntity: compound index "${index}" names "${member}", which is not declared in \`fields\`.`,
+          );
+        }
+      }
+      continue; // emitted verbatim; members are individually indexed only if also listed separately
+    }
+
     if(!(index in def.fields)) {
       throw new Error(
         `[db] defineEntity: index "${index}" is not declared in \`fields\`. ` +
