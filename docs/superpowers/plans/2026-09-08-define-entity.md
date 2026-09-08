@@ -10,7 +10,7 @@
 
 **Spec:** [docs/superpowers/specs/2026-09-08-define-entity-design.md](../specs/2026-09-08-define-entity-design.md)
 
-**Scope:** 16 tasks (Task 9b was added during execution — see its rationale). Tasks 1-9 are the framework (`accxui` root), Task 10 is Order Manager, Tasks 11-15 are Company. Company's own 43 tables and 17 synthetic keys convert in this plan, not a later one.
+**Scope:** 16 tasks (Task 9b added during execution; Company's Tasks 11-15 resequenced by testability — see the order note under Repo C). Tasks 1-9 are the framework (`accxui` root), Task 10 is Order Manager, Tasks 11-15 are Company. Company's own 43 tables and 17 synthetic keys convert in this plan, not a later one.
 
 ## Global Constraints
 
@@ -2786,171 +2786,19 @@ and rename `cachedAt`, and it is not what this plan asks for.
 
 ---
 
-### Task 11: Company's `cacheProjection.ts` learns compound keys
 
-**Files:**
-- Modify: `apps/company/src/utils/db/cacheProjection.ts`
-- Test: `apps/company/tests/utils/cacheProjection.spec.ts`
+> **Order note (revised during execution).** Company's tasks were resequenced by TESTABILITY.
+> Measured fact: `apps/company/src/db/companyDb.ts` still calls `defineAppDb` with the OLD option
+> shape, so `def.schema.stores` is `undefined` and `Object.keys(undefined)` throws at module load.
+> Every file that transitively imports `companyDb` therefore fails to COLLECT — 30 of 82 spec
+> files, including `tests/utils/cacheProjection.spec.ts`, which reaches it via a single
+> `dataFeedProjection` import from `cacheEntities`. So the projection work could not be validated
+> first. `companySchema.ts` is pure and its own spec imports only itself, so it goes first; the
+> suite only returns to green at Task 15, when `companyDb.ts` finally composes.
+> **Company baseline while red: 30 failed / 52 passed (82 files); 53 failed / 437 passed (494
+> tests). Static inventory: 82 spec files, 591 `it()` calls — that is the real target.**
 
-**Interfaces:**
-- Consumes: `Entity` from `@common/db/defineEntity`; `DbKey` from `@common/db/types`; `canonicalKey`, `entityKeyOf` from `@common/db/projection` (Repo A Tasks 1 and 3).
-- Produces: `projectRow(raw, entity: Entity, now): CachedRow | null`, `projectRows(rawRows, entity: Entity, now): CachedRow[]`, `isUnkeyableFetch(rawRows, entity: Entity): boolean`, `diffStaleKeys(existing: readonly DbKey[], fresh: readonly DbKey[]): DbKey[]`. `EntityProjection`, `FieldKind` and `buildKey` are deleted from this module. `CachedRow`, `toMillis`, `toCount`, `toText`, `isEffectiveNow`, `newestValue`, `keepNewerThan` are unchanged.
-
-Company currently duplicates the framework's `FieldKind`, `EntityProjection`, `COERCE`, and
-`diffStaleKeys`. The duplication existed because the framework's row shape differs; the *key* logic
-does not differ, so it stops being duplicated here. Import `canonicalKey` and `entityKeyOf` from
-`@common/db/projection` rather than reimplementing them — that module imports only `./types` and
-`./defineEntity`, both pure, so it is safe for Company's worker bundle.
-
-- [ ] **Step 1: Write the failing tests**
-
-In `apps/company/tests/utils/cacheProjection.spec.ts`, replace every construction of a projection
-literal (`{ keyField: "...", fields: {...}, buildKey: ... }`) with a `defineEntity({...})` call, and
-add these cases:
-
-```ts
-import { defineEntity } from "@common/db/defineEntity";
-
-describe("projectRow with a compound key", () => {
-  const groupFacility = defineEntity({
-    primaryKey: "facilityGroupId,facilityId,fromDate",
-    fields: {
-      facilityGroupId: "text", facilityId: "text", facilityName: "text",
-      fromDate: "date", thruDate: "date",
-    },
-    indexes: ["facilityGroupId", "facilityId", "fromDate", "thruDate"],
-  });
-
-  it("stores the key members as real fields, with no synthetic column", () => {
-    const raw = { facilityGroupId: "GRP1", facilityId: "FAC1", fromDate: 1700000000000 };
-    const row = projectRow(raw, groupFacility, 500)!;
-
-    expect(row.facilityGroupId).toBe("GRP1");
-    expect(row.fromDate).toBe(1700000000000);
-    expect(row.memberKey).toBeUndefined();
-  });
-
-  it("keeps the untouched server payload and cachedAt", () => {
-    const raw = { facilityGroupId: "GRP1", facilityId: "FAC1", fromDate: 1, extra: "kept" };
-    const row = projectRow(raw, groupFacility, 500)!;
-
-    expect(row.raw).toEqual(raw);
-    expect(row.cachedAt).toBe(500);
-  });
-
-  it("returns null when any key member is missing", () => {
-    expect(projectRow({ facilityGroupId: "GRP1", facilityId: "FAC1" }, groupFacility, 1)).toBeNull();
-  });
-
-  it("flags a fetch it can key none of", () => {
-    expect(isUnkeyableFetch([{ wrong: "shape" }], groupFacility)).toBe(true);
-  });
-});
-
-describe("diffStaleKeys with compound keys", () => {
-  it("diffs array keys by value and returns the original array form", () => {
-    const stale = diffStaleKeys([["A", "1"], ["B", "2"]], [["B", "2"]]);
-
-    expect(stale).toEqual([["A", "1"]]);
-    expect(Array.isArray(stale[0])).toBe(true);
-  });
-
-  it("still diffs scalar keys", () => {
-    expect(diffStaleKeys(["A", "B"], ["B"])).toEqual(["A"]);
-  });
-});
-```
-
-- [ ] **Step 2: Run tests to verify they fail**
-
-Run: `cd apps/company && pnpm test:unit cacheProjection`
-Expected: FAIL — `projectRow` still looks for `projection.keyField`, so the compound cases return
-rows keyed on `undefined` or throw.
-
-- [ ] **Step 3: Rewrite the key half of `cacheProjection.ts`**
-
-Replace the `FieldKind` type, the `EntityProjection` interface and `COERCE` with imports, keeping the
-`structured` behaviour note as a comment on the import (the framework's `COERCE` already has the same
-four kinds and the same `structured` pass-through):
-
-```ts
-import type { Entity } from "@common/db/defineEntity";
-import type { DbKey, FieldKind } from "@common/db/types";
-import { canonicalKey, entityKeyOf, toCount, toMillis, toText } from "@common/db/projection";
-
-export type { FieldKind };
-```
-
-Delete Company's local `toMillis`/`toCount`/`toText` definitions and re-export the framework's
-instead, so there is one coercion implementation:
-
-```ts
-export { toCount, toMillis, toText };
-```
-
-Rewrite `projectRow` — the only difference from the framework's is the row tail:
-
-```ts
-/**
- * Project one raw server record into a cached row. Returns null when the record cannot be keyed —
- * for a compound key that means ANY member failed to project.
- *
- * Unlike the framework's `projectRow`, this keeps `raw` (the untouched server object) and stamps
- * `cachedAt`. 56 read sites across the app reach into `row.raw`, so that field is load-bearing.
- */
-export function projectRow(
-  raw: Record<string, unknown>,
-  entity: Entity,
-  now: number,
-): CachedRow | null {
-  const row: Record<string, unknown> = {};
-  for (const [field, kind] of Object.entries(entity.fields)) {
-    const source = raw?.[field] !== undefined ? field : entity.rename?.[field] ?? field;
-    const value = COERCE[kind](raw?.[source]);
-    if (value !== undefined) row[field] = value;
-  }
-
-  for (const field of entity.primaryKeyFields) {
-    if (row[field] === undefined) return null;
-  }
-
-  return { ...row, raw, cachedAt: now } as CachedRow;
-}
-```
-
-Keep `COERCE` local only if the framework does not export it; if it does not, import the four
-coercers and build the same four-entry map, with the existing `structured` comment preserved
-verbatim — it documents a real bug (`String()` turning a nested payload into
-`"[object Object],[object Object]"`).
-
-Retype `projectRows` and `isUnkeyableFetch` to take `entity: Entity`, and replace `diffStaleKeys`:
-
-```ts
-export function diffStaleKeys(existingKeys: readonly DbKey[], freshKeys: readonly DbKey[]): DbKey[] {
-  const fresh = new Set(freshKeys.map(canonicalKey));
-  return existingKeys.filter((key) => !fresh.has(canonicalKey(key)));
-}
-```
-
-`isEffectiveNow`, `newestValue` and `keepNewerThan` are untouched. Keep every existing doc comment
-on them — several record measured live findings.
-
-- [ ] **Step 4: Run tests to verify they pass**
-
-Run: `cd apps/company && pnpm test:unit cacheProjection`
-Expected: PASS.
-
-- [ ] **Step 5: Commit**
-
-```bash
-cd apps/company
-git add src/utils/db/cacheProjection.ts tests/utils/cacheProjection.spec.ts
-git commit -m "feat(db)!: key cached rows by Entity, supporting compound primary keys"
-```
-
----
-
-### Task 12: Company's 26 single-key tables → `companySchema.ts`
+### Task 11: Company's 26 single-key tables → `companySchema.ts`
 
 **Files:**
 - Create: `apps/company/src/db/companySchema.ts`
@@ -3027,8 +2875,13 @@ normalization to `", "` between segments.
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd apps/company && pnpm test:unit companySchema`
+Run: `cd apps/company && pnpm vitest run tests/db/companySchema.spec.ts`
 Expected: FAIL — cannot resolve `@/db/companySchema`.
+
+Use the targeted `vitest run <file>` form throughout Tasks 11-14, NOT the whole suite: 30 of 82
+spec files cannot collect until Task 15 fixes `companyDb.ts`, so a full-suite run tells you nothing
+about your own work. `companySchema.spec.ts` imports only `companySchema`, which is pure, so it
+collects and passes independently.
 
 - [ ] **Step 3: Create `companySchema.ts` with the 26 single-key tables**
 
@@ -3074,7 +2927,7 @@ git commit -m "feat(db): declare Company's single-key tables via defineEntity"
 
 ---
 
-### Task 13: Company's 17 compound-key tables
+### Task 12: Company's 17 compound-key tables
 
 **Files:**
 - Modify: `apps/company/src/db/companySchema.ts`
@@ -3163,6 +3016,178 @@ Expected: PASS. Add to `companySchema.spec.ts`:
 cd apps/company
 git add src/db/companySchema.ts src/utils/db/cacheEntities.ts tests/db/companySchema.spec.ts tests/fixtures/companySchemaAfter.json
 git commit -m "feat(db)!: give Company's 17 composite tables real Dexie compound keys"
+```
+
+---
+
+### Task 13: Company's `cacheProjection.ts` learns compound keys
+
+**Files:**
+- Modify: `apps/company/src/utils/db/cacheProjection.ts`
+- Test: `apps/company/tests/utils/cacheProjection.spec.ts`
+
+**Interfaces:**
+- Consumes: `Entity` from `@common/db/defineEntity`; `DbKey` from `@common/db/types`; `canonicalKey`, `entityKeyOf` from `@common/db/projection` (Repo A Tasks 1 and 3).
+- Produces: `projectRow(raw, entity: Entity, now): CachedRow | null`, `projectRows(rawRows, entity: Entity, now): CachedRow[]`, `isUnkeyableFetch(rawRows, entity: Entity): boolean`, `diffStaleKeys(existing: readonly DbKey[], fresh: readonly DbKey[]): DbKey[]`. `EntityProjection`, `FieldKind` and `buildKey` are deleted from this module. `CachedRow`, `toMillis`, `toCount`, `toText`, `isEffectiveNow`, `newestValue`, `keepNewerThan` are unchanged.
+
+Company currently duplicates the framework's `FieldKind`, `EntityProjection`, `COERCE`, and
+`diffStaleKeys`. The duplication existed because the framework's row shape differs; the *key* logic
+does not differ, so it stops being duplicated here. Import `canonicalKey` and `entityKeyOf` from
+`@common/db/projection` rather than reimplementing them — that module imports only `./types` and
+`./defineEntity`, both pure, so it is safe for Company's worker bundle.
+
+- [ ] **Step 1: Write the failing tests**
+
+In `apps/company/tests/utils/cacheProjection.spec.ts`, replace every construction of a projection
+literal (`{ keyField: "...", fields: {...}, buildKey: ... }`) with a `defineEntity({...})` call, and
+add these cases:
+
+```ts
+import { defineEntity } from "@common/db/defineEntity";
+
+describe("projectRow with a compound key", () => {
+  const groupFacility = defineEntity({
+    primaryKey: "facilityGroupId,facilityId,fromDate",
+    fields: {
+      facilityGroupId: "text", facilityId: "text", facilityName: "text",
+      fromDate: "date", thruDate: "date",
+    },
+    indexes: ["facilityGroupId", "facilityId", "fromDate", "thruDate"],
+  });
+
+  it("stores the key members as real fields, with no synthetic column", () => {
+    const raw = { facilityGroupId: "GRP1", facilityId: "FAC1", fromDate: 1700000000000 };
+    const row = projectRow(raw, groupFacility, 500)!;
+
+    expect(row.facilityGroupId).toBe("GRP1");
+    expect(row.fromDate).toBe(1700000000000);
+    expect(row.memberKey).toBeUndefined();
+  });
+
+  it("keeps the untouched server payload and cachedAt", () => {
+    const raw = { facilityGroupId: "GRP1", facilityId: "FAC1", fromDate: 1, extra: "kept" };
+    const row = projectRow(raw, groupFacility, 500)!;
+
+    expect(row.raw).toEqual(raw);
+    expect(row.cachedAt).toBe(500);
+  });
+
+  it("returns null when any key member is missing", () => {
+    expect(projectRow({ facilityGroupId: "GRP1", facilityId: "FAC1" }, groupFacility, 1)).toBeNull();
+  });
+
+  it("flags a fetch it can key none of", () => {
+    expect(isUnkeyableFetch([{ wrong: "shape" }], groupFacility)).toBe(true);
+  });
+});
+
+describe("diffStaleKeys with compound keys", () => {
+  it("diffs array keys by value and returns the original array form", () => {
+    const stale = diffStaleKeys([["A", "1"], ["B", "2"]], [["B", "2"]]);
+
+    expect(stale).toEqual([["A", "1"]]);
+    expect(Array.isArray(stale[0])).toBe(true);
+  });
+
+  it("still diffs scalar keys", () => {
+    expect(diffStaleKeys(["A", "B"], ["B"])).toEqual(["A"]);
+  });
+});
+```
+
+**First, make this spec collectible.** `tests/utils/cacheProjection.spec.ts` imports
+`dataFeedProjection` from `@/utils/db/cacheEntities`, which reaches `appCacheDb` → `companyDb` and
+dies at module load until Task 15 lands. That single import is the only thing coupling an otherwise
+pure unit test to the whole app graph. Replace it with a local `defineEntity` call so the spec tests
+`cacheProjection` in isolation — that is a genuine improvement, not a workaround, and it is what
+makes this task verifiable at all.
+
+- [ ] **Step 2: Run tests to verify they fail**
+
+Run: `cd apps/company && pnpm vitest run tests/utils/cacheProjection.spec.ts`
+Expected: the spec now COLLECTS (it did not before), and fails because `projectRow` still looks for
+`projection.keyField`, so the compound cases return rows keyed on `undefined` or throw.
+Do NOT expect the wider suite to pass — it stays red until Task 15.
+
+- [ ] **Step 3: Rewrite the key half of `cacheProjection.ts`**
+
+Replace the `FieldKind` type, the `EntityProjection` interface and `COERCE` with imports, keeping the
+`structured` behaviour note as a comment on the import (the framework's `COERCE` already has the same
+four kinds and the same `structured` pass-through):
+
+```ts
+import type { Entity } from "@common/db/defineEntity";
+import type { DbKey, FieldKind } from "@common/db/types";
+import { canonicalKey, entityKeyOf, toCount, toMillis, toText } from "@common/db/projection";
+
+export type { FieldKind };
+```
+
+Delete Company's local `toMillis`/`toCount`/`toText` definitions and re-export the framework's
+instead, so there is one coercion implementation:
+
+```ts
+export { toCount, toMillis, toText };
+```
+
+Rewrite `projectRow` — the only difference from the framework's is the row tail:
+
+```ts
+/**
+ * Project one raw server record into a cached row. Returns null when the record cannot be keyed —
+ * for a compound key that means ANY member failed to project.
+ *
+ * Unlike the framework's `projectRow`, this keeps `raw` (the untouched server object) and stamps
+ * `cachedAt`. 56 read sites across the app reach into `row.raw`, so that field is load-bearing.
+ */
+export function projectRow(
+  raw: Record<string, unknown>,
+  entity: Entity,
+  now: number,
+): CachedRow | null {
+  const row: Record<string, unknown> = {};
+  for (const [field, kind] of Object.entries(entity.fields)) {
+    const source = raw?.[field] !== undefined ? field : entity.rename?.[field] ?? field;
+    const value = COERCE[kind](raw?.[source]);
+    if (value !== undefined) row[field] = value;
+  }
+
+  for (const field of entity.primaryKeyFields) {
+    if (row[field] === undefined) return null;
+  }
+
+  return { ...row, raw, cachedAt: now } as CachedRow;
+}
+```
+
+Keep `COERCE` local only if the framework does not export it; if it does not, import the four
+coercers and build the same four-entry map, with the existing `structured` comment preserved
+verbatim — it documents a real bug (`String()` turning a nested payload into
+`"[object Object],[object Object]"`).
+
+Retype `projectRows` and `isUnkeyableFetch` to take `entity: Entity`, and replace `diffStaleKeys`:
+
+```ts
+export function diffStaleKeys(existingKeys: readonly DbKey[], freshKeys: readonly DbKey[]): DbKey[] {
+  const fresh = new Set(freshKeys.map(canonicalKey));
+  return existingKeys.filter((key) => !fresh.has(canonicalKey(key)));
+}
+```
+
+`isEffectiveNow`, `newestValue` and `keepNewerThan` are untouched. Keep every existing doc comment
+on them — several record measured live findings.
+
+- [ ] **Step 4: Run tests to verify they pass**
+
+Run: `cd apps/company && pnpm test:unit cacheProjection`
+Expected: PASS.
+
+- [ ] **Step 5: Commit**
+
+```bash
+cd apps/company
+git add src/utils/db/cacheProjection.ts tests/utils/cacheProjection.spec.ts
+git commit -m "feat(db)!: key cached rows by Entity, supporting compound primary keys"
 ```
 
 ---
