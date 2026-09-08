@@ -6,6 +6,7 @@ import { commonSchema } from "../db/domains/commonSchema";
 import { SEED_DOMAIN_NAMES, SEED_SOURCES } from "../db/domains/seedSources";
 import { registerSeedDomains } from "../db/sync/registerSeedDomains";
 import { clearSyncRegistry, getAllSyncDomains } from "../db/sync/syncRegistry";
+import { DEFAULT_COMMON_SYNC_CATALOG } from "../db/useDbStatus";
 
 const ownSchema = defineSchema({
   widgets: defineEntity({
@@ -129,5 +130,17 @@ describe("defineAppDb", () => {
     expect(() => bare.raw()).toThrow(/no OMS instance resolver/i);
     bare.setOmsInstanceResolver(() => "demo-oms");
     expect(bare.raw().name).toBe("demo-oms-BareDB");
+  });
+});
+
+describe("DEFAULT_COMMON_SYNC_CATALOG", () => {
+  it("derives one entry per seed table, with its singular domain name and label", () => {
+    expect(DEFAULT_COMMON_SYNC_CATALOG).toHaveLength(29);
+    expect(DEFAULT_COMMON_SYNC_CATALOG.map((e) => e.name).sort()).toEqual([...SEED_DOMAIN_NAMES].sort());
+    for (const entry of DEFAULT_COMMON_SYNC_CATALOG) {
+      expect(entry.table, `${entry.name} missing table`).toBeTruthy();
+      expect(entry.label, `${entry.name} missing label`).toBeTruthy();
+      expect(entry.syncClass).toBe("B");
+    }
   });
 });

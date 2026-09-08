@@ -3,7 +3,7 @@ import { liveQuery, type Subscription } from "dexie";
 import type { BaseDB } from "./baseDb";
 import { DB_SYNC_CHANNEL } from "./syncChannel";
 import { resyncDomain, resyncAll } from "./sync/appDbBootstrap";
-import { SEED_ENTITIES, SEED_ENTITY_NAMES } from "./domains/seedEntities";
+import { SEED_SOURCES, SEED_TABLE_NAMES } from "./domains/seedSources";
 
 export interface SyncDomainCatalogItem {
   name: string;
@@ -18,11 +18,11 @@ export interface SyncDomainStatus extends SyncDomainCatalogItem {
   status: "success" | "empty" | "none";
 }
 
-/** Every seed domain, derived from SEED_ENTITIES. Prefer `appDb.statusCatalog`. */
-export const DEFAULT_COMMON_SYNC_CATALOG: SyncDomainCatalogItem[] = SEED_ENTITY_NAMES.map((name) => ({
-  name,
-  table: SEED_ENTITIES[name].table,
-  label: SEED_ENTITIES[name].label,
+/** Every seed domain, derived from SEED_SOURCES. Prefer `appDb.statusCatalog`. */
+export const DEFAULT_COMMON_SYNC_CATALOG: SyncDomainCatalogItem[] = SEED_TABLE_NAMES.map((table) => ({
+  name: SEED_SOURCES[table].name,
+  table,
+  label: SEED_SOURCES[table].label,
   syncClass: "B" as const,
 }));
 
