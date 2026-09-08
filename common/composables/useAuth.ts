@@ -25,6 +25,78 @@ const isMoquiOmsRef = ref(commonUtil.isMoqui())
 const token = ref(cookieHelper().get("token") || "")
 const expirationTime = ref(cookieHelper().get("expirationTime") || "")
 
+// Loop protection for version redirects, scoped to the tab: sessionStorage survives the reload a redirect
+// causes, which is exactly the span we need to reason across, and a new tab starts clean. Access is
+// guarded because embedded webviews can restrict storage — losing loop protection must never block the
+// redirect itself.
+const PENDING_VERSION_KEY = "appVersionRedirectPending"
+const FAILED_VERSIONS_KEY = "appVersionRedirectFailed"
+
+const readSession = (key: string) => {
+  try {
+    return sessionStorage.getItem(key)
+  } catch (e) {
+    return null
+  }
+}
+
+const writeSession = (key: string, value: string) => {
+  try {
+    sessionStorage.setItem(key, value)
+  } catch (e) {
+    // Storage unavailable — proceed without loop protection rather than stranding the user.
+  }
+}
+
+const clearSession = (key: string) => {
+  try {
+    sessionStorage.removeItem(key)
+  } catch (e) {
+    // As above.
+  }
+}
+
+const getFailedVersions = () => (readSession(FAILED_VERSIONS_KEY) || "").split(",").filter(Boolean)
+
+// A redirect issued during THIS page load. window.location.replace() doesn't stop the current task, and
+// several callers can run before the navigation happens (Login.vue resolves the version from more than
+// one path; the router guard fires on every navigation). They must be told a redirect is already in
+// flight, not treated as a fresh attempt.
+let versionRedirectIssued = false
+
+// Settle the previous page load's attempt, once per load. If the version we redirected to isn't the
+// version actually being served, the host isn't serving what the OMS named: record it so we stop
+// targeting it, otherwise root and that version bounce off each other forever. A redirect that landed
+// records nothing, so a later backend change — including a rollback to a version we already ran — still
+// redirects normally.
+let versionAttemptReconciled = false
+
+const reconcileVersionAttempt = () => {
+  if (versionAttemptReconciled) return
+  versionAttemptReconciled = true
+
+  const pending = readSession(PENDING_VERSION_KEY)
+  if (pending === null) return
+  clearSession(PENDING_VERSION_KEY)
+
+  // Redirecting to root is the fallback and always lands, so only a named version can fail.
+  if (!pending || pending === commonUtil.getBuildVersion()) return
+
+  const failed = getFailedVersions()
+  if (!failed.includes(pending)) writeSession(FAILED_VERSIONS_KEY, [...failed, pending].join(","))
+  logger.error(`App version "${pending}" is not served by this host; falling back to the root build for this session.`)
+}
+
+// Pinia isn't active at module-import time (and never in a bare unit context), so resolve the store
+// defensively — mirrors commonUtil's own guarded accessor.
+const getEmbeddedAppStoreSafe = () => {
+  try {
+    return useEmbeddedAppStore()
+  } catch (e) {
+    return undefined
+  }
+}
+
 export function useAuth() {
   const getDuration = (expirationTime?: any) => {
     const expiry = (expirationTime !== undefined && expirationTime !== null) ? expirationTime : commonUtil.getTokenExpiration();
@@ -63,9 +135,19 @@ export function useAuth() {
     let isOmsVerified = false;
     let isUserVerified = false;
 
-    if (!token.value || !expirationTime.value) return false;
+    // An embedded (Shopify) session keeps its credentials in the embedded-app store, not in cookies:
+    // document.cookie is unreliable inside Shopify's cross-origin iframe, since SameSite=Lax cookies
+    // aren't sent in a third-party context. So read the store first and fall back to the cookie-backed
+    // refs for standalone sessions — those stay reactive because updateToken() writes them. Reading the
+    // store's getters here (rather than commonUtil.getToken(), which resolves the cookie non-reactively)
+    // is what keeps this computed invalidating on both paths.
+    const embeddedAppStore = getEmbeddedAppStoreSafe();
+    const currentToken = embeddedAppStore?.getToken || token.value;
+    const currentExpiration = embeddedAppStore?.getTokenExpiration || expirationTime.value;
 
-    const expiry = Number(expirationTime.value);
+    if (!currentToken || !currentExpiration) return false;
+
+    const expiry = Number(currentExpiration);
     if(expiry) {
       const currTime = DateTime.now().toMillis();
       isTokenExpired = expiry < currTime;
@@ -211,9 +293,10 @@ export function useAuth() {
     }
 
     if (commonUtil.isAppEmbedded()) {
-      const embeddedAppStore = useEmbeddedAppStore();
-      redirectionUrl = window.location.origin + '/shopify-login?shop=' + embeddedAppStore.shop + '&host=' + embeddedAppStore.host + '&embedded=1';
-      embeddedAppStore.$reset();
+      // Build the entry URL before the reset, while shop/host are still in the store, and let the helper
+      // keep the version segment of the path we're on.
+      redirectionUrl = commonUtil.getEmbeddedAppEntryUrl();
+      useEmbeddedAppStore().$reset();
     }
 
     if (redirectionUrl) {
@@ -287,17 +370,49 @@ export function useAuth() {
   // (not resolved yet — acting would risk a premature/looping redirect) or already canonical. Shared by
   // the router guard (every navigation) and fetchAppVersion (right after it resolves the version).
   const checkAppVersionRedirect = () => {
+    // A redirect is already in flight for this page load: report it as such so callers bail, rather than
+    // letting a second caller treat it as a fresh attempt (and, by returning false, let an in-app
+    // navigation proceed and supersede the pending page load).
+    if(versionRedirectIssued) return true;
+
     const configuredVersion = accxuiConfig.value.appVersion;
     if(configuredVersion === undefined) return false;
 
-    const canonicalPath = getCanonicalPath(configuredVersion, window.location.pathname);
+    reconcileVersionAttempt();
+
+    // Hosting's catch-all rewrite serves the root bootstrap for any version it doesn't have, so the URL
+    // can claim a version this bundle isn't. Getting back onto a path this deployment can actually serve
+    // takes priority over honouring the OMS's answer — otherwise the versioned path matches no route and
+    // renders a blank outlet. The loop guard below then stops us being sent straight back.
+    const undeployedVersion = commonUtil.getUndeployedVersion();
+    // A version already proven unreachable this session is never targeted again — otherwise root and that
+    // version bounce off each other forever, and there is no address bar to escape from in Shopify POS.
+    const wantedVersion = getFailedVersions().includes(configuredVersion) ? "" : configuredVersion;
+    const targetVersion = undeployedVersion ? "" : wantedVersion;
+
+    const canonicalPath = getCanonicalPath(targetVersion, window.location.pathname);
     if(canonicalPath === null) return false;
+
+    // Remember what we're about to try so the next load can tell whether it landed.
+    writeSession(PENDING_VERSION_KEY, targetVersion);
+    versionRedirectIssued = true;
+
+    // A version switch is always a full page load, which destroys the live App Bridge instance. An
+    // embedded session can only rebuild it by going through /shopify-login, so send it there (carrying
+    // shop/host) instead of to the canonical path — landing anywhere else leaves it with no bridge.
+    if(commonUtil.isAppEmbedded()) {
+      window.location.replace(commonUtil.getEmbeddedAppEntryUrl(targetVersion));
+      return true;
+    }
 
     window.location.replace(`${canonicalPath}${window.location.search}${window.location.hash}`);
     return true;
   };
 
-  const fetchAppVersion = async () => {
+  // `baseURL` lets the caller name the backend to ask before the session knows its own — the embedded
+  // flow resolves the version from the shop's Maarg instance ahead of login. Returns true when a redirect
+  // was issued, so callers can stop instead of continuing into a page that is being torn down.
+  const fetchAppVersion = async (baseURL?: string) => {
     try {
       // appId (endpoint path) and environmentTypeId come from the single multi-version config object
       // (VITE_APP_VERSION_CONFIG), so they match this deployment's app rather than being hardcoded.
@@ -308,7 +423,8 @@ export function useAuth() {
         params: {
           appId,
           environmentTypeId
-        }
+        },
+        ...(baseURL ? { baseURL } : {})
       });
 
       const appVersions = Array.isArray(resp.data) ? resp.data : resp.data?.docs;
@@ -316,13 +432,15 @@ export function useAuth() {
 
       // Persist the OMS's answer, then move the Login page onto that version's canonical URL.
       accxuiConfig.value.appVersion = configuredVersion || "";
-      checkAppVersionRedirect();
+      return checkAppVersionRedirect();
     } catch (error) {
-      // The call failed outright (endpoint unreachable/absent, or the config JSON was unparseable).
-      // Resolve to "" so the app runs unversioned at root instead of staying unresolved.
-      accxuiConfig.value.appVersion = "";
-      checkAppVersionRedirect();
+      // The call failed outright (endpoint unreachable/absent, or the config JSON was unparseable). Don't
+      // demote a session already running a version this deployment serves — a transient OMS outage must
+      // not move every merchant onto the root build. Otherwise resolve to "" and run unversioned at root.
+      const runningVersion = commonUtil.getBuildVersion();
+      accxuiConfig.value.appVersion = runningVersion && !commonUtil.getUndeployedVersion() ? runningVersion : "";
       logger.error(error);
+      return checkAppVersionRedirect();
     }
   };
 
