@@ -294,4 +294,4 @@ export const commonSchema = defineSchema({
     },
     indexes: ["shopId", "facilityId", "shopifyLocationId"],
   }),
-});
+}, { seed: true });

@@ -45,6 +45,8 @@ export interface AppDb {
   readonly tableNames: string[];
   /** One entry per composed table that has a seed source. The app's own tables are absent. */
   readonly statusCatalog: SyncDomainCatalogItem[];
+  /** Tables that came from the framework seed schema. The app's own tables are absent. */
+  readonly seedTables: ReadonlySet<string>;
 }
 
 export function defineAppDb(def: AppDbDefinition): AppDb {
@@ -57,7 +59,8 @@ export function defineAppDb(def: AppDbDefinition): AppDb {
 
   // Derived from the composed tables, so it can never list a table the database does not have.
   const statusCatalog: SyncDomainCatalogItem[] = Object.keys(stores)
-    .filter((table) => table in SEED_SOURCES)
+    // Provenance, not name. An app may declare its own table with a seed table's name.
+    .filter((table) => def.schema.seedTables.has(table) && table in SEED_SOURCES)
     .map((table) => ({
       name: SEED_SOURCES[table as keyof typeof SEED_SOURCES].name,
       table,
@@ -113,5 +116,6 @@ export function defineAppDb(def: AppDbDefinition): AppDb {
     entities: def.schema.entities,
     tableNames: Object.keys(stores),
     statusCatalog,
+    seedTables: def.schema.seedTables,
   };
 }

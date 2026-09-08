@@ -20,4 +20,3 @@ export * from "./sync/workerFetch";
 export * from "./sync/snapshotDomain";
 export * from "./sync/pollingWorkerHarness";
 export * from "./sync/appDbBootstrap";
-export * from "./domains/commonSeedDomains";

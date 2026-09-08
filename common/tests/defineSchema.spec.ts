@@ -114,3 +114,44 @@ describe("mergeSchemas", () => {
     expect(mergeSchemas().stores).toEqual({});
   });
 });
+
+describe("seed provenance", () => {
+  it("marks nothing as a seed table by default", () => {
+    expect(base().seedTables.size).toBe(0);
+  });
+
+  it("marks every table when the schema declares itself the seed schema", () => {
+    const seed = defineSchema({ facilities, productStores }, { seed: true });
+
+    expect([...seed.seedTables].sort()).toEqual(["facilities", "productStores"]);
+  });
+
+  it("narrows provenance through pick", () => {
+    const seed = defineSchema({ facilities, productStores }, { seed: true });
+
+    expect([...seed.pick(["facilities"]).seedTables]).toEqual(["facilities"]);
+  });
+
+  it("preserves provenance through extendIndexes", () => {
+    const seed = defineSchema({ facilities }, { seed: true });
+
+    expect([...seed.extendIndexes({ facilities: ["ownerPartyId"] }).seedTables]).toEqual(["facilities"]);
+  });
+
+  it("keeps the two sides distinct when merged, even on a NAME COLLISION-free merge", () => {
+    const seed = defineSchema({ facilities }, { seed: true });
+    const own = defineSchema({ widgets: defineEntity({ primaryKey: "widgetId", fields: { widgetId: "text" } }) });
+    const merged = mergeSchemas(seed, own);
+
+    expect(merged.seedTables.has("facilities")).toBe(true);
+    expect(merged.seedTables.has("widgets")).toBe(false);
+  });
+
+  it("treats an app's OWN table as app-owned even when its name matches a seed table", () => {
+    // The real case: Company declares its own `statuses` because the framework fetches
+    // admin/status while Company fetches oms/statuses.
+    const own = defineSchema({ statuses: defineEntity({ primaryKey: "statusId", fields: { statusId: "text" } }) });
+
+    expect(own.seedTables.has("statuses")).toBe(false);
+  });
+});

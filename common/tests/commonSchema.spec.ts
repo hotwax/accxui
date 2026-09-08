@@ -31,7 +31,10 @@ describe("commonSchema", () => {
         expect(entity.fields[field], `${table}: pk field ${field} not projected`).toBeTruthy();
       }
       for (const index of entity.indexes) {
-        expect(entity.fields[index], `${table}: index ${index} not projected`).toBeTruthy();
+        const members = index.startsWith("[") ? index.slice(1, -1).split("+") : [index];
+        for (const member of members) {
+          expect(entity.fields[member], `${table}: index member ${member} not projected`).toBeTruthy();
+        }
       }
     }
   });

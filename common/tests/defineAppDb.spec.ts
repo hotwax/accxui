@@ -25,7 +25,7 @@ describe("defineAppDb schema composition", () => {
     expect(Object.keys(db.schema).sort()).toEqual(["facilities", "productStores", "widgets"]);
   });
 
-  it("lists the composed data tables; BaseDB adds syncMeta on top", () => {
+  it("lists the composed data tables, excluding syncMeta", () => {
     const db = defineAppDb({ suffix: "TestDB", schema: ownSchema });
 
     expect(db.tableNames).toEqual(["widgets"]);
@@ -130,6 +130,33 @@ describe("defineAppDb", () => {
     expect(() => bare.raw()).toThrow(/no OMS instance resolver/i);
     bare.setOmsInstanceResolver(() => "demo-oms");
     expect(bare.raw().name).toBe("demo-oms-BareDB");
+  });
+});
+
+describe("provenance keeps an app's own table out of the seed machinery", () => {
+  // Mirrors Company: its own `statuses` table, same name as the seed one, different endpoint.
+  const ownStatuses = defineSchema({
+    statuses: defineEntity({ primaryKey: "statusId", fields: { statusId: "text", statusTypeId: "text" } }),
+  });
+
+  it("omits it from statusCatalog", () => {
+    const db = defineAppDb({ suffix: "TestDB", schema: ownStatuses });
+
+    expect(db.statusCatalog).toEqual([]);
+  });
+
+  it("registers no seed domain for it", () => {
+    clearSyncRegistry();
+    registerSeedDomains(defineAppDb({ suffix: "TestDB", schema: ownStatuses }));
+
+    expect(getAllSyncDomains()).toEqual([]);
+  });
+
+  it("still registers the seed table when it IS picked", () => {
+    clearSyncRegistry();
+    registerSeedDomains(defineAppDb({ suffix: "TestDB", schema: commonSchema.pick(["statuses"]) }));
+
+    expect(getAllSyncDomains().map((d) => d.name)).toEqual(["status"]);
   });
 });
 

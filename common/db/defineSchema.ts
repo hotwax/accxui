@@ -16,6 +16,8 @@ export interface AppSchema {
   entities: Record<string, Entity>;
   /** Table name → Dexie schema string, ready for `version().stores()`. `syncMeta` is not included — BaseDB adds it. */
   stores: Record<string, string>;
+  /** Tables that came from the framework seed schema. An app's own tables are absent, even when the name matches. */
+  seedTables: ReadonlySet<string>;
   /** A subset of this schema. Throws on a table this schema does not have. */
   pick(tables: string[]): AppSchema;
   /** Extra secondary indexes appended after an entity's own. Throws on an unknown table, a pk restatement, or an unprojected field. */
@@ -30,10 +32,11 @@ function storesOf(entities: Record<string, Entity>): Record<string, string> {
   return stores;
 }
 
-function build(entities: Record<string, Entity>): AppSchema {
+function build(entities: Record<string, Entity>, seedTables: ReadonlySet<string>): AppSchema {
   return {
     entities,
     stores: storesOf(entities),
+    seedTables,
 
     pick(tables) {
       const picked: Record<string, Entity> = {};
@@ -46,7 +49,7 @@ function build(entities: Record<string, Entity>): AppSchema {
         }
         picked[table] = entity;
       }
-      return build(picked);
+      return build(picked, new Set(tables.filter((t) => seedTables.has(t))));
     },
 
     extendIndexes(map) {
@@ -71,20 +74,30 @@ function build(entities: Record<string, Entity>): AppSchema {
         });
       }
 
-      return build(extended);
+      return build(extended, seedTables);
     },
   };
 }
 
-export function defineSchema(map: Record<string, Entity>): AppSchema {
+/**
+ * `options.seed` marks every table in the map as framework seed data. Only `commonSchema` passes
+ * it. It exists because an app may legitimately declare its OWN table with a seed table's name —
+ * Company's `statuses` hits `oms/statuses` while the seed one hits `admin/status` — and deciding
+ * provenance by name alone would point the app's table at the wrong endpoint.
+ */
+export function defineSchema(
+  map: Record<string, Entity>,
+  options: { seed?: boolean } = {},
+): AppSchema {
   if("syncMeta" in map) {
     throw new Error('[db] defineSchema: "syncMeta" is provided by BaseDB and must not be declared.');
   }
-  return build({ ...map });
+  return build({ ...map }, new Set(options.seed ? Object.keys(map) : []));
 }
 
 export function mergeSchemas(...schemas: AppSchema[]): AppSchema {
   const merged: Record<string, Entity> = {};
+  const mergedSeed = new Set<string>();
 
   for (const schema of schemas) {
     for (const [table, entity] of Object.entries(schema.entities)) {
@@ -95,8 +108,9 @@ export function mergeSchemas(...schemas: AppSchema[]): AppSchema {
         );
       }
       merged[table] = entity;
+      if(schema.seedTables.has(table)) mergedSeed.add(table);
     }
   }
 
-  return build(merged);
+  return build(merged, mergedSeed);
 }
