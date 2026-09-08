@@ -44,3 +44,28 @@ describe("registerCommonSeedDomains", () => {
     expect(getAllSyncDomains().map((d) => d.name).sort()).toEqual(before.domainNames);
   });
 });
+
+describe("groupFacility refetchScope", () => {
+  it("re-lists and snapshots just the one facility group, pruning members that left it", () => {
+    const { refetchScope } = SEED_ENTITIES.groupFacility.source;
+    expect(refetchScope).toBeTypeOf("function");
+
+    const result = refetchScope!({ facilityGroupId: "GRP1" });
+    expect(result.params).toEqual({ facilityGroupId: "GRP1" });
+    expect(result.scope).toEqual({ field: "facilityGroupId", value: "GRP1" });
+  });
+});
+
+describe("adopted seed entity fetch config", () => {
+  it("scopes the carrier list to the CARRIER role", () => {
+    expect(SEED_ENTITIES.carrier.source.listUrl).toBe("oms/shippingGateways/carrierParties");
+    expect(SEED_ENTITIES.carrier.source.listParams).toEqual({ roleTypeId: "CARRIER" });
+  });
+
+  it("fans productStoreFacility out over cached product stores", () => {
+    const fanOut = SEED_ENTITIES.productStoreFacility.source.fanOut;
+    expect(fanOut?.parentTable).toBe("productStores");
+    expect(fanOut?.parentKeyField).toBe("productStoreId");
+    expect(fanOut?.urlFor("STORE 1")).toBe("oms/productStores/STORE%201/facilities");
+  });
+});

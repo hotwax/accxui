@@ -369,7 +369,16 @@ export const SEED_ENTITIES = {
     schema: "memberKey, facilityGroupId, facilityId, fromDate, thruDate",
     label: "Facility Group Members",
     projection: groupFacilityProjection,
-    source: { listUrl: "oms/groupFacilities", collectionKey: null },
+    source: {
+      listUrl: "oms/groupFacilities",
+      collectionKey: null,
+      // Composite key + no by-PK route: re-list one group and snapshot just that scope, so a
+      // member removed from the group is pruned rather than left behind.
+      refetchScope: (pk) => ({
+        params: { facilityGroupId: pk.facilityGroupId },
+        scope: { field: "facilityGroupId", value: pk.facilityGroupId },
+      }),
+    },
   },
 
   geo: {
