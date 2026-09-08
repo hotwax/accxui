@@ -2284,6 +2284,29 @@ git commit -m "feat(db)!: compose defineAppDb from an AppSchema; retire SEED_ENT
 - Modify: `apps/order-manager/src/db/orderManagerDb.ts:20-34`
 - Modify: `apps/order-manager/src/db/useSeedData.ts:41-51` (`row`), `:73-86` (`labels`)
 - Modify: `apps/order-manager/tests/db/projectRow.spec.ts`
+- Modify: `apps/order-manager/tests/db/projections.spec.ts` — imports the deleted `geoProjection`/`shopifyShopProjection`
+- Modify: `apps/order-manager/tests/db/useSeedData.spec.ts` — imports the deleted `COMMON_DB_SCHEMA`
+
+**Measured starting state** (with Task 9 landed, before this task): `pnpm test:unit` reports
+**12 failed files / 84 passed (96)** and **8 failed / 428 passed (436)**. Four files import deleted
+symbols; the other eight fail with "0 test" purely because they transitively import
+`orderManagerDb` through a store, service or the router, and will go green the moment
+`orderManagerDb.ts` resolves again. Do not edit those eight.
+
+The four real edits:
+
+| File | Deleted symbol | Replacement |
+|---|---|---|
+| `src/db/orderManagerDb.ts` | `SEED_ENTITY_NAMES` | `commonSchema` (take the whole schema) |
+| `tests/db/projectRow.spec.ts` | `type EntityProjection` | `defineEntity({...})` |
+| `tests/db/projections.spec.ts` | `geoProjection`, `shopifyShopProjection` | `commonSchema.entities.geos.fields`, `commonSchema.entities.shopifyShops.fields` |
+| `tests/db/useSeedData.spec.ts` | `COMMON_DB_SCHEMA` | `commonSchema.stores` |
+
+**One failure is NOT ours and must not be "fixed":**
+`../../common/components/DxpOmsInstanceFooter.spec.ts` has 1 failing test (timezone `data-color`).
+It is a Vue component spec with no db, projection, schema or seed references, last touched in an
+unrelated commit. OM's vitest picks up `common/components/**`, which the root `common/tests` run
+does not, which is why it is invisible from the framework side. Leave it alone.
 
 **Interfaces:**
 - Consumes: `defineAppDb`, `commonSchema` from Repo A.
