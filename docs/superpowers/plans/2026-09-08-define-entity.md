@@ -1718,7 +1718,7 @@ projection's map **minus** the synthetic key field.
 | `statusFlowTransitions` | `statusFlowTransition` | `statusFlowId,statusId,toStatusId` | `["statusId", "toStatusId", "statusFlowId"]` | `transitionKey` |
 | `productStoreFacilities` | `productStoreFacility` | `productStoreId,facilityId` | `["productStoreId", "facilityId"]` | `storeFacilityKey` |
 | `productStoreFacilityGroups` | `productStoreFacilityGroup` | `productStoreId,facilityGroupId` | `["productStoreId", "facilityGroupId"]` | `storeFacilityGroupKey` |
-| `productStoreShipmentMethods` | `productStoreShipmentMethod` | `productStoreId,shipmentMethodTypeId,partyId` | `["productStoreId", "shipmentMethodTypeId", "partyId"]` | `storeShipmentMethodKey` |
+| `productStoreShipmentMethods` | `productStoreShipmentMethod` | `productStoreShipMethId` (surrogate, **single-key**) | `["productStoreId", "shipmentMethodTypeId", "partyId"]` | `storeShipmentMethodKey` |
 | `productStoreEmailSettings` | `productStoreEmailSetting` | `productStoreId,emailTypeEnumId` | `["productStoreId", "emailTypeEnumId"]` | `emailSettingKey` |
 | `shopifyShopLocations` | `shopifyShopLocation` | `shopId,shopifyLocationId` | `["shopId", "facilityId", "shopifyLocationId"]` | `locationKey` |
 
@@ -1737,12 +1737,18 @@ Note `productStoreShipmentMethodProjection` currently declares **both** `partyId
 
 - `groupFacilities` — old `buildKey` used `${raw?.fromDate ?? ""}`. `fromDate` is now a required key
   member. Confirm `oms/groupFacilities` always returns it.
-- `statusFlowTransitions` — old `buildKey` used `${raw?.statusFlowId ?? ""}`. `statusFlowId` is now a
-  required key member and gains an index. Confirm `admin/statusFlows/transitions` always returns it.
-- `productStoreShipmentMethods` — old `buildKey` used `raw?.partyId || raw?.carrierPartyId || ""`,
-  so a row with neither still stored. `partyId` is now a required key member with a `rename` onto
-  `carrierPartyId`. Confirm `oms/productStores/{id}/shipmentMethods` always returns one of the two;
-  if a carrier-less shipment method is legitimate, drop `partyId` from `primaryKey` and record why.
+- `statusFlowTransitions` — RESOLVED by decision: `statusFlowId,statusId,toStatusId`, all three
+  required. The endpoint is `admin/statusFlows/transitions`, so a transition inherently belongs to a
+  flow, and `statusFlowId` is part of the entity PK in the Moqui model — the old `?? ""` was
+  defensive coding rather than a real case. Accepted risk: a row genuinely missing `statusFlowId`
+  is dropped rather than stored.
+- `productStoreShipmentMethods` — RESOLVED by decision: key on the surrogate `productStoreShipMethId`
+  instead of any natural combination. `productStoreShipMethId` is NOT in the old projection, so it
+  must be ADDED to `fields`. The accepted risk is that if the endpoint does not return that field,
+  every row becomes unkeyable — but that failure is LOUD and safe, not silent: `isUnkeyableFetch`
+  trips, logs "fetched N records but keys could not be built", and ABORTS the snapshot rather than
+  pruning the table. So the table simply stays empty and says so. Verify on an instance with data
+  when one is available.
 
 If either field is genuinely absent in a live response, **drop it from `primaryKey`** and record why
 in the commit message — do not reintroduce a synthetic column. Dropping `fromDate` collapses
@@ -1761,7 +1767,7 @@ Add these 9 entries to `schema` in `common/tests/fixtures/seedSchemaAfter.json`:
     "statusFlowTransitions": "[statusFlowId+statusId+toStatusId], statusId, toStatusId, statusFlowId",
     "productStoreFacilities": "[productStoreId+facilityId], productStoreId, facilityId",
     "productStoreFacilityGroups": "[productStoreId+facilityGroupId], productStoreId, facilityGroupId",
-    "productStoreShipmentMethods": "[productStoreId+shipmentMethodTypeId+partyId], productStoreId, shipmentMethodTypeId, partyId",
+    "productStoreShipmentMethods": "productStoreShipMethId, productStoreId, shipmentMethodTypeId, partyId",
     "productStoreEmailSettings": "[productStoreId+emailTypeEnumId], productStoreId, emailTypeEnumId",
     "shopifyShopLocations": "[shopId+shopifyLocationId], shopId, facilityId, shopifyLocationId"
 ```
@@ -1850,8 +1856,14 @@ Append inside the `defineSchema({ ... })` call:
   }),
 
   productStoreShipmentMethods: defineEntity({
-    primaryKey: "productStoreId,shipmentMethodTypeId,partyId",
+    // OFBiz ProductStoreShipmentMeth is keyed by a SURROGATE id, not by the natural triple, and
+    // Company's own `productStoreShippingMethods` table already keys on it. The old synthetic
+    // `storeShipmentMethodKey` joined productStore + method + party, and tolerated NO party at
+    // all (`partyId || carrierPartyId || ""`), so a natural compound key would have had to either
+    // drop carrier-less rows or collide on them. The surrogate avoids both.
+    primaryKey: "productStoreShipMethId",
     fields: {
+      productStoreShipMethId: "text",
       productStoreId: "text",
       shipmentMethodTypeId: "text",
       partyId: "text",
@@ -1859,7 +1871,7 @@ Append inside the `defineSchema({ ... })` call:
       description: "text",
     },
     indexes: ["productStoreId", "shipmentMethodTypeId", "partyId"],
-    // Some routes return the carrier only as `carrierPartyId`; `partyId` is a key member.
+    // Some routes name the carrier only `carrierPartyId`; keep `partyId` populated either way.
     rename: { partyId: "carrierPartyId" },
   }),
 
