@@ -10,7 +10,7 @@
 
 **Spec:** [docs/superpowers/specs/2026-09-08-define-entity-design.md](../specs/2026-09-08-define-entity-design.md)
 
-**Scope:** 15 tasks. Tasks 1-9 are the framework (`accxui` root), Task 10 is Order Manager, Tasks 11-15 are Company. Company's own 43 tables and 17 synthetic keys convert in this plan, not a later one.
+**Scope:** 16 tasks (Task 9b was added during execution — see its rationale). Tasks 1-9 are the framework (`accxui` root), Task 10 is Order Manager, Tasks 11-15 are Company. Company's own 43 tables and 17 synthetic keys convert in this plan, not a later one.
 
 ## Global Constraints
 
@@ -2272,6 +2272,294 @@ pre-existing failures remain: `commonUtil.spec.ts` (4) and `useSolrSearch.spec.t
 ```bash
 git add -A common/db common/tests
 git commit -m "feat(db)!: compose defineAppDb from an AppSchema; retire SEED_ENTITIES"
+```
+
+---
+
+### Task 9b: Seed provenance on `AppSchema`
+
+**Files:**
+- Modify: `common/db/defineSchema.ts` (add `seedTables` to `AppSchema`; `defineSchema` gains an options arg)
+- Modify: `common/db/domains/commonSchema.ts` (mark itself as the seed schema)
+- Modify: `common/db/defineAppDb.ts` (`statusCatalog` and `AppDb` use provenance, not table-name lookup)
+- Modify: `common/db/sync/registerSeedDomains.ts` (skip app-owned tables by provenance)
+- Delete: `common/db/domains/commonSeedDomains.ts` (dead: zero callers repo-wide)
+- Modify: `common/db/index.ts` (drop the deleted export)
+- Test: `common/tests/defineSchema.spec.ts`, `common/tests/defineAppDb.spec.ts`
+
+**Interfaces:**
+- Consumes: `Entity`, `AppSchema`, `commonSchema`, `SEED_SOURCES`.
+- Produces: `AppSchema.seedTables: ReadonlySet<string>`; `defineSchema(map, options?: { seed?: boolean })`; `AppDb.seedTables: ReadonlySet<string>`.
+
+**Why this task exists.** Task 9 made `defineAppDb.statusCatalog` and `registerSeedDomains` decide
+"is this a seed table?" by looking the TABLE NAME up in `SEED_SOURCES`. That is wrong, and Task 9's
+review caught it. Five of Company's own tables share a name with a seed table —
+`statuses`, `carriers`, `carrierShipmentMethods`, `facilityGroups`, `shopifyShops` — and every one
+of them is a **documented deliberate rejection** of the seed version, recorded in
+`apps/company/src/db/companyDb.ts:23-36`:
+
+- `statuses` — the framework fetches `admin/status`, Company fetches `oms/statuses`.
+- `carriers` / `carrierShipmentMethods` — the seed omits Company's `listParams: { roleTypeId: "CARRIER" }`, `refetchScope` and `strictCollection`.
+- `facilityGroups` — the seed omits Company's `refetchScope`.
+- `shopifyShops` — the seed omits Company's `byPk`, **whose comment documents a real previously-fixed bug**: a `refetchScope` keyed on `productStoreId` silently re-listed every shop instead of the one that changed.
+
+Under table-name keying, all five would acquire a spurious `statusCatalog` row AND a snapshot domain
+pointed at the framework's endpoint and fetch config. For `shopifyShops` that resurrects the fixed
+bug. The old design could not make this mistake, because `defineAppDb({ seed: [...] })` listed the
+picks explicitly; the deleted test "allows an own table whose name matches an UNPICKED seed table"
+was that guard. Provenance restores it structurally rather than by convention.
+
+Note this is why the fix must land BEFORE Task 15 composes Company's database.
+
+- [ ] **Step 1: Write the failing tests**
+
+Add to `common/tests/defineSchema.spec.ts`:
+
+```ts
+describe("seed provenance", () => {
+  it("marks nothing as a seed table by default", () => {
+    expect(base().seedTables.size).toBe(0);
+  });
+
+  it("marks every table when the schema declares itself the seed schema", () => {
+    const seed = defineSchema({ facilities, productStores }, { seed: true });
+
+    expect([...seed.seedTables].sort()).toEqual(["facilities", "productStores"]);
+  });
+
+  it("narrows provenance through pick", () => {
+    const seed = defineSchema({ facilities, productStores }, { seed: true });
+
+    expect([...seed.pick(["facilities"]).seedTables]).toEqual(["facilities"]);
+  });
+
+  it("preserves provenance through extendIndexes", () => {
+    const seed = defineSchema({ facilities }, { seed: true });
+
+    expect([...seed.extendIndexes({ facilities: ["ownerPartyId"] }).seedTables]).toEqual(["facilities"]);
+  });
+
+  it("keeps the two sides distinct when merged, even on a NAME COLLISION-free merge", () => {
+    const seed = defineSchema({ facilities }, { seed: true });
+    const own = defineSchema({ widgets: defineEntity({ primaryKey: "widgetId", fields: { widgetId: "text" } }) });
+    const merged = mergeSchemas(seed, own);
+
+    expect(merged.seedTables.has("facilities")).toBe(true);
+    expect(merged.seedTables.has("widgets")).toBe(false);
+  });
+
+  it("treats an app's OWN table as app-owned even when its name matches a seed table", () => {
+    // The real case: Company declares its own `statuses` because the framework fetches
+    // admin/status while Company fetches oms/statuses.
+    const own = defineSchema({ statuses: defineEntity({ primaryKey: "statusId", fields: { statusId: "text" } }) });
+
+    expect(own.seedTables.has("statuses")).toBe(false);
+  });
+});
+```
+
+Add to `common/tests/defineAppDb.spec.ts`:
+
+```ts
+describe("provenance keeps an app's own table out of the seed machinery", () => {
+  // Mirrors Company: its own `statuses` table, same name as the seed one, different endpoint.
+  const ownStatuses = defineSchema({
+    statuses: defineEntity({ primaryKey: "statusId", fields: { statusId: "text", statusTypeId: "text" } }),
+  });
+
+  it("omits it from statusCatalog", () => {
+    const db = defineAppDb({ suffix: "TestDB", schema: ownStatuses });
+
+    expect(db.statusCatalog).toEqual([]);
+  });
+
+  it("registers no seed domain for it", () => {
+    clearSyncRegistry();
+    registerSeedDomains(defineAppDb({ suffix: "TestDB", schema: ownStatuses }));
+
+    expect(getAllSyncDomains()).toEqual([]);
+  });
+
+  it("still registers the seed table when it IS picked", () => {
+    clearSyncRegistry();
+    registerSeedDomains(defineAppDb({ suffix: "TestDB", schema: commonSchema.pick(["statuses"]) }));
+
+    expect(getAllSyncDomains().map((d) => d.name)).toEqual(["status"]);
+  });
+});
+```
+
+- [ ] **Step 2: Run and confirm they fail**
+
+Run: `pnpm vitest run common/tests/defineSchema.spec.ts common/tests/defineAppDb.spec.ts`
+Expected: FAIL — `seedTables` does not exist, and the own-`statuses` cases currently pick up the
+seed source by name.
+
+- [ ] **Step 3: Add provenance to `defineSchema.ts`**
+
+Add `seedTables: ReadonlySet<string>` to the `AppSchema` interface, thread it through `build`, and
+give `defineSchema` an options argument:
+
+```ts
+function build(entities: Record<string, Entity>, seedTables: ReadonlySet<string>): AppSchema {
+  return {
+    entities,
+    stores: storesOf(entities),
+    seedTables,
+
+    pick(tables) {
+      const picked: Record<string, Entity> = {};
+      for (const table of tables) {
+        const entity = entities[table];
+        if(!entity) {
+          throw new Error(`[db] defineSchema: pick names "${table}", which is not a table in this schema.`);
+        }
+        picked[table] = entity;
+      }
+      return build(picked, new Set(tables.filter((t) => seedTables.has(t))));
+    },
+
+    extendIndexes(map) {
+      /* ...unchanged body... */
+      return build(extended, seedTables);
+    },
+  };
+}
+
+/**
+ * `options.seed` marks every table in the map as framework seed data. Only `commonSchema` passes
+ * it. It exists because an app may legitimately declare its OWN table with a seed table's name —
+ * Company's `statuses` hits `oms/statuses` while the seed one hits `admin/status` — and deciding
+ * provenance by name alone would point the app's table at the wrong endpoint.
+ */
+export function defineSchema(
+  map: Record<string, Entity>,
+  options: { seed?: boolean } = {},
+): AppSchema {
+  if("syncMeta" in map) {
+    throw new Error('[db] defineSchema: "syncMeta" is provided by BaseDB and must not be declared.');
+  }
+  return build({ ...map }, new Set(options.seed ? Object.keys(map) : []));
+}
+
+export function mergeSchemas(...schemas: AppSchema[]): AppSchema {
+  const merged: Record<string, Entity> = {};
+  const mergedSeed = new Set<string>();
+
+  for (const schema of schemas) {
+    for (const [table, entity] of Object.entries(schema.entities)) {
+      if(table in merged) {
+        throw new Error(
+          `[db] mergeSchemas: table "${table}" is claimed by more than one schema. ` +
+          "Use `pick` to take it from exactly one, or `extendIndexes` to widen it.",
+        );
+      }
+      merged[table] = entity;
+      if(schema.seedTables.has(table)) mergedSeed.add(table);
+    }
+  }
+
+  return build(merged, mergedSeed);
+}
+```
+
+- [ ] **Step 4: Mark `commonSchema` as the seed schema**
+
+In `common/db/domains/commonSchema.ts`, close the `defineSchema` call with the options argument:
+
+```ts
+export const commonSchema = defineSchema({
+  /* ...the 29 entities, unchanged... */
+}, { seed: true });
+```
+
+- [ ] **Step 5: Use provenance in `defineAppDb.ts` and `registerSeedDomains.ts`**
+
+In `defineAppDb.ts`, add `seedTables` to the `AppDb` interface and to the returned object, and
+filter the catalog on provenance FIRST:
+
+```ts
+  /** Tables that came from the framework seed schema. The app's own tables are absent. */
+  readonly seedTables: ReadonlySet<string>;
+```
+
+```ts
+  const statusCatalog: SyncDomainCatalogItem[] = Object.keys(stores)
+    // Provenance, not name. An app may declare its own table with a seed table's name.
+    .filter((table) => def.schema.seedTables.has(table) && table in SEED_SOURCES)
+    .map((table) => ({
+      name: SEED_SOURCES[table as keyof typeof SEED_SOURCES].name,
+      table,
+      label: SEED_SOURCES[table as keyof typeof SEED_SOURCES].label,
+      syncClass: "B" as const,
+    }));
+```
+
+and `seedTables: def.schema.seedTables,` in the returned object.
+
+In `registerSeedDomains.ts`, gate on provenance:
+
+```ts
+export function registerSeedDomains(appDb: AppDb): void {
+  for (const [table, entity] of Object.entries(appDb.entities)) {
+    // Provenance, not name: an app's own table may share a seed table's name but needs its own
+    // endpoint and fetch config, and must NOT be registered against the seed source.
+    if(!appDb.seedTables.has(table)) continue;
+
+    const seed = SEED_SOURCES[table as keyof typeof SEED_SOURCES];
+    if(!seed) continue;
+
+    registerSnapshotDomain(
+      { name: seed.name, table, projection: entity, ...seed.source },
+      (omsInstance) => appDb.get(omsInstance),
+    );
+  }
+}
+```
+
+- [ ] **Step 6: Delete the dead `commonSeedDomains.ts`**
+
+`registerCommonSeedDomains` has ZERO callers anywhere in the workspace — verified by grep across
+`common/` and every app's `src/`. Its only test lived in the deleted `seedEntities.spec.ts`, so it is
+untested dead code whose "Kept for backwards compatibility" header is now false, and it duplicates
+`registerSeedDomains` badly enough that it would not survive a provenance change anyway.
+
+```bash
+git rm common/db/domains/commonSeedDomains.ts
+```
+
+Remove its line from `common/db/index.ts`.
+
+- [ ] **Step 7: Fix the two Minors Task 9's review raised**
+
+In `common/tests/defineAppDb.spec.ts`, the test titled "lists the composed data tables; BaseDB adds
+syncMeta on top" no longer touches a live handle, so the second clause is false. Retitle it to
+"lists the composed data tables, excluding syncMeta".
+
+In `common/tests/commonSchema.spec.ts`, the "every index is a projected field" loop does
+`entity.fields[index]`, which is not compound-aware and will spuriously fail the moment a common
+entity gains a `[a+b]` secondary index (now a legal form). Make it split compound entries:
+
+```ts
+      for (const index of entity.indexes) {
+        const members = index.startsWith("[") ? index.slice(1, -1).split("+") : [index];
+        for (const member of members) {
+          expect(entity.fields[member], `${table}: index member ${member} not projected`).toBeTruthy();
+        }
+      }
+```
+
+- [ ] **Step 8: Run the full framework suite**
+
+Run: `pnpm vitest run common/tests`
+Expected: all db specs pass, including the new provenance tests. Only `commonUtil.spec.ts` (4) and
+`useSolrSearch.spec.ts` still fail, for unrelated pre-existing reasons.
+
+- [ ] **Step 9: Commit**
+
+```bash
+git add -A common/db common/tests
+git commit -m "fix(db)!: decide seed membership by provenance, not table name"
 ```
 
 ---
