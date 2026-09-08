@@ -2576,12 +2576,12 @@ git commit -m "fix(db)!: decide seed membership by provenance, not table name"
 - Modify: `apps/order-manager/tests/db/useSeedData.spec.ts` — imports the deleted `COMMON_DB_SCHEMA`
 
 **Measured starting state** (with Task 9 landed, before this task): `pnpm test:unit` reports
-**12 failed files / 84 passed (96)** and **8 failed / 428 passed (436)**. Four files import deleted
+**12 failed files / 84 passed (96)** and **8 failed / 428 passed (436)**. Five files import deleted
 symbols; the other eight fail with "0 test" purely because they transitively import
 `orderManagerDb` through a store, service or the router, and will go green the moment
 `orderManagerDb.ts` resolves again. Do not edit those eight.
 
-The four real edits:
+The five real edits:
 
 | File | Deleted symbol | Replacement |
 |---|---|---|
@@ -2589,6 +2589,17 @@ The four real edits:
 | `tests/db/projectRow.spec.ts` | `type EntityProjection` | `defineEntity({...})` |
 | `tests/db/projections.spec.ts` | `geoProjection`, `shopifyShopProjection` | `commonSchema.entities.geos.fields`, `commonSchema.entities.shopifyShops.fields` |
 | `tests/db/useSeedData.spec.ts` | `COMMON_DB_SCHEMA` | `commonSchema.stores` |
+| `tests/db/syncDomainUrls.spec.ts` | `registerCommonSeedDomains` | `registerSeedDomains(orderManagerDb)` |
+
+`tests/db/syncDomainUrls.spec.ts` needs care rather than deletion — it carries a real guardrail.
+It asserts (a) a sync domain is registered for every seed dataset the app reads, and (b) that the
+serialized domain registry never contains `oms/entityData` or `oms/dataDocumentView`, i.e. seed data
+never arrives through a generic entity endpoint. Task 9b deleted `registerCommonSeedDomains` as dead
+code, so swap the registration call for `registerSeedDomains(orderManagerDb)` — Order Manager takes
+the whole `commonSchema`, so every seed domain still registers and BOTH assertions keep their exact
+meaning. Keep the file's explanatory comment about replacing the deleted `tests/store/seed.spec.ts`.
+Note it must `clearSyncRegistry()` first if registration is not already isolated, and that
+`registerSeedDomains` takes the `AppDb` rather than a `getDb` callback.
 
 **One failure is NOT ours and must not be "fixed":**
 `../../common/components/DxpOmsInstanceFooter.spec.ts` has 1 failing test (timezone `data-color`).
