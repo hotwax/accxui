@@ -21,6 +21,7 @@
 - **Dexie cannot change a store's primary key in an upgrade** — it throws `"Not yet support for changing primary key"` (verified in Dexie 4.4.3). Do not attempt to write an upgrade path.
 - **Domain names stay exactly as they are** (singular: `facility`, `productStore`, `groupFacility`). Only the *schema map* is keyed by table name. `common/tests/fixtures/seedBefore.json`'s `domainNames` assertion must keep passing unchanged.
 - **Key separator is `\u0000`, never `|`.** `|` occurs in real OFBiz data; a NUL cannot.
+- **Write the NUL separator as the SOURCE ESCAPE, never as a raw byte.** In every `.ts` file it is a backslash, then `u`, then four zeros, inside quotes — six characters in the source, which the compiler turns into one NUL at runtime. Some editing tools silently emit a real NUL byte instead; that compiles and passes tests but makes the file binary to `grep`, `diff` and most editors. After touching any file that mentions the separator, verify with `tr -dc '\000' < <file> | wc -c` — it must print `0`, in the working tree *and* in the committed blob (`git show <sha>:<file> | tr -dc '\000' | wc -c`). This already went wrong once, in Task 3.
 - **Pre-existing test failures — do not try to fix these.** `common/tests/commonUtil.spec.ts` (4 failures) and `common/tests/useSolrSearch.spec.ts` (collection error) are red before this work starts. Baseline for the files this plan touches: `projection.spec.ts` 8 passing, `seedEntities.spec.ts` 9 passing, `defineAppDb.spec.ts` 23 passing.
 - **Typecheck and lint are pre-broken repo-wide.** Tests are the meaningful gate. Do not run `typecheck` or `lint` as a completion signal.
 
@@ -757,7 +758,7 @@ Then, replacing the existing `diffStaleKeys`:
  * `|` occurs in real OFBiz ids, so joining on it would make `["A","B"]` and the single id `"A|B"`
  * indistinguishable. NUL cannot occur in one.
  */
-const KEY_SEPARATOR = "\\u0000";
+const KEY_SEPARATOR = "\u0000";
 
 /** A compound key flattened to a value-comparable string, for Set and Map membership. */
 export function canonicalKey(key: DbKey): string {
