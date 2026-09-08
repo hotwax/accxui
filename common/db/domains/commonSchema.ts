@@ -85,6 +85,7 @@ export const commonSchema = defineSchema({
     fields: lookupFields("facilityGroupId", {
       facilityGroupName: "text",
       facilityGroupTypeId: "text",
+      lastUpdatedStamp: "date",
     }),
     indexes: ["facilityGroupTypeId"],
   }),
@@ -109,8 +110,11 @@ export const commonSchema = defineSchema({
       groupName: "text",
       firstName: "text",
       lastName: "text",
+      partyTypeId: "text",
       roleTypeId: "text",
+      statusId: "text",
     },
+    indexes: ["groupName", "roleTypeId"],
   }),
 
   shipmentMethodTypes: defineEntity({
@@ -175,6 +179,10 @@ export const commonSchema = defineSchema({
       myshopifyDomain: "text",
       domain: "text",
       systemMessageRemoteId: "text",
+      currency: "text",
+      primaryLocationId: "text",
+      realTimeInventoryPush: "text",
+      lastUpdatedStamp: "date",
     },
     indexes: ["productStoreId", "shopifyShopId"],
   }),
@@ -214,8 +222,10 @@ export const commonSchema = defineSchema({
       shipmentMethodTypeId: "text",
       roleTypeId: "text",
       sequenceNumber: "count",
+      carrierServiceCode: "text",
+      deliveryDays: "count",
     },
-    indexes: ["partyId", "shipmentMethodTypeId"],
+    indexes: ["partyId", "roleTypeId", "shipmentMethodTypeId", "sequenceNumber"],
   }),
 
   statusFlowTransitions: defineEntity({
