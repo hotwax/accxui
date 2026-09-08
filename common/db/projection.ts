@@ -4,7 +4,8 @@
  * Deliberately free of Dexie and Vue so every rule here is unit-testable without IndexedDB.
  */
 
-import type { DbRow, EntityProjection, FieldKind } from "./types";
+import type { Entity } from "./defineEntity";
+import type { DbKey, DbRow, EntityProjection, FieldKind } from "./types";
 
 /** Coerce a server date field (epoch-millis number, numeric string, or ISO string) to millis. */
 export function toMillis(value: unknown): number | undefined {
@@ -84,11 +85,40 @@ export function isUnkeyableFetch(
 }
 
 /**
- * Keys to delete after a snapshot sync: everything stored that the fresh full set no longer contains.
+ * `|` occurs in real OFBiz ids, so joining on it would make `["A","B"]` and the single id `"A|B"`
+ * indistinguishable. NUL cannot occur in one.
  */
-export function diffStaleKeys(existingKeys: readonly string[], freshKeys: readonly string[]): string[] {
-  const fresh = new Set(freshKeys);
-  return existingKeys.filter((key) => !fresh.has(key));
+const KEY_SEPARATOR = "\u0000";
+
+/** A compound key flattened to a value-comparable string, for Set and Map membership. */
+export function canonicalKey(key: DbKey): string {
+  return Array.isArray(key) ? key.join(KEY_SEPARATOR) : String(key);
+}
+
+/**
+ * The primary key of a stored row: a scalar for a single-field key, an array in declared order for
+ * a compound one. Undefined when any member is absent, which means the row cannot be stored.
+ */
+export function entityKeyOf(row: Record<string, unknown>, entity: Entity): DbKey | undefined {
+  const values: Array<string | number> = [];
+
+  for (const field of entity.primaryKeyFields) {
+    const value = row?.[field];
+    if (value === undefined || value === null || value === "") return undefined;
+    values.push(typeof value === "number" ? value : String(value));
+  }
+
+  return values.length === 1 ? values[0] : values;
+}
+
+/**
+ * Keys to delete after a snapshot sync: everything stored that the fresh full set no longer
+ * contains. Compares through `canonicalKey` because a Set compares arrays by identity, but returns
+ * the ORIGINAL key form so the result can be handed straight to `bulkDelete`.
+ */
+export function diffStaleKeys(existingKeys: readonly DbKey[], freshKeys: readonly DbKey[]): DbKey[] {
+  const fresh = new Set(freshKeys.map(canonicalKey));
+  return existingKeys.filter((key) => !fresh.has(canonicalKey(key)));
 }
 
 /**

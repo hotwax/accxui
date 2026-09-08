@@ -8,6 +8,12 @@ export interface DbRow {
   syncedAt: number;
 }
 
+/**
+ * A stored row's primary key. A scalar for a single-field key; an array, in the entity's declared
+ * field order, for a Dexie compound key (`[a+b]`).
+ */
+export type DbKey = string | number | Array<string | number>;
+
 export type FieldKind = "text" | "count" | "date" | "structured";
 
 export interface EntityProjection {
