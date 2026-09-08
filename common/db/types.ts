@@ -16,17 +16,6 @@ export type DbKey = string | number | Array<string | number>;
 
 export type FieldKind = "text" | "count" | "date" | "structured";
 
-export interface EntityProjection {
-  /** Primary-key field name on the stored row (must project to a non-empty string). */
-  keyField: string;
-  /** Field name -> how to coerce it. Every listed field is hoisted to the row's top level. */
-  fields: Record<string, FieldKind>;
-  /** Optional synthetic key builder for entities with composite natural keys. */
-  buildKey?: (raw: Record<string, unknown>) => string | undefined;
-  /** Stored-field name -> source field to read from if different. */
-  rename?: Record<string, string>;
-}
-
 export interface QueryOptions {
   /** Filter by an indexed field via where(scope.field).equals(scope.value). */
   scope?: { field: string; value: unknown };

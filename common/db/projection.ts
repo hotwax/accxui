@@ -5,7 +5,7 @@
  */
 
 import type { Entity } from "./defineEntity";
-import type { DbKey, DbRow, EntityProjection, FieldKind } from "./types";
+import type { DbKey, DbRow, FieldKind } from "./types";
 
 /** Coerce a server date field (epoch-millis number, numeric string, or ISO string) to millis. */
 export function toMillis(value: unknown): number | undefined {
@@ -39,23 +39,28 @@ const COERCE: Record<FieldKind, (value: unknown) => unknown> = {
 };
 
 /**
- * Project one raw server record into a stored row. Returns null when the record has no usable primary key.
+ * Project one raw server record into a stored row.
+ *
+ * Returns null when the record cannot be keyed — for a compound key that means ANY member failed to
+ * project. There is no synthetic key to build: the key members are ordinary declared fields, so
+ * they are coerced by their declared kind like everything else.
  */
 export function projectRow(
   raw: Record<string, unknown>,
-  projection: EntityProjection,
+  entity: Entity,
   now: number,
 ): DbRow | null {
   const row: Record<string, unknown> = {};
-  for (const [field, kind] of Object.entries(projection.fields)) {
-    const source = raw?.[field] !== undefined ? field : projection.rename?.[field] ?? field;
+
+  for (const [field, kind] of Object.entries(entity.fields)) {
+    const source = raw?.[field] !== undefined ? field : entity.rename?.[field] ?? field;
     const value = COERCE[kind](raw?.[source]);
     if (value !== undefined) row[field] = value;
   }
 
-  const key = projection.buildKey ? projection.buildKey(raw) : toText(raw?.[projection.keyField]);
-  if (!key) return null;
-  row[projection.keyField] = key;
+  for (const field of entity.primaryKeyFields) {
+    if (row[field] === undefined) return null;
+  }
 
   return { ...row, syncedAt: now } as DbRow;
 }
@@ -63,12 +68,12 @@ export function projectRow(
 /** Project many records, dropping any without a usable key. */
 export function projectRows(
   rawRows: Array<Record<string, unknown>>,
-  projection: EntityProjection,
+  entity: Entity,
   now: number,
 ): DbRow[] {
   const rows: DbRow[] = [];
   for (const raw of rawRows) {
-    const row = projectRow(raw, projection, now);
+    const row = projectRow(raw, entity, now);
     if (row) rows.push(row);
   }
   return rows;
@@ -79,9 +84,9 @@ export function projectRows(
  */
 export function isUnkeyableFetch(
   rawRows: Array<Record<string, unknown>>,
-  projection: EntityProjection,
+  entity: Entity,
 ): boolean {
-  return rawRows.length > 0 && projectRows(rawRows, projection, 0).length === 0;
+  return rawRows.length > 0 && projectRows(rawRows, entity, 0).length === 0;
 }
 
 /**

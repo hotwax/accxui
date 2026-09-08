@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import { canonicalKey, diffStaleKeys, entityKeyOf, isUnkeyableFetch, projectRow, projectRows, toCount, toMillis, toText } from "../db/projection";
-import type { EntityProjection } from "../db/types";
 import { defineEntity } from "../db/defineEntity";
 
 describe("projection coercion helpers", () => {
@@ -27,14 +26,10 @@ describe("projection coercion helpers", () => {
 });
 
 describe("projectRow & projectRows", () => {
-  const facilityProjection: EntityProjection = {
-    keyField: "facilityId",
-    fields: {
-      facilityId: "text",
-      facilityName: "text",
-      maximumOrderLimit: "count",
-    },
-  };
+  const facility = defineEntity({
+    primaryKey: "facilityId",
+    fields: { facilityId: "text", facilityName: "text", maximumOrderLimit: "count" },
+  });
 
   it("stores only the projected fields, never the raw server payload", () => {
     const raw = {
@@ -44,8 +39,7 @@ describe("projectRow & projectRows", () => {
       extraServerField: "ignored",
     };
 
-    const row = projectRow(raw, facilityProjection, 12345);
-    expect(row).toEqual({
+    expect(projectRow(raw, facility, 12345)).toEqual({
       facilityId: "FAC_01",
       facilityName: "Main Warehouse",
       maximumOrderLimit: 100,
@@ -53,26 +47,49 @@ describe("projectRow & projectRows", () => {
     });
   });
 
-  it("handles composite synthetic keys", () => {
-    const compositeProjection: EntityProjection = {
-      keyField: "storeFacilityKey",
-      fields: {
-        storeFacilityKey: "text",
-        productStoreId: "text",
-        facilityId: "text",
-      },
-      buildKey: (raw) => `${raw.productStoreId}|${raw.facilityId}`,
-    };
+  it("stores a compound key as its real member fields, with no synthetic column", () => {
+    const storeFacility = defineEntity({
+      primaryKey: "productStoreId,facilityId",
+      fields: { productStoreId: "text", facilityId: "text" },
+    });
 
-    const raw = { productStoreId: "STORE_1", facilityId: "FAC_1" };
-    const row = projectRow(raw, compositeProjection, 1000);
-    expect(row?.storeFacilityKey).toBe("STORE_1|FAC_1");
+    expect(projectRow({ productStoreId: "STORE_1", facilityId: "FAC_1" }, storeFacility, 1000))
+      .toEqual({ productStoreId: "STORE_1", facilityId: "FAC_1", syncedAt: 1000 });
+  });
+
+  it("drops a record missing any compound-key member", () => {
+    const storeFacility = defineEntity({
+      primaryKey: "productStoreId,facilityId",
+      fields: { productStoreId: "text", facilityId: "text" },
+    });
+
+    expect(projectRow({ productStoreId: "STORE_1" }, storeFacility, 1000)).toBeNull();
+  });
+
+  it("reads a key member supplied only under its rename source", () => {
+    const geoAssoc = defineEntity({
+      primaryKey: "geoId,toGeoId",
+      fields: { geoId: "text", toGeoId: "text" },
+      rename: { toGeoId: "geoIdTo" },
+    });
+
+    expect(projectRow({ geoId: "USA", geoIdTo: "CA" }, geoAssoc, 1000))
+      .toEqual({ geoId: "USA", toGeoId: "CA", syncedAt: 1000 });
+  });
+
+  it("coerces a date key member to millis, so it is a valid IndexedDB key", () => {
+    const dated = defineEntity({
+      primaryKey: "facilityGroupId,fromDate",
+      fields: { facilityGroupId: "text", fromDate: "date" },
+    });
+
+    const row = projectRow({ facilityGroupId: "GRP1", fromDate: "2024-01-01T00:00:00.000Z" }, dated, 1);
+    expect(row?.fromDate).toBe(1704067200000);
   });
 
   it("drops records without a valid key", () => {
-    const raw = { facilityName: "Nameless" };
-    const row = projectRow(raw, facilityProjection, 1000);
-    expect(row).toBeNull();
+    expect(projectRow({ facilityName: "Nameless" }, facility, 1000)).toBeNull();
+    expect(projectRows([{ facilityId: "A" }, { facilityName: "X" }], facility, 1000)).toHaveLength(1);
   });
 });
 
@@ -85,17 +102,15 @@ describe("diffStaleKeys", () => {
 });
 
 describe("isUnkeyableFetch", () => {
-  const projection: EntityProjection = {
-    keyField: "id",
-    fields: { id: "text" },
-  };
+  const entity = defineEntity({ primaryKey: "id", fields: { id: "text" } });
 
   it("flags unkeyable fetches", () => {
-    const mismatchedRows = [{ wrongIdField: "123" }];
-    expect(isUnkeyableFetch(mismatchedRows, projection)).toBe(true);
+    expect(isUnkeyableFetch([{ wrongIdField: "123" }], entity)).toBe(true);
+    expect(isUnkeyableFetch([{ id: "123" }], entity)).toBe(false);
+  });
 
-    const validRows = [{ id: "123" }];
-    expect(isUnkeyableFetch(validRows, projection)).toBe(false);
+  it("does not flag an empty fetch", () => {
+    expect(isUnkeyableFetch([], entity)).toBe(false);
   });
 });
 
