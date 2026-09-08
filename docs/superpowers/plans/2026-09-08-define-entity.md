@@ -2798,7 +2798,7 @@ and rename `cachedAt`, and it is not what this plan asks for.
 > **Company baseline while red: 30 failed / 52 passed (82 files); 53 failed / 437 passed (494
 > tests). Static inventory: 82 spec files, 591 `it()` calls — that is the real target.**
 
-### Task 11: Company's 26 single-key tables → `companySchema.ts`
+### Task 11: Company's 29 single-key tables → `companySchema.ts`
 
 **Files:**
 - Create: `apps/company/src/db/companySchema.ts`
@@ -2813,7 +2813,7 @@ and rename `cachedAt`, and it is not what this plan asks for.
 table's `fields` map is the matching projection in `apps/company/src/utils/db/cacheEntities.ts`.**
 Move both verbatim; add no field and change no `FieldKind`.
 
-For the 26 tables in this task, the conversion is mechanical, exactly as in Repo A Task 7: the first
+For the 29 tables in this task, the conversion is mechanical, exactly as in Repo A Task 7: the first
 segment of the existing schema string becomes `primaryKey`, the remaining segments become `indexes`.
 
 **Compound SECONDARY indexes must be preserved.** Ten of Company's tables carry them
@@ -2868,7 +2868,7 @@ describe("companySchema", () => {
 });
 ```
 
-Create `apps/company/tests/fixtures/companySchemaAfter.json` holding, for each of this task's 26
+Create `apps/company/tests/fixtures/companySchemaAfter.json` holding, for each of this task's 29
 tables, its schema string copied **verbatim** from `COMPANY_SCHEMA` in `companyDb.ts` — these tables
 are single-key, so their emitted string must be byte-identical to today's apart from whitespace
 normalization to `", "` between segments.
@@ -2883,7 +2883,7 @@ spec files cannot collect until Task 15 fixes `companyDb.ts`, so a full-suite ru
 about your own work. `companySchema.spec.ts` imports only `companySchema`, which is pure, so it
 collects and passes independently.
 
-- [ ] **Step 3: Create `companySchema.ts` with the 26 single-key tables**
+- [ ] **Step 3: Create `companySchema.ts` with the 29 single-key tables**
 
 ```ts
 /**
@@ -2901,7 +2901,7 @@ import { defineEntity } from "@common/db/defineEntity";
 import { defineSchema } from "@common/db/defineSchema";
 
 export const companySchema = defineSchema({
-  // ... 26 entities, each defineEntity({ primaryKey, fields, indexes }) ...
+  // ... 29 entities, each defineEntity({ primaryKey, fields, indexes }) ...
 });
 ```
 
@@ -2927,7 +2927,7 @@ git commit -m "feat(db): declare Company's single-key tables via defineEntity"
 
 ---
 
-### Task 12: Company's 17 compound-key tables
+### Task 12: Company's 14 compound-key tables
 
 **Files:**
 - Modify: `apps/company/src/db/companySchema.ts`
@@ -2938,16 +2938,33 @@ git commit -m "feat(db): declare Company's single-key tables via defineEntity"
 - Consumes: Task 12's `companySchema`.
 - Produces: `companySchema` complete at 43 tables. `cacheEntities.ts` no longer defines any `buildKey`.
 
-**The 17 tables and their synthetic key fields**, from `keyField:` in `cacheEntities.ts`:
+**The 14 Company-OWNED tables with a synthetic key**, taken from `COMPANY_SCHEMA` in
+`companyDb.ts` (a table whose first schema segment matches `/Key$/`):
 
-`organizationRelationships` (`relationshipKey`), `groupFacilities` (`memberKey`), `shopifyLocations`
-(`locationKey`), `shopifyInventoryAdjustmentDetails` (`adjustmentKey`), `shopifyTypeMappings`
-(`typeMappingKey`), `inventoryEventDocuments` (`documentFeedKey`), `carrierShipmentMethods`
-(`carrierShipmentMethodKey`), `carrierFacilities` (`carrierFacilityKey`), `shopifyCarrierShipments`
-(`carrierShipmentKey`), `enumGroupMembers` (`enumGroupMemberKey`), `facilityIdentifications`
-(`facilityIdentificationKey`), `geoAssocs` (`geoAssocKey`), `productStoreFacilities`
-(`storeFacilityKey`), `systemMessageErrors` (`errorKey`), `productUpdateHistories` (`updateKey`),
-`facilityGroupProductStores` (`facilityGroupProductStoreKey`), `appVersions` (`appVersionKey`).
+| table | synthetic key |
+|---|---|
+| `systemMessageErrors` | `errorKey` |
+| `productUpdateHistories` | `updateKey` |
+| `shopifyInventoryAdjustmentDetails` | `adjustmentKey` |
+| `carrierShipmentMethods` | `carrierShipmentMethodKey` |
+| `carrierFacilities` | `carrierFacilityKey` |
+| `inventoryEventDocuments` | `documentFeedKey` |
+| `organizationRelationships` | `relationshipKey` |
+| `shopifyLocations` | `locationKey` |
+| `shopifyTypeMappings` | `typeMappingKey` |
+| `shopifyCarrierShipments` | `carrierShipmentKey` |
+| `facilityGroupProductStores` | `facilityGroupProductStoreKey` |
+| `enumGroupMembers` | `enumGroupMemberKey` |
+| `facilityIdentifications` | `facilityIdentificationKey` |
+| `appVersions` | `appVersionKey` |
+
+**`cacheEntities.ts` also defines synthetic-key projections for `groupFacilities` (`memberKey`),
+`geoAssocs` (`geoAssocKey`) and `productStoreFacilities` (`storeFacilityKey`) — do NOT convert
+those here.** They are framework SEED tables that Company picks, not Company-owned tables; they are
+absent from `COMPANY_SCHEMA` entirely. The framework already gave all three real compound keys in
+its own Task 8, and Task 15 deletes their local projections when `cacheEntities.ts` retargets onto
+the composed entities. Adding them to `companySchema` would make `mergeSchemas` throw on a duplicate
+table, which is the check that catches this mistake.
 
 **The conversion rule is mechanical and its source of truth is in the file.** Each projection's
 `buildKey` joins the composite fields with `|`, in order, and each projection's doc comment states
