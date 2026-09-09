@@ -173,3 +173,72 @@ describe("createSyncService", () => {
     service.stop();
   });
 });
+
+import { serviceState } from "../db/sync/syncService";
+
+describe("syncService error state", () => {
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    workerStub.onmessage = null;
+    for (const key of Object.keys(serviceState.errors)) delete serviceState.errors[key];
+  });
+
+  it("records a domain error from a sync-error status", async () => {
+    const service = createSyncService({ workerUrl: "/w.js" });
+    await service.start();
+
+    workerStub.onmessage!({ data: { type: "sync-error", domain: "a", message: "boom" } } as MessageEvent);
+
+    expect(serviceState.errors.a).toBe("boom");
+    service.stop();
+  });
+
+  it("clears a domain's error on its next successful sync", async () => {
+    const service = createSyncService({ workerUrl: "/w.js" });
+    await service.start();
+    workerStub.onmessage!({ data: { type: "sync-error", domain: "a", message: "boom" } } as MessageEvent);
+
+    workerStub.onmessage!({ data: { type: "sync-end", domain: "a", written: 2 } } as MessageEvent);
+
+    expect(serviceState.errors.a).toBeUndefined();
+    service.stop();
+  });
+
+  /**
+   * One domain, several PK scopes in flight. A failure on one scope must not replace the visible
+   * message for another, and clearing one scope must not clear the other's.
+   */
+  it("keeps scoped failures independent", async () => {
+    const service = createSyncService({ workerUrl: "/w.js" });
+    await service.start();
+
+    workerStub.onmessage!({ data: { type: "sync-error", domain: "d", scope: "id=1", message: "one" } } as MessageEvent);
+    workerStub.onmessage!({ data: { type: "sync-error", domain: "d", scope: "id=2", message: "two" } } as MessageEvent);
+    workerStub.onmessage!({ data: { type: "refetch-end", domain: "d", scope: "id=2" } } as MessageEvent);
+
+    expect(serviceState.errors.d).toBe("one");
+    service.stop();
+  });
+
+  it("drops the domain error once its last scope succeeds", async () => {
+    const service = createSyncService({ workerUrl: "/w.js" });
+    await service.start();
+    workerStub.onmessage!({ data: { type: "sync-error", domain: "d", scope: "id=1", message: "one" } } as MessageEvent);
+
+    workerStub.onmessage!({ data: { type: "refetch-end", domain: "d", scope: "id=1" } } as MessageEvent);
+
+    expect(serviceState.errors.d).toBeUndefined();
+    service.stop();
+  });
+
+  it("surfaces the newest scoped failure when several are open", async () => {
+    const service = createSyncService({ workerUrl: "/w.js" });
+    await service.start();
+
+    workerStub.onmessage!({ data: { type: "sync-error", domain: "d", scope: "id=1", message: "one" } } as MessageEvent);
+    workerStub.onmessage!({ data: { type: "sync-error", domain: "d", scope: "id=2", message: "two" } } as MessageEvent);
+
+    expect(serviceState.errors.d).toBe("two");
+    service.stop();
+  });
+});

@@ -14,9 +14,6 @@
  * MAIN-THREAD ONLY. This module may import `vue` (it exports a `reactive` state object) and MUST
  * NEVER be imported by `pollingWorkerHarness.ts` or anything a worker entry reaches — that would
  * pull `vue` into a worker chunk Vite must emit as a single iife.
- *
- * The per-domain/per-scope error map (`serviceState.errors`, `clearDomainError`) is deferred to
- * Task 4, which ports it from Company's `appCacheBootstrap.ts`.
  */
 
 import { reactive } from "vue";
@@ -63,6 +60,8 @@ export interface SyncService {
   catalog: () => Promise<CatalogItem[]>;
   /** Diagnostics: domains this worker build knows about. */
   registeredDomains: () => Promise<string[]>;
+  /** Clear one domain's visible error (and every scope behind it) without waiting on a resync. */
+  clearDomainError: (domain: string) => void;
   stop: () => void;
 }
 
@@ -76,7 +75,66 @@ export const serviceState = reactive({
   running: false,
   lastSyncAt: 0,
   written: {} as Record<string, number>,
+  errors: {} as Record<string, string>,
 });
+
+/**
+ * A domain can have several independently refetched scopes in flight (for example one carrier
+ * party per detail screen). Keep their failures separately even though the public status contract
+ * intentionally exposes one message per domain.
+ */
+const domainErrors = new Map<string, string>();
+const scopedDomainErrors = new Map<string, Map<string, string>>();
+
+function updateVisibleError(domain: string): void {
+  const domainError = domainErrors.get(domain);
+  if (domainError !== undefined) {
+    serviceState.errors[domain] = domainError;
+
+    return;
+  }
+  const scoped = scopedDomainErrors.get(domain);
+  const messages = scoped ? [...scoped.values()] : [];
+  if (messages.length) {
+    serviceState.errors[domain] = messages[messages.length - 1];
+  } else {
+    delete serviceState.errors[domain];
+  }
+}
+
+function recordSyncError(domain: string, message: string, scope?: string): void {
+  if (scope) {
+    const scoped = scopedDomainErrors.get(domain) ?? new Map<string, string>();
+    // The worker posts the scoped failure before its Comlink promise rejects. The service catch
+    // records the same failure as a fallback, but must not move that duplicate behind a newer
+    // failure from another PK and change the domain's visible diagnostic.
+    if (scoped.get(scope) === message) {
+      updateVisibleError(domain);
+
+      return;
+    }
+    // Move a repeated failure to the end so the public message reflects the newest failure.
+    scoped.delete(scope);
+    scoped.set(scope, message);
+    scopedDomainErrors.set(domain, scoped);
+  } else {
+    domainErrors.set(domain, message);
+  }
+  updateVisibleError(domain);
+}
+
+function clearDomainErrors(domain: string): void {
+  domainErrors.delete(domain);
+  scopedDomainErrors.delete(domain);
+  updateVisibleError(domain);
+}
+
+function clearScopeError(domain: string, scope: string): void {
+  const scoped = scopedDomainErrors.get(domain);
+  scoped?.delete(scope);
+  if (scoped?.size === 0) { scopedDomainErrors.delete(domain); }
+  updateVisibleError(domain);
+}
 
 /**
  * Main-thread half of the sync service (framework-wide).
@@ -118,6 +176,18 @@ export function createSyncService(opts: SyncServiceOptions): SyncService {
     if (data.type === "sync-end" && data.domain) {
       serviceState.written[String(data.domain)] = data.written ?? 0;
       serviceState.lastSyncAt = Date.now();
+      // A successful full snapshot verifies the whole domain and therefore every scoped row.
+      clearDomainErrors(String(data.domain));
+    } else if (data.type === "refetch-end" && data.domain) {
+      serviceState.written[String(data.domain)] = data.written ?? 0;
+      // A targeted read verifies only its own PK scope. A legacy message without scope cannot
+      // safely prove that some other failed scope recovered, so it clears nothing.
+      if (typeof data.scope === "string" && data.scope) {
+        clearScopeError(String(data.domain), data.scope);
+      }
+    } else if (data.type === "sync-error" && data.domain) {
+      const scope = typeof data.scope === "string" && data.scope ? data.scope : undefined;
+      recordSyncError(String(data.domain), String(data.message ?? "failed"), scope);
     }
     opts.onStatus?.(data);
   }
@@ -186,6 +256,7 @@ export function createSyncService(opts: SyncServiceOptions): SyncService {
     refetchOne: async (domain, pk) => (harness ? harness.refetchOne({ domain, pk }) : 0),
     catalog: async () => (harness ? harness.catalog() : []),
     registeredDomains: async () => (harness ? harness.domains() : []),
+    clearDomainError: clearDomainErrors,
     stop,
   };
 }
