@@ -292,10 +292,16 @@ export function createSyncHarness(getDb: (omsInstance: string) => BaseDB): SyncH
 
   async function resyncAll(): Promise<void> {
     const db = getDb(ctx.omsInstance);
+    // Every REGISTERED domain, not just the currently active ones — "resync ALL" must mean the
+    // whole catalog, or a domain nobody has activated yet would never actually resync. Routes
+    // around the active-scoped `tick` entirely rather than through it. Class C is write-through
+    // only and must never be ticked, resync or not.
     for (const domain of getAllSyncDomains()) {
+      if (domain.syncClass === "C") continue;
       await db.syncMeta.delete(`${LOGIN_MARKER_PREFIX}${domain.name}`);
+      // propagateError=false: one bad endpoint must not abort the rest of resyncAll.
+      await runDomain({ name: domain.name }, true, false);
     }
-    await tick(true, false);
   }
 
   return {

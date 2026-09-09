@@ -233,6 +233,34 @@ describe("backward compatibility (removed in Task 12)", () => {
     harness.stop();
   });
 
+  /**
+   * The divergence this fix closes: `resyncAll` must mean "every REGISTERED domain," not "every
+   * currently ACTIVE domain." Routing it through the active-scoped `tick` would silently skip a
+   * domain nobody has activated yet, and nothing but this test would catch it — the only real
+   * caller today activates its full catalog, which happens to mask the bug.
+   */
+  it("resyncAll reaches a registered domain that was never activated, and skips class C", async () => {
+    const del = vi.fn(async () => {});
+    const db = { ...stubDb(), syncMeta: { get: async () => undefined, put: async () => {}, delete: del } };
+    const a = domain({ name: "a", syncClass: "A", intervalMs: 100_000 });
+    const b = domain({ name: "b", syncClass: "A", intervalMs: 100_000 });
+    const c = domain({ name: "c", syncClass: "C" });
+    registerSyncDomain(a); registerSyncDomain(b); registerSyncDomain(c);
+    const harness = createSyncHarness(() => db);
+
+    // Only "a" is activated — "b" and "c" are registered but never activated.
+    await harness.start({ ...START, domains: [{ name: "a" }] });
+    expect(a.sync).toHaveBeenCalledTimes(1);
+    expect(b.sync).not.toHaveBeenCalled();
+
+    await harness.resyncAll();
+
+    expect(a.sync).toHaveBeenCalledTimes(2);
+    expect(b.sync).toHaveBeenCalledTimes(1);
+    expect(c.sync).not.toHaveBeenCalled();
+    harness.stop();
+  });
+
   it("refetchOne(domain, pk) reaches the domain's refetchOne with the pk", async () => {
     const refetch = vi.fn(async () => 3);
     const a = domain({ name: "a", refetchOne: refetch });
