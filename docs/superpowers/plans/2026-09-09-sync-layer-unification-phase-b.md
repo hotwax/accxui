@@ -333,7 +333,18 @@ Rewrite `common/db/sync/pollingWorkerHarness.ts`. Read `apps/company/src/workers
     },
   ```
 - Keep the `DB_SYNC_CHANNEL` broadcast on `domain-synced` / `sync-complete` from the framework's current harness — Company's version posts status over `self.postMessage` instead, and both are needed: the channel feeds main-thread liveQuery listeners, the postMessage feeds the service's status routing.
-- Leave `refetchOne` as a stub that throws `new Error("not implemented until Task 2")`; Task 2 ports it with its ordering guarantees. Do not ship a naive version — an unordered refetch is the bug Task 2 exists to prevent.
+- Carry over the **existing** framework `refetchOne` unchanged for now:
+
+  ```ts
+    async refetchOne({ domain: domainName, pk }: { domain: string; pk: Record<string, unknown> }) {
+      const domain = getSyncDomain(domainName);
+      if (!domain?.refetchOne) return 0;
+      ctx.now = Date.now();
+      return (await domain.refetchOne(ctx, pk)) ?? 0;
+    },
+  ```
+
+  Task 2 replaces this with the ordered version. It must not be left unimplemented or throwing: Order Manager reaches this method through `refreshAfterMutation` (`src/services/orderIdentification.ts:19`), so a stub would be a live regression for the duration of one task, and its Comlink proxy means no test would catch it at compile time.
 
 Replace `exposeWorkerHarness` with:
 
