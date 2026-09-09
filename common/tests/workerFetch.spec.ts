@@ -61,3 +61,60 @@ describe("pageAll", () => {
     expect(workerRemoteApi).toHaveBeenCalledTimes(2);
   });
 });
+
+/**
+ * `strictCollection` is the guard for mutation-sensitive snapshots.
+ *
+ * A snapshot treats an empty collection as authoritative and prunes the whole scope, so an
+ * unexpected success envelope must not be allowed to become `[]`. Without the guard
+ * `unwrapCollection` degrades every unrecognized shape to an empty array, and the caller cannot
+ * tell "the server returned nothing" from "the server returned something I did not understand".
+ */
+describe("pageAll strictCollection", () => {
+  beforeEach(() => {
+    workerRemoteApi.mockReset();
+  });
+
+  it("rejects a paged response that has no array at the configured key", async () => {
+    workerRemoteApi.mockResolvedValueOnce({ ok: true });
+
+    await expect(
+      pageAll({ ctx, url: "admin/serviceJobs", collectionKey: "serviceJobList", strictCollection: true, keyOf }),
+    ).rejects.toThrow(/serviceJobList/);
+  });
+
+  it("rejects a paged response that is not the bare array it declared", async () => {
+    workerRemoteApi.mockResolvedValueOnce({ unexpectedEnvelope: rows(0, 3) });
+
+    await expect(
+      pageAll({ ctx, url: "oms/shippingGateways/carrierParties", collectionKey: null, strictCollection: true, keyOf }),
+    ).rejects.toThrow(/bare array/);
+  });
+
+  it("rejects an unpaged response of the wrong shape too", async () => {
+    workerRemoteApi.mockResolvedValueOnce({ ok: true });
+
+    await expect(
+      pageAll({ ctx, url: "oms/returnTypes", collectionKey: null, strictCollection: true, unpaged: true, keyOf }),
+    ).rejects.toThrow(/bare array/);
+  });
+
+  it("accepts the shape it declared", async () => {
+    workerRemoteApi.mockResolvedValueOnce({ serviceJobList: rows(0, 4) });
+
+    const result = await pageAll({
+      ctx, url: "admin/serviceJobs", collectionKey: "serviceJobList", strictCollection: true, keyOf,
+    });
+
+    expect(result).toHaveLength(4);
+  });
+
+  // The guard is opt-in: every domain that has not asked for it keeps the lenient unwrap.
+  it("leaves the default lenient when it is not asked for", async () => {
+    workerRemoteApi.mockResolvedValueOnce({ ok: true });
+
+    await expect(
+      pageAll({ ctx, url: "admin/serviceJobs", collectionKey: "serviceJobList", keyOf }),
+    ).resolves.toEqual([]);
+  });
+});

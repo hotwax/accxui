@@ -1,11 +1,10 @@
-/**
- * Factory for Class-B (reference/config) snapshot sync domains.
- */
-
 import { BaseDB, hasSyncedThisLogin, markSyncedThisLogin } from "../baseDb";
+import { getAppDb } from "../appDbRegistry";
+import { dbClient } from "../dbClient";
 import type { Entity } from "../defineEntity";
+
 import { canonicalKey, diffStaleKeys, entityKeyOf, isUnkeyableFetch, projectRow, projectRows } from "../projection";
-import type { DbKey, DbRow, SyncContext } from "../types";
+import type { DbKey, DbRow, SyncContext, SyncDomain } from "../types";
 import { registerSyncDomain } from "./syncRegistry";
 import { pageAll, unwrapCollection, workerGet } from "./workerFetch";
 
@@ -15,12 +14,9 @@ export interface SnapshotDomainConfig {
   projection: Entity;
   listUrl: string;
   collectionKey?: string | null;
+  strictCollection?: boolean;
   listParams?: Record<string, unknown>;
   batchSize?: number;
-  /**
-   * Fetch the collection in a single request instead of paging through it. Only for endpoints
-   * that cannot page; anything larger than one page is silently dropped.
-   */
   unpaged?: boolean;
   scopeOnSync?: { field: string; value: unknown };
   fanOut?: {
@@ -37,14 +33,6 @@ export interface SnapshotDomainConfig {
   };
 }
 
-/**
- * The cross-page dedup key pageAll needs: a canonical STRING, not a DbKey, because it goes into a
- * Set. Derived by projecting the raw record first, so it is impossible for the dedup key and the
- * key the row is eventually stored under to disagree.
- *
- * Exported so it can be tested directly; takes the Entity rather than the whole config so the test
- * needs no fetch config to exercise it.
- */
 export function snapshotKeyOf(record: any, entity: Entity): string | undefined {
   const row = projectRow(record, entity, 0);
   if (!row) return undefined;
@@ -53,7 +41,6 @@ export function snapshotKeyOf(record: any, entity: Entity): string | undefined {
   return key === undefined ? undefined : canonicalKey(key);
 }
 
-/** The stored keys of already-projected rows, dropping any that cannot be keyed. */
 function keysOfRows(rows: DbRow[], entity: Entity): DbKey[] {
   const keys: DbKey[] = [];
   for (const row of rows) {
@@ -63,36 +50,87 @@ function keysOfRows(rows: DbRow[], entity: Entity): DbKey[] {
   return keys;
 }
 
-export function registerSnapshotDomain(config: SnapshotDomainConfig, getDb: (omsInstance: string) => BaseDB): void {
-  registerSyncDomain({
+export function defineCachedEntity(db: BaseDB, table: string, entity: Entity) {
+  const client = dbClient(db);
+  const tableRef = db.table<DbRow, DbKey>(table);
+
+  return {
+    table,
+    async snapshotReplace(rawRows: any[], scope?: { field: string; value: unknown }) {
+      const rows = projectRows(rawRows, entity, Date.now());
+      let pruned = 0;
+      await db.transaction("rw", [table, "syncMeta"], async () => {
+        let existingKeys: DbKey[] = [];
+        if (scope) {
+          const scoped = await tableRef.where(scope.field).equals(scope.value as any).toArray();
+          existingKeys = keysOfRows(scoped, entity);
+        } else {
+          existingKeys = (await tableRef.toCollection().primaryKeys()) as DbKey[];
+        }
+
+        const freshKeys = keysOfRows(rows, entity);
+        const staleKeys = diffStaleKeys(existingKeys, freshKeys);
+        if (staleKeys.length > 0) {
+          await client.bulkRemove(table, staleKeys);
+          pruned = staleKeys.length;
+        }
+
+        if (rows.length > 0) {
+          await client.bulkPut(table, rows);
+        }
+      });
+      return { written: rows.length, pruned };
+    },
+
+    async upsertMany(rawRows: any[]) {
+      const rows = projectRows(rawRows, entity, Date.now());
+      if (rows.length > 0) await client.bulkPut(table, rows);
+      return rows.length;
+    },
+
+    async remove(key: DbKey) {
+      await client.remove(table, key);
+    },
+  };
+}
+
+export function registerSnapshotDomain(
+  config: SnapshotDomainConfig,
+  getDb?: (omsInstance: string) => BaseDB,
+): SyncDomain {
+  const resolveDb = getDb ?? ((omsInstance: string) => getAppDb().get(omsInstance));
+
+  const syncDomain: SyncDomain = {
     name: config.name,
-    async sync(ctx: SyncContext) {
-      const db = getDb(ctx.omsInstance);
-      if (ctx.trigger !== "manual" && await hasSyncedThisLogin(db, config.name)) return;
+    async sync(ctx: SyncContext, _args?: unknown, options?: { force?: boolean }) {
+      const db = resolveDb(ctx.omsInstance);
+      if (!options?.force && ctx.trigger !== "manual" && await hasSyncedThisLogin(db, config.name)) return 0;
 
       let rawRecords: any[] = [];
 
       if (config.fanOut) {
         const parentRows = await db.table<DbRow, string>(config.fanOut.parentTable).toArray();
-        for (const parent of parentRows) {
-          const parentId = String(parent[config.fanOut.parentKeyField] || "");
-          if (!parentId) continue;
-          const url = config.fanOut.urlFor(parentId);
+        const parentIds = [...new Set(parentRows.map((row: any) => row?.[config.fanOut!.parentKeyField]).filter(Boolean))];
+        for (const parentId of parentIds) {
+          const url = config.fanOut.urlFor(String(parentId));
           const fanRows = await pageAll({
             ctx,
             url,
             collectionKey: config.fanOut.collectionKey ?? config.collectionKey,
+            strictCollection: config.strictCollection,
+            params: config.listParams,
             batchSize: config.batchSize ?? 250,
             unpaged: config.unpaged,
-            keyOf: (r) => snapshotKeyOf(r, config.projection),
+            keyOf: (r) => snapshotKeyOf({ ...r, [config.fanOut!.parentKeyField]: parentId }, config.projection),
           });
-          rawRecords.push(...fanRows);
+          rawRecords.push(...fanRows.map((r: any) => ({ ...r, [config.fanOut!.parentKeyField]: parentId })));
         }
       } else {
         rawRecords = await pageAll({
           ctx,
           url: config.listUrl,
           collectionKey: config.collectionKey,
+          strictCollection: config.strictCollection,
           params: config.listParams,
           batchSize: config.batchSize ?? 250,
           unpaged: config.unpaged,
@@ -102,39 +140,51 @@ export function registerSnapshotDomain(config: SnapshotDomainConfig, getDb: (oms
 
       if (rawRecords.length > 0 && isUnkeyableFetch(rawRecords, config.projection)) {
         console.warn(`[db] ${config.name}: fetched ${rawRecords.length} records but keys could not be built. Aborting snapshot replace.`);
-        return;
+        return 0;
       }
 
-      const freshRows = projectRows(rawRecords, config.projection, ctx.now);
-      const freshKeys = keysOfRows(freshRows, config.projection);
+      // Safety check: avoid wiping a populated table on zero-row fetch during auto sync
+      const currentCount = await db.table(config.table).count();
+      if (!options?.force && ctx.trigger !== "manual" && rawRecords.length === 0 && currentCount > 0) {
+        console.warn(`[db] ${config.name}: fetch returned 0 records while cache holds ${currentCount} rows. Refusing to snapshot replace on auto sync.`);
+        return 0;
+      }
 
-      await db.transaction("rw", [config.table, "syncMeta"], async () => {
-        const tableRef = db.table<DbRow, DbKey>(config.table);
-        let existingKeys: DbKey[] = [];
+      const entityOps = defineCachedEntity(db, config.table, config.projection);
+      const fanned = await entityOps.snapshotReplace(rawRecords, config.scopeOnSync);
 
-        if (config.scopeOnSync) {
-          const scoped = await tableRef.where(config.scopeOnSync.field).equals(config.scopeOnSync.value as any).toArray();
-          existingKeys = keysOfRows(scoped, config.projection);
-        } else {
-          existingKeys = (await tableRef.toCollection().primaryKeys()) as DbKey[];
-        }
-
-        const staleKeys = diffStaleKeys(existingKeys, freshKeys);
-        if (staleKeys.length > 0) {
-          await tableRef.bulkDelete(staleKeys);
-        }
-
-        if (freshRows.length > 0) {
-          await tableRef.bulkPut(freshRows);
-        }
-
+      if (rawRecords.length === 0 || fanned.written > 0) {
         await markSyncedThisLogin(db, config.name);
-      });
+      }
+
+      return fanned.written;
     },
 
-    async refetchOne(pk: Record<string, unknown>, ctx: SyncContext) {
-      const db = getDb(ctx.omsInstance);
-      const tableRef = db.table<DbRow, DbKey>(config.table);
+    async refetchOne(ctx: SyncContext, pk: Record<string, unknown>) {
+      const db = resolveDb(ctx.omsInstance);
+      const entityOps = defineCachedEntity(db, config.table, config.projection);
+
+      if (!config.byPk && config.fanOut) {
+        const { parentKeyField, urlFor } = config.fanOut;
+        const parentId = pk[parentKeyField];
+        if (!parentId) return 0;
+
+        const fetched = await pageAll({
+          ctx,
+          url: urlFor(String(parentId)),
+          collectionKey: config.fanOut.collectionKey ?? config.collectionKey,
+          strictCollection: config.strictCollection,
+          params: config.listParams,
+          batchSize: config.batchSize ?? 250,
+          unpaged: config.unpaged,
+          keyOf: (r) => snapshotKeyOf({ ...r, [parentKeyField]: parentId }, config.projection),
+        });
+        const stamped = fetched.map((row: any) => ({ ...row, [parentKeyField]: parentId }));
+        if (stamped.length > 0 && isUnkeyableFetch(stamped, config.projection)) return 0;
+
+        const { written } = await entityOps.snapshotReplace(stamped, { field: parentKeyField, value: parentId });
+        return written;
+      }
 
       if (config.byPk) {
         const target = config.byPk(pk);
@@ -142,42 +192,42 @@ export function registerSnapshotDomain(config: SnapshotDomainConfig, getDb: (oms
           const resp = await workerGet(ctx, target.url, target.params);
           const raw = config.byPkRecordKey ? resp?.[config.byPkRecordKey] : resp;
           if (raw) {
-            const projected = projectRows([raw], config.projection, ctx.now);
-            if (projected.length > 0) {
-              await tableRef.put(projected[0]);
-            }
+            return await entityOps.upsertMany([raw]);
+          } else {
+            const key = entityKeyOf(pk, config.projection);
+            if (key !== undefined) await entityOps.remove(key);
+            return 0;
           }
         } catch (error) {
           console.warn(`[db] ${config.name}: failed to refetch by PK:`, error);
         }
+        return 0;
       } else if (config.refetchScope) {
         const scopeConfig = config.refetchScope(pk);
+        if (scopeConfig.scope && (scopeConfig.scope.value === undefined || scopeConfig.scope.value === null)) {
+          return 0;
+        }
         const scopedRecords = await pageAll({
           ctx,
           url: config.listUrl,
           collectionKey: config.collectionKey,
+          strictCollection: config.strictCollection,
           params: scopeConfig.params,
           batchSize: config.batchSize ?? 250,
           keyOf: (r) => snapshotKeyOf(r, config.projection),
         });
 
-        const freshRows = projectRows(scopedRecords, config.projection, ctx.now);
-        const freshKeys = keysOfRows(freshRows, config.projection);
+        if (scopedRecords.length > 0 && isUnkeyableFetch(scopedRecords, config.projection)) return 0;
 
-        await db.transaction("rw", [config.table], async () => {
-          let existingKeys: DbKey[] = [];
-          if (scopeConfig.scope) {
-            const scoped = await tableRef.where(scopeConfig.scope.field).equals(scopeConfig.scope.value as any).toArray();
-            existingKeys = keysOfRows(scoped, config.projection);
-          } else {
-            existingKeys = (await tableRef.toCollection().primaryKeys()) as DbKey[];
-          }
-
-          const staleKeys = diffStaleKeys(existingKeys, freshKeys);
-          if (staleKeys.length > 0) await tableRef.bulkDelete(staleKeys);
-          if (freshRows.length > 0) await tableRef.bulkPut(freshRows);
-        });
+        const { written } = await entityOps.snapshotReplace(scopedRecords, scopeConfig.scope);
+        return written;
       }
+      return 0;
     },
-  });
+  };
+
+  return registerSyncDomain(syncDomain);
 }
+
+
+

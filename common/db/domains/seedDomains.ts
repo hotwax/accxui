@@ -10,6 +10,7 @@ import type { SnapshotDomainConfig } from "../sync/snapshotDomain";
 
 /** Everything `registerSnapshotDomain` needs except what the entity already states. */
 export type SeedSource = Omit<SnapshotDomainConfig, "name" | "table" | "projection">;
+export type SeedDomainSource = SeedSource;
 
 export interface SeedSourceEntry {
   /** Sync domain name — the status-catalog key and the syncMeta cursor key. */
@@ -18,8 +19,9 @@ export interface SeedSourceEntry {
   label: string;
   source: SeedSource;
 }
+export type SeedDomainEntry = SeedSourceEntry;
 
-export const SEED_SOURCES = {
+export const SEED_DOMAINS = {
   productStores: {
     name: "productStore",
     label: "Product Stores",
@@ -238,8 +240,11 @@ export const SEED_SOURCES = {
   },
 } satisfies Record<string, SeedSourceEntry>;
 
-export type SeedTableName = keyof typeof SEED_SOURCES;
+/** Backward-compatibility alias for SEED_DOMAINS */
+export const SEED_SOURCES = SEED_DOMAINS;
 
-export const SEED_TABLE_NAMES = Object.keys(SEED_SOURCES) as SeedTableName[];
+export type SeedTableName = keyof typeof SEED_DOMAINS;
 
-export const SEED_DOMAIN_NAMES = SEED_TABLE_NAMES.map((table) => SEED_SOURCES[table].name);
+export const SEED_TABLE_NAMES = Object.keys(SEED_DOMAINS) as SeedTableName[];
+
+export const SEED_DOMAIN_NAMES = SEED_TABLE_NAMES.map((table) => SEED_DOMAINS[table].name);

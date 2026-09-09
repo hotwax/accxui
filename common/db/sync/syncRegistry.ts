@@ -12,9 +12,11 @@ export interface SyncRegistrationEntry {
 
 const registry = new Map<string, SyncRegistrationEntry>();
 
-export function registerSyncDomain(domain: SyncDomain): void {
+export function registerSyncDomain(domain: SyncDomain): SyncDomain {
   registry.set(domain.name, { domain });
+  return domain;
 }
+
 
 export function unregisterSyncDomain(name: string): void {
   registry.delete(name);
@@ -28,9 +30,14 @@ export function getAllSyncDomains(): SyncDomain[] {
   return Array.from(registry.values()).map((e) => e.domain);
 }
 
+export function registeredDomainNames(): string[] {
+  return Array.from(registry.keys());
+}
+
 export function clearSyncRegistry(): void {
   registry.clear();
 }
+
 
 /**
  * Pure scheduling rule: which registered domains are due to run at `now`?

@@ -3,7 +3,7 @@ import { liveQuery, type Subscription } from "dexie";
 import type { BaseDB } from "./baseDb";
 import { DB_SYNC_CHANNEL } from "./syncChannel";
 import { resyncDomain, resyncAll } from "./sync/appDbBootstrap";
-import { SEED_SOURCES, SEED_TABLE_NAMES } from "./domains/seedSources";
+import { SEED_DOMAINS, SEED_SOURCES, SEED_TABLE_NAMES } from "./domains/seedDomains";
 
 export interface SyncDomainCatalogItem {
   name: string;
@@ -26,7 +26,26 @@ export const DEFAULT_COMMON_SYNC_CATALOG: SyncDomainCatalogItem[] = SEED_TABLE_N
   syncClass: "B" as const,
 }));
 
-export function useDbStatus(db: BaseDB, catalog: SyncDomainCatalogItem[] = DEFAULT_COMMON_SYNC_CATALOG) {
+/**
+ * How this app re-runs a sync.
+ *
+ * Injected rather than imported, because an app's status card must refresh through the SAME
+ * main-thread service that owns its worker. Defaults to `appDbBootstrap`, which is correct for an
+ * app started with `startDbBootstrap`. An app running its own sync service has no harness proxy
+ * there, and the fallback path resolves domains from the main-thread registry — which is empty,
+ * because domains register as side effects inside the worker module. The refresh then resolves
+ * having done nothing, which looks exactly like a refresh that found no changes.
+ */
+export interface DbStatusActions {
+  resyncDomain: (domain: string) => Promise<void>;
+  resyncAll: () => Promise<void>;
+}
+
+export function useDbStatus(
+  db: BaseDB,
+  catalog: SyncDomainCatalogItem[] = DEFAULT_COMMON_SYNC_CATALOG,
+  actions: DbStatusActions = { resyncDomain, resyncAll },
+) {
   const domains = ref<SyncDomainStatus[]>([]);
   const loaded = ref(false);
   const refreshing = ref<string | null>(null);
@@ -118,7 +137,7 @@ export function useDbStatus(db: BaseDB, catalog: SyncDomainCatalogItem[] = DEFAU
   async function refreshDomain(name: string) {
     refreshing.value = name;
     try {
-      await resyncDomain(name);
+      await actions.resyncDomain(name);
     } finally {
       refreshing.value = null;
     }
@@ -127,7 +146,7 @@ export function useDbStatus(db: BaseDB, catalog: SyncDomainCatalogItem[] = DEFAU
   async function refreshAll() {
     refreshing.value = "*";
     try {
-      await resyncAll();
+      await actions.resyncAll();
     } finally {
       refreshing.value = null;
     }

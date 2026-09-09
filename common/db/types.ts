@@ -46,8 +46,22 @@ export interface SyncContext {
 export interface SyncDomain {
   name: string;
   cadenceMs?: number;
-  sync: (ctx: SyncContext) => Promise<void>;
-  refetchOne?: (pk: Record<string, unknown>, ctx: SyncContext) => Promise<void>;
+  sync: (ctx: SyncContext, args?: unknown, options?: { force?: boolean }) => Promise<number | void>;
+  /**
+   * Refetch one record after a mutation.
+   *
+   * Context FIRST, like `sync` — a harness holds one context and hands it to whichever domain is
+   * due, and it cannot tell a factory-built domain from a hand-written one. When the two orders
+   * disagree the mismatch is silent: the domain reads its key fields off the context (all
+   * `undefined`) and issues the request with the primary key where the token belongs, while the
+   * mutation that triggered it has already succeeded.
+   */
+  refetchOne?: (
+    ctx: SyncContext,
+    pk: Record<string, unknown>,
+    args?: unknown,
+  ) => Promise<number | void>;
 }
+
 
 export type DbSchemaDefinition = Record<string, string>;

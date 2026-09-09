@@ -12,9 +12,10 @@
 import type { AppSchema } from "./defineSchema";
 import type { Entity } from "./defineEntity";
 import type { SyncDomainCatalogItem } from "./useDbStatus";
-import { SEED_SOURCES } from "./domains/seedSources";
+import { SEED_DOMAINS, SEED_SOURCES } from "./domains/seedDomains";
 import { BaseDB } from "./baseDb";
 import { type DbClient, dbClient } from "./dbClient";
+import { setAppDb } from "./appDbRegistry";
 
 export interface AppDbDefinition {
   /** Name suffix: "CompanyDB" produces `{omsInstance}-CompanyDB`. */
@@ -104,7 +105,7 @@ export function defineAppDb(def: AppDbDefinition): AppDb {
     return get(resolveOmsInstance());
   }
 
-  return {
+  const appDb: AppDb = {
     name,
     get,
     setOmsInstanceResolver(resolve) {
@@ -118,4 +119,7 @@ export function defineAppDb(def: AppDbDefinition): AppDb {
     statusCatalog,
     seedTables: def.schema.seedTables,
   };
+
+  setAppDb(appDb);
+  return appDb;
 }

@@ -108,7 +108,7 @@ export function createPollingWorkerHarness(getDb: (omsInstance: string) => BaseD
       const domain = getSyncDomain(domainName);
       if (!domain || !domain.refetchOne) return;
       ctx.now = Date.now();
-      await domain.refetchOne(pk, ctx);
+      await domain.refetchOne(ctx, pk);
     },
 
     updateToken(token: string) {

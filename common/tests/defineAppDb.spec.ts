@@ -3,7 +3,7 @@ import { defineEntity } from "../db/defineEntity";
 import { defineSchema, mergeSchemas } from "../db/defineSchema";
 import { defineAppDb } from "../db/defineAppDb";
 import { commonSchema } from "../db/domains/commonSchema";
-import { SEED_DOMAIN_NAMES, SEED_SOURCES } from "../db/domains/seedSources";
+import { SEED_DOMAIN_NAMES, SEED_DOMAINS, SEED_SOURCES } from "../db/domains/seedDomains";
 import { registerSeedDomains } from "../db/sync/registerSeedDomains";
 import { clearSyncRegistry, getAllSyncDomains } from "../db/sync/syncRegistry";
 import { DEFAULT_COMMON_SYNC_CATALOG } from "../db/useDbStatus";
