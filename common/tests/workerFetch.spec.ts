@@ -53,12 +53,14 @@ describe("pageAll", () => {
   });
 
   it("stops when a page repeats keys it has already seen", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     workerRemoteApi.mockResolvedValue(rows(0, 250));
 
     const result = await pageAll({ ctx, url: "oms/roleTypes", keyOf });
 
     expect(result).toHaveLength(250);
     expect(workerRemoteApi).toHaveBeenCalledTimes(2);
+    warn.mockRestore();
   });
 });
 
