@@ -91,6 +91,31 @@ export function defineCachedEntity(db: BaseDB, table: string, entity: Entity) {
     async remove(key: DbKey) {
       await client.remove(table, key);
     },
+
+    /** Rows in the table, or in one scoped partition. The shallow-window test for a cursor sync. */
+    async count(scope?: { field: string; value: unknown }) {
+      if (!scope) return tableRef.count();
+      return tableRef.where(scope.field).equals(scope.value as any).count();
+    },
+
+    /**
+     * The newest stored value of `dateField`, optionally scoped — the incremental-poll cursor.
+     *
+     * Undefined for an empty scope, never 0: a 0 would be sent as a genuine lower bound and the
+     * first sync would seed nothing.
+     */
+    async newestCursor(dateField: string, scope?: { field: string; value: unknown }) {
+      const rows = scope
+        ? await tableRef.where(scope.field).equals(scope.value as any).toArray()
+        : await tableRef.toCollection().toArray();
+
+      let newest: number | undefined;
+      for (const row of rows) {
+        const value = (row as Record<string, unknown>)[dateField];
+        if (typeof value === "number" && (newest === undefined || value > newest)) newest = value;
+      }
+      return newest;
+    },
   };
 }
 
