@@ -26,6 +26,17 @@ function stubDb(rows: any[]) {
       where: (field: string) => ({
         equals: (value: unknown) => collection(rows.filter((r) => r[field] === value)),
       }),
+      // The unscoped, un-narrowed `newestCursor` path reads through this instead of a full-table
+      // scan — see Fix 6. `last()` is the max by `field` among rows where it is defined.
+      orderBy: (field: string) => ({
+        last: async () => {
+          let max: any;
+          for (const row of rows) {
+            if (row[field] !== undefined && (max === undefined || row[field] > max[field])) max = row;
+          }
+          return max;
+        },
+      }),
       bulkPut: async () => {},
       bulkDelete: async () => {},
       delete: async () => {},
@@ -75,5 +86,71 @@ describe("defineCachedEntity cursor operations", () => {
     );
 
     expect(await entity.newestCursor("createdDate", { field: "configId", value: "C1" })).toBe(42);
+  });
+
+  // Fix 6: the unscoped, un-narrowed case must not read every row to find the newest one.
+  it("finds the newest cursor value with no scope and no narrowing", async () => {
+    const entity = defineCachedEntity(
+      stubDb([
+        { logId: "A", configId: "C1", createdDate: 300 },
+        { logId: "B", configId: "C2", createdDate: 900 },
+      ]),
+      "dataManagerLogs",
+      logs,
+    );
+
+    expect(await entity.newestCursor("createdDate")).toBe(900);
+  });
+});
+
+describe("defineCachedEntity `equals` narrowing", () => {
+  it("counts only rows matching equals within a scoped partition", async () => {
+    const rows = [
+      { logId: "A", configId: "C1", createdDate: 100, logLevel: "INFO" },
+      { logId: "B", configId: "C1", createdDate: 200, logLevel: "ERROR" },
+      { logId: "C", configId: "C2", createdDate: 300, logLevel: "ERROR" },
+    ];
+    const entity = defineCachedEntity(stubDb(rows), "dataManagerLogs", logs);
+
+    expect(await entity.count({ field: "configId", value: "C1" }, { logLevel: "ERROR" })).toBe(1);
+  });
+
+  it("counts only rows matching equals with no scope", async () => {
+    const rows = [
+      { logId: "A", configId: "C1", createdDate: 100, logLevel: "INFO" },
+      { logId: "B", configId: "C1", createdDate: 200, logLevel: "ERROR" },
+      { logId: "C", configId: "C2", createdDate: 300, logLevel: "ERROR" },
+    ];
+    const entity = defineCachedEntity(stubDb(rows), "dataManagerLogs", logs);
+
+    expect(await entity.count(undefined, { logLevel: "ERROR" })).toBe(2);
+  });
+
+  /**
+   * The bug this guards: a filter applied server-side (e.g. via a cursor domain's `paramsOf`)
+   * but not to the cursor computation takes the cursor from the newest row of ANY value of that
+   * field. Here the scope-only newest is the ERROR row (900); narrowed to `logLevel: "INFO"` it
+   * must be the INFO row (100) instead — a different value, proving `equals` actually narrows.
+   */
+  it("finds the newest cursor value matching equals within a scoped partition", async () => {
+    const rows = [
+      { logId: "A", configId: "C1", createdDate: 100, logLevel: "INFO" },
+      { logId: "B", configId: "C1", createdDate: 900, logLevel: "ERROR" },
+    ];
+    const entity = defineCachedEntity(stubDb(rows), "dataManagerLogs", logs);
+
+    expect(
+      await entity.newestCursor("createdDate", { field: "configId", value: "C1" }, { logLevel: "INFO" }),
+    ).toBe(100);
+  });
+
+  it("finds the newest cursor value matching equals with no scope", async () => {
+    const rows = [
+      { logId: "A", configId: "C1", createdDate: 100, logLevel: "INFO" },
+      { logId: "B", configId: "C2", createdDate: 900, logLevel: "ERROR" },
+    ];
+    const entity = defineCachedEntity(stubDb(rows), "dataManagerLogs", logs);
+
+    expect(await entity.newestCursor("createdDate", undefined, { logLevel: "INFO" })).toBe(100);
   });
 });

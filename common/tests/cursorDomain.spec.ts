@@ -14,7 +14,7 @@ const ctx = {
 
 const logs = defineEntity({
   primaryKey: "logId",
-  fields: { logId: "text", configId: "text", createdDate: "date" },
+  fields: { logId: "text", configId: "text", createdDate: "date", logLevel: "text" },
   indexes: ["configId", "createdDate"],
 });
 
@@ -140,16 +140,53 @@ describe("cursor domain", () => {
     expect(written[0]).toHaveProperty("syncedAt");
   });
 
-  it("merges caller params into the request", async () => {
+  /**
+   * `paramsOf` must NOT narrow the record set — it is only for extra params that do not change
+   * which rows the endpoint returns (a client tag, a sort hint, ...). Nothing here filters the
+   * cached rows the cursor is computed from, so there is nothing to prove about the cursor: this
+   * test only proves the value reaches the request.
+   */
+  it("sends a non-narrowing paramsOf value through to the request", async () => {
     workerRemoteApi.mockResolvedValueOnce(page(1, 1));
     const domain = registerCursorDomain(
-      { ...CONFIG, paramsOf: (args: any) => ({ statusId: args.statusId }) },
+      { ...CONFIG, paramsOf: (args: any) => ({ requestedBy: args.requestedBy }) },
       () => stubDb([]),
     );
 
-    await domain.sync(ctx, { configId: "C1", statusId: "SUCCESS" });
+    await domain.sync(ctx, { configId: "C1", requestedBy: "ui" });
 
-    expect(workerRemoteApi.mock.calls[0][0].params.statusId).toBe("SUCCESS");
+    expect(workerRemoteApi.mock.calls[0][0].params.requestedBy).toBe("ui");
     expect(workerRemoteApi.mock.calls[0][0].params.configId).toBeUndefined();
+  });
+
+  /**
+   * The bug `narrowOf` exists to prevent: a server-side filter that is not also applied to the
+   * cursor computation takes its cursor from the newest row of ANY value of that filter, not the
+   * narrowed one. Two rows differing only in `logLevel` — an "INFO" row newer than an "ERROR" row —
+   * must yield the ERROR row's (older) date as the cursor when narrowed to `logLevel: "ERROR"`, not
+   * the INFO row's newer one; and the request must carry `logLevel` so the server applies the same
+   * filter.
+   */
+  it("narrowOf reaches the request and narrows the cursor computation", async () => {
+    workerRemoteApi.mockResolvedValueOnce(page(1, 1));
+    const rows = [
+      { logId: "E1", configId: "C1", createdDate: 500, logLevel: "ERROR" },
+      { logId: "E2", configId: "C1", createdDate: 1000, logLevel: "INFO" },
+    ];
+    const domain = registerCursorDomain(
+      {
+        ...CONFIG,
+        total: 1, // reached once narrowed to logLevel: "ERROR" (one matching row), so the sync
+        // computes a cursor instead of deepening
+        narrowOf: (args: any) => ({ logLevel: args.logLevel }),
+      },
+      () => stubDb(rows),
+    );
+
+    await domain.sync(ctx, { configId: "C1", logLevel: "ERROR" });
+
+    const params = workerRemoteApi.mock.calls[0][0].params;
+    expect(params.logLevel).toBe("ERROR");
+    expect(params.createdDate_from).toBe(new Date(500).toISOString());
   });
 });

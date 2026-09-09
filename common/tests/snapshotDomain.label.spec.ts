@@ -110,13 +110,13 @@ describe("snapshot domain database resolution", () => {
   it("warns when getDb is omitted, because the domain then writes to whichever db registered last", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 
-    registerSnapshotDomain({
+    (registerSnapshotDomain as any)({
       name: "legacy",
       table: "carriers",
       projection: defineEntity({ primaryKey: "partyId", fields: { partyId: "text" } }),
       listUrl: "oms/x",
       collectionKey: null,
-    } as any);
+    });
 
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("legacy"));
     warn.mockRestore();

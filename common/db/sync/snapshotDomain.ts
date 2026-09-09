@@ -3,7 +3,7 @@ import { getAppDb } from "../appDbRegistry";
 import { dbClient } from "../dbClient";
 import type { Entity } from "../defineEntity";
 
-import { canonicalKey, diffStaleKeys, entityKeyOf, isUnkeyableFetch, projectRow, projectRows } from "../projection";
+import { canonicalKey, diffStaleKeys, entityKeyOf, isUnkeyableFetch, newestValue, projectRow, projectRows } from "../projection";
 import type { DbKey, DbRow, SyncContext, SyncDomain } from "../types";
 import { registerSyncDomain } from "./syncRegistry";
 import { pageAll, unwrapCollection, workerGet } from "./workerFetch";
@@ -92,29 +92,50 @@ export function defineCachedEntity(db: BaseDB, table: string, entity: Entity) {
       await client.remove(table, key);
     },
 
-    /** Rows in the table, or in one scoped partition. The shallow-window test for a cursor sync. */
-    async count(scope?: { field: string; value: unknown }) {
-      if (!scope) return tableRef.count();
-      return tableRef.where(scope.field).equals(scope.value as any).count();
+    /**
+     * Rows in the table, or in one scoped partition, optionally narrowed further by `equals`
+     * (every named field must match). The shallow-window test for a cursor sync.
+     */
+    async count(scope?: { field: string; value: unknown }, equals?: Record<string, unknown>) {
+      const equalsEntries = equals ? Object.entries(equals) : [];
+      if (!scope) {
+        if (!equalsEntries.length) return tableRef.count();
+        const rows = await tableRef.toCollection().toArray();
+        return rows.filter((row) => equalsEntries.every(([field, value]) => (row as any)[field] === value)).length;
+      }
+      const scoped = tableRef.where(scope.field).equals(scope.value as any);
+      if (!equalsEntries.length) return scoped.count();
+      const rows = await scoped.toArray();
+      return rows.filter((row) => equalsEntries.every(([field, value]) => (row as any)[field] === value)).length;
     },
 
     /**
-     * The newest stored value of `dateField`, optionally scoped — the incremental-poll cursor.
+     * The newest stored value of `dateField`, optionally scoped and/or narrowed by `equals` (every
+     * named field must match) — the incremental-poll cursor.
      *
      * Undefined for an empty scope, never 0: a 0 would be sent as a genuine lower bound and the
      * first sync would seed nothing.
      */
-    async newestCursor(dateField: string, scope?: { field: string; value: unknown }) {
-      const rows = scope
+    async newestCursor(
+      dateField: string,
+      scope?: { field: string; value: unknown },
+      equals?: Record<string, unknown>,
+    ) {
+      const equalsEntries = equals ? Object.entries(equals) : [];
+
+      if (!scope && !equalsEntries.length) {
+        // Unscoped, un-narrowed: an index range read for the newest row, not a full table read.
+        const newest = await tableRef.orderBy(dateField).last();
+        return (newest as Record<string, unknown> | undefined)?.[dateField] as number | undefined;
+      }
+
+      let rows = scope
         ? await tableRef.where(scope.field).equals(scope.value as any).toArray()
         : await tableRef.toCollection().toArray();
-
-      let newest: number | undefined;
-      for (const row of rows) {
-        const value = (row as Record<string, unknown>)[dateField];
-        if (typeof value === "number" && (newest === undefined || value > newest)) newest = value;
+      if (equalsEntries.length) {
+        rows = rows.filter((row) => equalsEntries.every(([field, value]) => (row as any)[field] === value));
       }
-      return newest;
+      return newestValue(rows, dateField);
     },
   };
 }
@@ -249,7 +270,7 @@ export function registerSnapshotDomain(
           collectionKey: config.collectionKey,
           strictCollection: config.strictCollection,
           label: config.name,
-          params: scopeConfig.params,
+          params: { ...config.listParams, ...scopeConfig.params },
           batchSize: config.batchSize ?? 250,
           keyOf: (r) => snapshotKeyOf(r, config.projection),
         });

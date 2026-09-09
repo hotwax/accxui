@@ -122,15 +122,18 @@ export async function pageAll(options: {
       }
     }
 
+    if (rows.length < batchSize) break; // last page
+
     // Server ignored pageIndex (the same page came back) — stop instead of looping, and say so:
-    // a silently half-filled table is indistinguishable from a complete one.
+    // a silently half-filled table is indistinguishable from a complete one. Checked AFTER the
+    // short-page break above: a legitimate final page whose rows all duplicate earlier ones (e.g.
+    // every row on it was already seen) is a normal end of pagination, not a stuck pageIndex.
     if (newKeysCount === 0) {
       console.warn(
         `[db] ${label}: page ${pageIndex} returned no new records — the endpoint appears to ignore pageIndex; stopping with ${all.length}.`,
       );
       break;
     }
-    if (rows.length < batchSize) break; // last page
     pageIndex++;
   }
 
@@ -161,8 +164,10 @@ export async function pageNewestFirst(options: {
   batchSize: number;
   /** Narrow a page to the records worth keeping; returning fewer than given stops paging. */
   keep?: (page: any[]) => any[];
+  /** Identifies the domain in diagnostics. Defaults to `url`. */
+  label?: string;
 }): Promise<any[]> {
-  const { ctx, url, collectionKey, params, total, batchSize, keep } = options;
+  const { ctx, url, collectionKey, params, total, batchSize, keep, label = url } = options;
   const collected: any[] = [];
 
   for (let pageIndex = 0; collected.length < total; pageIndex++) {
