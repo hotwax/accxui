@@ -605,6 +605,13 @@ Error state lands in Task 4.
     onStatus?: (status: Record<string, any>) => void;
     onAuthError?: (message: string) => void;
     tokenWatchMs?: number;
+    /**
+     * The app's database, for the row-shape check. Optional: an app that does not version its
+     * stored row shape omits it. Order Manager passes it — `appDbBootstrap` runs this check today
+     * and Task 6 moves Order Manager off that module, so without it here the check is silently
+     * lost and a future DB_SHAPE_VERSION bump would not clear stale rows.
+     */
+    db?: BaseDB;
   }
   export interface SyncService {
     start: () => Promise<void>;
@@ -762,6 +769,7 @@ Required behaviour:
 - **Idempotent `start()`**: hold the in-flight promise in a `starting` variable and return it on re-entry. Carry Company's `startGeneration` counter so a terminated attempt's late status message is ignored.
 - **Token push**: `createTokenPublisher()`, seed `lastToken` from `commonUtil.getToken()`, and an interval (`tokenWatchMs`, default 15s) that publishes on change. On `auth-error`, push immediately before invoking `onAuthError` — the token may have just rotated.
 - **Status routing**: forward every message to `onStatus`; update `serviceState.written[domain]` and `lastSyncAt` on `sync-end`; set `serviceState.running` across the first pass.
+- **Row shape**: before starting the worker, when `opts.db` is given, run the shape check. Do not copy `ensureRowShape` out of `appDbBootstrap` — **move** it, with `DB_SHAPE_VERSION`, into `common/db/baseDb.ts` and export both. `clearDatabaseTables` already lives there, it is a database concern rather than a service one, and both `appDbBootstrap` (until Task 12) and `syncService` then call the same implementation instead of drifting copies.
 - **`stop()`**: clear the interval, close the publisher, terminate the worker, null the harness. Must leave the service restartable.
 
 `pollingService.ts` and `appDbBootstrap.ts` stay in place until Task 12.
