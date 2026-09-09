@@ -1704,6 +1704,20 @@ In `common/db/types.ts`, change `label?: string` to `label: string` and `syncCla
 
 This will surface any registration that still omits them, in both apps. Fix the framework ones (`registerSeedDomains` supplies both from `SEED_DOMAINS`; `registerSnapshotDomain` and `registerCursorDomain` must take them from their config and pass them through). App-side omissions mean Task 8 missed one — report rather than defaulting.
 
+- [ ] **Step 3b: Remove the harness's backward-compatibility shims**
+
+Task 1 kept `updateToken`, `resyncDomain`, `resyncAll`, a `string[]`-tolerant `domains` payload, and a two-argument `refetchOne` on the harness, because `appDbBootstrap` speaks that older protocol over a Comlink proxy and Order Manager used it until Task 6. Both apps are now on `syncService`, and `appDbBootstrap` is deleted in Step 5, so the shims have no caller.
+
+Delete from `common/db/sync/pollingWorkerHarness.ts`: the `updateToken`, `resyncDomain` and `resyncAll` methods, the `string[]` branch in `start()`'s domain normalisation, and the two-argument overload of `refetchOne`. Then delete the shim tests in `common/tests/syncHarness.spec.ts` — they pin a protocol that no longer has a speaker.
+
+Verify nothing still calls them:
+
+```bash
+grep -rn "updateToken\|resyncAll\|resyncDomain" common apps/company/src apps/order-manager/src
+```
+
+Expected after Step 5: matches only in `apps/company/src/services/appCacheBootstrap.ts`, which has its own `resyncDomain` export (a different function — it takes a domain name and routes through the service). Any match on the harness proxy means an app is still on the old protocol; STOP and report.
+
 - [ ] **Step 4: Remove the `getDb` fallback**
 
 In `common/db/sync/snapshotDomain.ts`, delete the `if (!getDb)` warning block and the `?? ((omsInstance) => getAppDb().get(omsInstance))` fallback, leaving `const resolveDb = getDb;`. Remove the now-unused `getAppDb` import.
