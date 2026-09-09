@@ -45,7 +45,20 @@ export interface SyncContext {
 
 export interface SyncDomain {
   name: string;
-  cadenceMs?: number;
+  /**
+   * Status-card text. Optional during Phase A, required from Phase B step 6 — a domain that
+   * cannot say how it appears is a domain the catalog has to be told about separately, which is
+   * the drift this design exists to remove.
+   */
+  label?: string;
+  /**
+   * A: cadenced, polled while a view that needs it is open.
+   * B: reference/config — once per login, then only on mutation.
+   * C: write-through only — never ticked, but still listed and still refetchable.
+   */
+  syncClass?: "A" | "B" | "C";
+  /** Poll cadence for class A. Omit for B and C. `ActiveDomain.intervalMs` overrides it. */
+  intervalMs?: number;
   sync: (ctx: SyncContext, args?: unknown, options?: { force?: boolean }) => Promise<number | void>;
   /**
    * Refetch one record after a mutation.

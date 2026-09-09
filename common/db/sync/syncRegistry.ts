@@ -53,7 +53,7 @@ export function dueDomains(
       due.push(entry.domain);
       continue;
     }
-    const cadence = entry.domain.cadenceMs ?? 0;
+    const cadence = entry.domain.intervalMs ?? 0;
     if (cadence > 0 && now - entry.lastRanAt >= cadence) {
       due.push(entry.domain);
     }
