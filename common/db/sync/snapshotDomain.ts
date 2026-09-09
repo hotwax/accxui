@@ -96,8 +96,16 @@ export function defineCachedEntity(db: BaseDB, table: string, entity: Entity) {
 
 export function registerSnapshotDomain(
   config: SnapshotDomainConfig,
-  getDb?: (omsInstance: string) => BaseDB,
+  getDb: (omsInstance: string) => BaseDB,
 ): SyncDomain {
+  if (!getDb) {
+    // Phase A transitional: Company's referenceDomains.ts omits this at 22 sites and lives in a
+    // different repo, so it cannot be fixed in the same commit. Removed in Phase B step 6.
+    console.warn(
+      `[db] registerSnapshotDomain("${config.name}") was called without a getDb; falling back to the ` +
+      "active AppDb global. Pass an explicit getDb — a domain should name the database it writes to.",
+    );
+  }
   const resolveDb = getDb ?? ((omsInstance: string) => getAppDb().get(omsInstance));
 
   const syncDomain: SyncDomain = {
@@ -118,6 +126,7 @@ export function registerSnapshotDomain(
             url,
             collectionKey: config.fanOut.collectionKey ?? config.collectionKey,
             strictCollection: config.strictCollection,
+            label: `${config.name}:${parentId}`,
             params: config.listParams,
             batchSize: config.batchSize ?? 250,
             unpaged: config.unpaged,
@@ -131,6 +140,7 @@ export function registerSnapshotDomain(
           url: config.listUrl,
           collectionKey: config.collectionKey,
           strictCollection: config.strictCollection,
+          label: config.name,
           params: config.listParams,
           batchSize: config.batchSize ?? 250,
           unpaged: config.unpaged,
@@ -174,6 +184,7 @@ export function registerSnapshotDomain(
           url: urlFor(String(parentId)),
           collectionKey: config.fanOut.collectionKey ?? config.collectionKey,
           strictCollection: config.strictCollection,
+          label: `${config.name}:${parentId}`,
           params: config.listParams,
           batchSize: config.batchSize ?? 250,
           unpaged: config.unpaged,
@@ -212,6 +223,7 @@ export function registerSnapshotDomain(
           url: config.listUrl,
           collectionKey: config.collectionKey,
           strictCollection: config.strictCollection,
+          label: config.name,
           params: scopeConfig.params,
           batchSize: config.batchSize ?? 250,
           keyOf: (r) => snapshotKeyOf(r, config.projection),
