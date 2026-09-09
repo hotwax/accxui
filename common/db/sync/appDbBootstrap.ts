@@ -5,7 +5,7 @@
 import { wrap, type Remote } from "comlink";
 import { reactive } from "vue";
 import type { BaseDB } from "../baseDb";
-import { clearDatabaseTables } from "../baseDb";
+import { clearDatabaseTables, DB_SHAPE_VERSION, ensureRowShape } from "../baseDb";
 import type { SyncHarness } from "./pollingWorkerHarness";
 
 export const bootstrapState = reactive({
@@ -14,26 +14,10 @@ export const bootstrapState = reactive({
   error: null as string | null,
 });
 
-/**
- * Bumped whenever the stored row shape changes in a way existing rows cannot satisfy.
- * On mismatch the data tables are cleared once and the worker refills them.
- * v2: `raw` removed from stored rows.
- */
-export const DB_SHAPE_VERSION = 2;
-const SHAPE_MARKER_KEY = "dbShapeVersion";
-
-async function ensureRowShape(db: BaseDB): Promise<void> {
-  try {
-    const marker = await db.syncMeta.get(SHAPE_MARKER_KEY);
-    if (Number(marker?.version) === DB_SHAPE_VERSION) return;
-
-    console.info(`[db-bootstrap] Row shape changed, clearing local tables for ${db.name}.`);
-    await clearDatabaseTables(db);
-    await db.syncMeta.put({ key: SHAPE_MARKER_KEY, version: DB_SHAPE_VERSION, timestamp: Date.now() });
-  } catch (error) {
-    console.warn("[db-bootstrap] Row shape check failed:", error);
-  }
-}
+// `DB_SHAPE_VERSION`/`ensureRowShape` now live in `baseDb.ts` (a database concern, not a service
+// one) so `syncService.ts` can run the same check without a second, drifting copy. Re-exported
+// here so existing importers of `appDbBootstrap.ts` keep working unchanged.
+export { DB_SHAPE_VERSION };
 
 let workerInstance: Worker | null = null;
 let harnessProxy: Remote<SyncHarness> | null = null;

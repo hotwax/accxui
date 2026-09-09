@@ -4,9 +4,9 @@
  * Merges three prior implementations into one:
  *   - `pollingService.ts`'s worker lifecycle (spawn via `WorkerFactory`, token push over
  *     BroadcastChannel, status routing, the auth-error hook);
- *   - `appDbBootstrap.ts`'s row-shape marker is NOT ported here (it lives on `BaseDB`/
- *     `clearLocalDb` and stays with that module until Task 12 — this service does not own a
- *     `BaseDB` instance);
+ *   - `appDbBootstrap.ts`'s row-shape check: `ensureRowShape` now lives on `baseDb.ts` (a database
+ *     concern, shared with `clearDatabaseTables`) and this service runs it against the caller's
+ *     `BaseDB`, when one is given, before spawning the worker — see `SyncServiceOptions.db`;
  *   - Company's `appCacheBootstrap.ts` idempotent once-per-login `start()`: the in-flight
  *     `starting` promise plus a `startGeneration` counter so a terminated attempt's last queued
  *     worker message can never mutate state after teardown.
@@ -26,6 +26,7 @@ import { WorkerFactory } from "../../core/workerFactory";
 import { createTokenPublisher } from "./pollingTokenChannel";
 import type { ActiveDomain } from "./syncRegistry";
 import type { CatalogItem, SyncHarness } from "./pollingWorkerHarness";
+import { type BaseDB, ensureRowShape } from "../baseDb";
 
 export interface SyncServiceOptions {
   /** The Web Worker URL or instance (e.g. `new URL('./appSync.worker.ts', import.meta.url)`) */
@@ -38,6 +39,12 @@ export interface SyncServiceOptions {
   onStatus?: (status: Record<string, any>) => void;
   /** Called when the worker reports an auth failure; wire to the app's re-auth/logout. */
   onAuthError?: (message: string) => void;
+  /**
+   * The app's database, for the row-shape check (`ensureRowShape`) run once before the worker
+   * spawns. Optional because an app that does not version its stored row shape omits it. Order
+   * Manager passes it once it moves onto this service (Task 6).
+   */
+  db?: BaseDB;
   /** App-local token-change watcher cadence (default 15s). */
   tokenWatchMs?: number;
 }
@@ -121,6 +128,11 @@ export function createSyncService(opts: SyncServiceOptions): SyncService {
     serviceState.running = true;
 
     const attempt = (async () => {
+      // Row-shape check runs first, before the worker exists to race it. `ensureRowShape` never
+      // throws (it swallows and warns) — a shape-check failure must never block boot.
+      if (opts.db) await ensureRowShape(opts.db);
+      if (generation !== startGeneration) return; // terminated (stop()) while the shape check ran
+
       const targetUrl = typeof opts.workerUrl === "string"
         ? new URL(opts.workerUrl, import.meta.url)
         : opts.workerUrl;

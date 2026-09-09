@@ -44,6 +44,31 @@ export async function clearDatabaseTables(db: BaseDB): Promise<void> {
   }
 }
 
+/**
+ * Bumped whenever the stored row shape changes in a way existing rows cannot satisfy.
+ * On mismatch the data tables are cleared once and the worker refills them.
+ * v2: `raw` removed from stored rows.
+ */
+export const DB_SHAPE_VERSION = 2;
+const SHAPE_MARKER_KEY = "dbShapeVersion";
+
+/**
+ * Clear the local data tables once whenever `DB_SHAPE_VERSION` has moved past what this database
+ * last recorded. Never throws — a failed shape check must not block boot.
+ */
+export async function ensureRowShape(db: BaseDB): Promise<void> {
+  try {
+    const marker = await db.syncMeta.get(SHAPE_MARKER_KEY);
+    if (Number(marker?.version) === DB_SHAPE_VERSION) return;
+
+    console.info(`[db] Row shape changed, clearing local tables for ${db.name}.`);
+    await clearDatabaseTables(db);
+    await db.syncMeta.put({ key: SHAPE_MARKER_KEY, version: DB_SHAPE_VERSION, timestamp: Date.now() });
+  } catch (error) {
+    console.warn("[db] Row shape check failed:", error);
+  }
+}
+
 const LOGIN_MARKER_PREFIX = "loginSync:";
 
 export async function hasSyncedThisLogin(db: BaseDB, domain: string): Promise<boolean> {
