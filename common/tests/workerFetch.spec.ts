@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const workerRemoteApi = vi.hoisted(() => vi.fn());
 vi.mock("../core/workerRemoteApi", () => ({ default: workerRemoteApi }));
 
-import { pageAll } from "../db/sync/workerFetch";
+import { pageAll, pageNewestFirst } from "../db/sync/workerFetch";
 import type { SyncContext } from "../db/types";
 
 const ctx = { token: "test-token", maargUrl: "https://example.hotwax.io/rest/s1/", now: 0 } as unknown as SyncContext;
@@ -116,5 +116,98 @@ describe("pageAll strictCollection", () => {
     await expect(
       pageAll({ ctx, url: "admin/serviceJobs", collectionKey: "serviceJobList", keyOf }),
     ).resolves.toEqual([]);
+  });
+});
+
+describe("pageAll diagnostics", () => {
+  beforeEach(() => {
+    workerRemoteApi.mockReset();
+  });
+
+  it("names the domain, not just the URL, when a strict collection is wrong", async () => {
+    workerRemoteApi.mockResolvedValueOnce({ partyList: [] });
+
+    await expect(
+      pageAll({
+        ctx,
+        url: "oms/shippingGateways/carrierParties/FEDEX/facilities",
+        collectionKey: null,
+        strictCollection: true,
+        label: "carrierFacility:FEDEX",
+        keyOf,
+      }),
+    ).rejects.toThrow("carrierFacility:FEDEX");
+  });
+
+  it("falls back to the URL when no label is given", async () => {
+    workerRemoteApi.mockResolvedValueOnce({ nope: [] });
+
+    await expect(
+      pageAll({ ctx, url: "oms/returnTypes", collectionKey: null, strictCollection: true, keyOf }),
+    ).rejects.toThrow("oms/returnTypes");
+  });
+
+  // An endpoint that ignores pageIndex returns page 0 forever. Stopping is right; stopping
+  // SILENTLY is not — a half-filled table then looks like a complete one.
+  it("warns when an endpoint ignores pageIndex", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    workerRemoteApi.mockResolvedValue(rows(0, 250));
+
+    await pageAll({ ctx, url: "oms/roleTypes", label: "roleType", keyOf });
+
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("roleType"));
+    warn.mockRestore();
+  });
+});
+
+describe("pageNewestFirst", () => {
+  beforeEach(() => {
+    workerRemoteApi.mockReset();
+  });
+
+  it("stops once it has collected the requested total", async () => {
+    workerRemoteApi.mockResolvedValue(rows(0, 25));
+
+    const result = await pageNewestFirst({
+      ctx, url: "admin/dataManager/details", params: {}, total: 25, batchSize: 25,
+    });
+
+    expect(result).toHaveLength(25);
+    expect(workerRemoteApi).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops on a short page", async () => {
+    workerRemoteApi.mockResolvedValueOnce(rows(0, 10));
+
+    const result = await pageNewestFirst({
+      ctx, url: "admin/dataManager/details", params: {}, total: 100, batchSize: 25,
+    });
+
+    expect(result).toHaveLength(10);
+  });
+
+  // `keep` narrowing a page means we have crossed into records already held — stop, don't page on.
+  it("stops when keep() drops part of a page", async () => {
+    workerRemoteApi
+      .mockResolvedValueOnce(rows(0, 25))
+      .mockResolvedValueOnce(rows(25, 25));
+
+    const result = await pageNewestFirst({
+      ctx, url: "admin/dataManager/details", params: {}, total: 100, batchSize: 25,
+      keep: (page) => page.slice(0, 5),
+    });
+
+    expect(result).toHaveLength(5);
+    expect(workerRemoteApi).toHaveBeenCalledTimes(1);
+  });
+
+  it("never returns more than the requested total", async () => {
+    workerRemoteApi.mockResolvedValue(rows(0, 25));
+
+    const result = await pageNewestFirst({
+      ctx, url: "x", params: {}, total: 10, batchSize: 25,
+    });
+
+    expect(result).toHaveLength(10);
   });
 });

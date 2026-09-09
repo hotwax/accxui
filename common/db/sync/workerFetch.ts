@@ -75,17 +75,19 @@ export async function pageAll(options: {
   unpaged?: boolean;
   keyOf: (record: any) => string | undefined;
   maxPages?: number;
+  /** Identifies the domain (and parent, for a fan-out) in errors/warnings. Defaults to `url`. */
+  label?: string;
 }): Promise<any[]> {
   const {
     ctx, url, collectionKey, strictCollection = false, params = {},
-    batchSize = 250, unpaged = false, keyOf, maxPages = 40,
+    batchSize = 250, unpaged = false, keyOf, maxPages = 40, label = url,
   } = options;
   if (unpaged || batchSize === 0) {
     // Single request, but still ask for a full page: Moqui defaults to 20 rows when no page
     // size is given, which silently truncates a snapshot to its first 20 records.
     const singlePageSize = batchSize || 250;
     const resp = await workerGet(ctx, url, { ...params, pageSize: singlePageSize, viewSize: singlePageSize });
-    if (strictCollection) assertCollectionShape(resp, collectionKey, url);
+    if (strictCollection) assertCollectionShape(resp, collectionKey, label);
     const rows = unwrapCollection(resp, collectionKey);
     return rows ?? [];
   }
@@ -102,7 +104,7 @@ export async function pageAll(options: {
       viewSize: batchSize,
     };
     const resp = await workerGet(ctx, url, pageParams);
-    if (strictCollection) assertCollectionShape(resp, collectionKey, url);
+    if (strictCollection) assertCollectionShape(resp, collectionKey, label);
     const rows = unwrapCollection(resp, collectionKey);
     if (!rows || rows.length === 0) break;
 
@@ -120,9 +122,64 @@ export async function pageAll(options: {
       }
     }
 
-    if (rows.length < batchSize || newKeysCount === 0) break;
+    // Server ignored pageIndex (the same page came back) — stop instead of looping, and say so:
+    // a silently half-filled table is indistinguishable from a complete one.
+    if (newKeysCount === 0) {
+      console.warn(
+        `[db] ${label}: page ${pageIndex} returned no new records — the endpoint appears to ignore pageIndex; stopping with ${all.length}.`,
+      );
+      break;
+    }
+    if (rows.length < batchSize) break; // last page
     pageIndex++;
   }
 
+  // The loop increments pageIndex on a normal iteration, so reaching maxPages here means the walk
+  // was cut short rather than finished. Warn — a silently truncated set looks like a complete one.
+  if (pageIndex >= maxPages) {
+    console.warn(
+      `[db] ${label}: stopped at the ${maxPages}-page backstop after ${all.length} records — the set may be TRUNCATED.`,
+    );
+  }
+
   return all;
+}
+
+/**
+ * Page a newest-first list endpoint until `total` records are collected, a short page arrives, or
+ * `keep` says the page has crossed into records already held.
+ *
+ * The class-A counterpart to `pageAll`: `pageAll` fetches a COMPLETE set and the caller replaces
+ * it; this fetches the newest slice and the caller upserts it.
+ */
+export async function pageNewestFirst(options: {
+  ctx: SyncContext;
+  url: string;
+  collectionKey?: string | null;
+  params: Record<string, unknown>;
+  total: number;
+  batchSize: number;
+  /** Narrow a page to the records worth keeping; returning fewer than given stops paging. */
+  keep?: (page: any[]) => any[];
+}): Promise<any[]> {
+  const { ctx, url, collectionKey, params, total, batchSize, keep } = options;
+  const collected: any[] = [];
+
+  for (let pageIndex = 0; collected.length < total; pageIndex++) {
+    const resp = await workerGet(ctx, url, { ...params, pageSize: batchSize, pageIndex });
+    const page: any[] = unwrapCollection(resp, collectionKey);
+    if (!page.length) break;
+
+    if (keep) {
+      const fresh = keep(page);
+      collected.push(...fresh);
+      if (fresh.length < page.length) break; // crossed into already-cached records
+    } else {
+      collected.push(...page);
+    }
+
+    if (page.length < batchSize) break; // last page
+  }
+
+  return collected.slice(0, total);
 }
