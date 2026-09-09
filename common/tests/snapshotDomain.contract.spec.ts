@@ -51,6 +51,7 @@ const stubDb = () => ({
 
 const urlOf = (call: number) => String(workerRemoteApi.mock.calls[call][0].url);
 const authOf = (call: number) => String(workerRemoteApi.mock.calls[call][0].headers?.Authorization ?? "");
+const paramsOf = (call: number): Record<string, any> => workerRemoteApi.mock.calls[call][0].params ?? {};
 
 describe("snapshot domain call contract", () => {
   beforeEach(() => {
@@ -104,7 +105,7 @@ describe("snapshot domain call contract", () => {
 
     await domain.refetchOne!(ctx, { systemMessageRemoteId: "SHOPIFY_1" });
 
-    expect(urlOf(0)).toContain("systemMessageRemoteId=SHOPIFY_1");
+    expect(paramsOf(0).systemMessageRemoteId).toBe("SHOPIFY_1");
     expect(authOf(0)).toBe("Bearer test-token");
   });
 

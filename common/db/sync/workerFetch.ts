@@ -5,45 +5,19 @@
 import workerRemoteApi from "../../core/workerRemoteApi";
 import type { SyncContext } from "../types";
 
-function toQueryString(params: Record<string, unknown>): string {
-  const search = new URLSearchParams();
-  for (const [key, value] of Object.entries(params)) {
-    if (value === undefined || value === null) continue;
-    if (Array.isArray(value)) {
-      for (const entry of value) {
-        if (entry === undefined || entry === null) continue;
-        search.append(key, String(entry));
-      }
-    } else {
-      search.append(key, String(value));
-    }
-  }
-  return search.toString();
-}
-
-function isEmptyBodyError(err: any): boolean {
-  if (!(err instanceof SyntaxError)) return false;
-  return /unexpected end of (json )?input/i.test(String(err?.message ?? ""));
-}
-
 export async function workerGet(
   ctx: SyncContext,
   url: string,
   params: Record<string, unknown> = {},
 ): Promise<any> {
-  try {
-    const queryString = toQueryString(params);
-    const maargUrl = (ctx.maargUrl as string) || "";
-    return await workerRemoteApi({
-      baseURL: maargUrl,
-      url: queryString ? `${url}?${queryString}` : url,
-      method: "GET",
-      headers: { Authorization: `Bearer ${ctx.token}` },
-    });
-  } catch (err: any) {
-    if (isEmptyBodyError(err)) return null;
-    throw err;
-  }
+  // Array params and empty bodies are the transport's problem now — see common/core/workerRemoteApi.
+  return workerRemoteApi({
+    baseURL: (ctx.maargUrl as string) || "",
+    url,
+    params,
+    method: "GET",
+    headers: { Authorization: `Bearer ${ctx.token}` },
+  });
 }
 
 export async function workerPost(
@@ -51,19 +25,13 @@ export async function workerPost(
   url: string,
   data: Record<string, unknown> = {},
 ): Promise<any> {
-  try {
-    const maargUrl = (ctx.maargUrl as string) || "";
-    return await workerRemoteApi({
-      baseURL: maargUrl,
-      url,
-      method: "POST",
-      headers: { Authorization: `Bearer ${ctx.token}` },
-      data,
-    });
-  } catch (err: any) {
-    if (isEmptyBodyError(err)) return null;
-    throw err;
-  }
+  return workerRemoteApi({
+    baseURL: (ctx.maargUrl as string) || "",
+    url,
+    data,
+    method: "POST",
+    headers: { Authorization: `Bearer ${ctx.token}` },
+  });
 }
 
 export function unwrapCollection(resp: any, collectionKey?: string | null): any[] {
