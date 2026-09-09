@@ -10,6 +10,8 @@ import { pageAll, unwrapCollection, workerGet } from "./workerFetch";
 
 export interface SnapshotDomainConfig {
   name: string;
+  label?: string;
+  syncClass?: "A" | "B" | "C";
   table: string;
   projection: Entity;
   listUrl: string;
@@ -156,6 +158,8 @@ export function registerSnapshotDomain(
 
   const syncDomain: SyncDomain = {
     name: config.name,
+    label: config.label ?? config.name,
+    syncClass: config.syncClass ?? "B",
     async sync(ctx: SyncContext, _args?: unknown, options?: { force?: boolean }) {
       const db = resolveDb(ctx.omsInstance);
       if (!options?.force && ctx.trigger !== "manual" && await hasSyncedThisLogin(db, config.name)) return 0;

@@ -25,7 +25,7 @@ export function registerSeedDomains(
 
     registerSnapshotDomain(
       // `appDb.entities[table]` IS the projection — an `Entity` carries no nested `projection`.
-      { name: seed.name, table, projection: entity, ...seed.source },
+      { name: seed.name, label: seed.label, syncClass: "B", table, projection: entity, ...seed.source },
       (omsInstance) => appDb.get(omsInstance),
     );
   }

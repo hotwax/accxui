@@ -73,7 +73,7 @@ export async function pageAll(options: {
   params?: Record<string, unknown>;
   batchSize?: number;
   unpaged?: boolean;
-  keyOf: (record: any) => string | undefined;
+  keyOf?: (record: any) => string | undefined;
   maxPages?: number;
   /** Identifies the domain (and parent, for a fan-out) in errors/warnings. Defaults to `url`. */
   label?: string;
@@ -110,7 +110,7 @@ export async function pageAll(options: {
 
     let newKeysCount = 0;
     for (const row of rows) {
-      const key = keyOf(row);
+      const key = keyOf ? keyOf(row) : undefined;
       if (key) {
         if (!seenKeys.has(key)) {
           seenKeys.add(key);

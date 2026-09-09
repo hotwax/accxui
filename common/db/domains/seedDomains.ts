@@ -24,7 +24,7 @@ export type SeedDomainEntry = SeedSourceEntry;
 export const SEED_DOMAINS = {
   productStores: {
     name: "productStore",
-    label: "Product Stores",
+    label: "Product stores",
     source: {
       listUrl: "admin/productStores",
       collectionKey: null,
@@ -46,7 +46,7 @@ export const SEED_DOMAINS = {
 
   enumTypes: {
     name: "enumType",
-    label: "Enumeration Types",
+    label: "Enumeration types",
     source: { listUrl: "admin/enumTypes", collectionKey: null },
   },
 
@@ -62,19 +62,19 @@ export const SEED_DOMAINS = {
 
   facilityTypes: {
     name: "facilityType",
-    label: "Facility Types",
+    label: "Facility types",
     source: { listUrl: "oms/facilityTypes", collectionKey: null },
   },
 
   facilityGroups: {
     name: "facilityGroup",
-    label: "Facility Groups",
+    label: "Facility groups",
     source: { listUrl: "oms/facilityGroups", collectionKey: null },
   },
 
   groupFacilities: {
     name: "groupFacility",
-    label: "Facility Group Members",
+    label: "Facility group members",
     source: {
       listUrl: "oms/groupFacilities",
       collectionKey: null,
@@ -89,13 +89,13 @@ export const SEED_DOMAINS = {
 
   geos: {
     name: "geo",
-    label: "Geographic Regions",
+    label: "Geos (countries/states)",
     source: { listUrl: "admin/geos", collectionKey: null, batchSize: 500 },
   },
 
   geoAssocs: {
     name: "geoAssoc",
-    label: "Region Associations",
+    label: "Geo associations",
     source: { listUrl: "admin/geos/assocs", collectionKey: null, batchSize: 500 },
   },
 
@@ -111,7 +111,7 @@ export const SEED_DOMAINS = {
 
   shipmentMethodTypes: {
     name: "shipmentMethodType",
-    label: "Shipment Methods",
+    label: "Shipment method types",
     source: { listUrl: "oms/shippingGateways/shipmentMethodTypes", collectionKey: null },
   },
 
@@ -123,7 +123,7 @@ export const SEED_DOMAINS = {
 
   paymentMethodTypes: {
     name: "paymentMethodType",
-    label: "Payment Method Types",
+    label: "Payment method types",
     source: { listUrl: "oms/paymentMethodTypes", collectionKey: null },
   },
 
@@ -147,7 +147,7 @@ export const SEED_DOMAINS = {
 
   roleTypes: {
     name: "roleType",
-    label: "Role Types",
+    label: "Role types",
     source: { listUrl: "oms/roleTypes", collectionKey: null },
   },
 
@@ -183,7 +183,7 @@ export const SEED_DOMAINS = {
 
   productStoreFacilities: {
     name: "productStoreFacility",
-    label: "Store Facilities",
+    label: "Store facilities",
     source: {
       // No global association list exists, so both the snapshot and the refetch go through fanOut.
       listUrl: "oms/productStores",
