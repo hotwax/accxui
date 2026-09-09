@@ -1732,6 +1732,22 @@ In `common/db/sync/snapshotDomain.ts`, delete the `if (!getDb)` warning block an
 
 Then fix `common/tests/snapshotDomain.label.spec.ts`: delete the "warns when getDb is omitted" test — the behaviour it pinned no longer exists — and remove the `(registerSnapshotDomain as any)` cast added in the Phase A fix wave, since every call now passes both arguments.
 
+- [ ] **Step 4b: Rehome the two things `appDbBootstrap` still owns**
+
+Deleting `appDbBootstrap.ts` in the next step would break two live consumers that are nothing to do with the sync worker. Move both first, and run the greps — do not take this list on trust, because it was assembled late.
+
+1. **`bootstrapState` → `serviceState`.** `common/db/useDb.ts:15` imports `bootstrapState` and reads `.running` in its `hydrated` computed, to tell "still seeding" from "genuinely empty". `useDb` is the framework's core read composable used across dozens of files in both apps, so this is the highest-blast-radius edit in Phase B. Repoint the import to `serviceState` from `./sync/syncService`; the `.running` field exists on both, so it is an import change only.
+
+2. **`clearLocalDb` → `syncService.ts`.** `apps/order-manager/src/store/user.ts:185` calls it on logout, via the `@common/db` barrel. Move the function into `syncService.ts` unchanged, adapting it to use this service's own worker reference and `serviceState` instead of the module-level ones it used before. Because the barrel re-exports it either way, Order Manager's import does not change.
+
+Verify both before proceeding:
+
+```bash
+grep -rn "bootstrapState\|clearLocalDb" common apps/order-manager/src apps/company/src | grep -v node_modules
+```
+
+Expected after the move: `useDb.ts` references `serviceState`, `syncService.ts` defines `clearLocalDb`, Order Manager's `store/user.ts` still imports `clearLocalDb` from `@common/db`, and Company's `appCacheBootstrap.ts` has its own `bootstrapState` export (aliased to `serviceState` in Task 9 — a different binding, leave it). **Any remaining reference to `appDbBootstrap` is a consumer nobody has rehomed; STOP and report it.**
+
 - [ ] **Step 5: Delete the superseded modules and the catalog remnants**
 
 ```bash
