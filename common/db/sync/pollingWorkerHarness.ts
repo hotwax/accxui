@@ -10,11 +10,7 @@
  * Domains supply only their own `sync` / `refetchOne` work via the registry. One base tick runs
  * whichever activated domains are due, so N domains share one thread and one token subscription.
  *
- * Ported from the Company app's fork (`apps/company/src/workers/pollingWorkerHarness.ts`), which
- * remains the more evolved version until the rest of it lands. NOT YET PORTED — still lives only
- * in that fork until a later task promotes it: the exclusive/shared per-domain operation queues
- * that order a full snapshot against a targeted refetch, the ordered `refetchOne`, and 401 →
- * `auth-error` classification. This harness's `refetchOne` is the older, unordered version.
+ * Ported from the Company app's fork (`apps/company/src/workers/pollingWorkerHarness.ts`).
  *
  * Also carries a compatibility shim (`updateToken`, `resyncDomain`, `resyncAll`, the two-arg
  * `refetchOne(domain, pk)`, and `string[]` `domains`) for the pre-Task-1 protocol that
@@ -96,6 +92,11 @@ const DEFAULT_BASE_TICK_MS = 5_000;
 
 const LOGIN_MARKER_PREFIX = "loginSync:";
 
+/** A stable string for one PK, so two refetches of the same record share a queue. */
+function scopeKeyOf(pk: Record<string, unknown>): string {
+  return Object.keys(pk).sort().map((k) => `${k}=${String(pk[k])}`).join("|");
+}
+
 /** Normalises the pre-Task-1 `string[]` domains shape to `ActiveDomain[]`. */
 function normalizeDomains(domains: ActiveDomain[] | string[] | undefined): ActiveDomain[] | undefined {
   if (!domains) return undefined;
@@ -110,6 +111,9 @@ export function createSyncHarness(getDb: (omsInstance: string) => BaseDB): SyncH
   let timer: ReturnType<typeof setInterval> | null = null;
   let running = false;
   const lastRunAt: Record<string, number> = {};
+  const refetchQueues = new Map<string, Promise<void>>();
+  const domainExclusiveQueues = new Map<string, Promise<void>>();
+  const domainSharedOperations = new Map<string, Set<Promise<void>>>();
 
   const syncChannel = typeof BroadcastChannel !== "undefined" ? new BroadcastChannel(DB_SYNC_CHANNEL) : null;
 
@@ -120,6 +124,60 @@ export function createSyncHarness(getDb: (omsInstance: string) => BaseDB): SyncH
   const post = (msg: Record<string, unknown>) => {
     if (typeof self !== "undefined") self.postMessage(msg);
   };
+
+  function classifyError(err: any): { isAuth: boolean; message: string } {
+    const message = err?.message ?? (typeof err === "string" ? err : JSON.stringify(err ?? ""));
+    const status = err?.status ?? err?.statusCode ?? err?.response?.status;
+    // workerRemoteApi throws the parsed error body (no status), so also sniff the message.
+    const isAuth = status === 401 || /unauthor|not authorized|invalid.*token|\b401\b/i.test(message);
+
+    return { isAuth, message };
+  }
+
+  /**
+   * Run a full snapshot exclusively with respect to targeted refetches for the same domain.
+   *
+   * The exclusive tail is installed immediately, before this operation starts, so a later refetch
+   * cannot overtake it. Capturing the currently registered shared operations provides the opposite
+   * ordering too: a snapshot requested after a mutation waits for every earlier targeted read.
+   */
+  function runExclusiveDomainOperation<T>(
+    domain: string,
+    action: () => Promise<T>,
+  ): Promise<T> {
+    const previousExclusive = domainExclusiveQueues.get(domain) ?? Promise.resolve();
+    const previousShared = [...(domainSharedOperations.get(domain) ?? [])];
+    const operation = Promise.all([previousExclusive, ...previousShared]).then(() => action());
+    const tail = operation.then(() => undefined, () => undefined);
+    domainExclusiveQueues.set(domain, tail);
+
+    return operation.finally(() => {
+      if (domainExclusiveQueues.get(domain) === tail) domainExclusiveQueues.delete(domain);
+    });
+  }
+
+  /**
+   * Run a targeted refetch concurrently with other scopes, but never across a full snapshot for the
+   * same domain. Different domains do not share either map and remain fully independent.
+   */
+  function runSharedDomainOperation<T>(
+    domain: string,
+    action: () => Promise<T>,
+  ): Promise<T> {
+    const previousExclusive = domainExclusiveQueues.get(domain) ?? Promise.resolve();
+    const operation = previousExclusive.then(() => action());
+    const tail = operation.then(() => undefined, () => undefined);
+    const activeOps = domainSharedOperations.get(domain) ?? new Set<Promise<void>>();
+    activeOps.add(tail);
+    domainSharedOperations.set(domain, activeOps);
+
+    return operation.finally(() => {
+      activeOps.delete(tail);
+      if (!activeOps.size && domainSharedOperations.get(domain) === activeOps) {
+        domainSharedOperations.delete(domain);
+      }
+    });
+  }
 
   async function executeDomain(
     entry: ActiveDomain,
@@ -164,13 +222,15 @@ export function createSyncHarness(getDb: (omsInstance: string) => BaseDB): SyncH
     }
   }
 
-  // Thin seam today; Task 2 wraps this with the exclusive/shared per-domain operation queues.
   function runDomain(
     entry: ActiveDomain,
     force = false,
     propagateError = false,
   ): Promise<number> {
-    return executeDomain(entry, force, propagateError);
+    return runExclusiveDomainOperation(
+      entry.name,
+      () => executeDomain(entry, force, propagateError),
+    );
   }
 
   async function tick(force = false, propagateErrors = false): Promise<void> {
@@ -253,19 +313,65 @@ export function createSyncHarness(getDb: (omsInstance: string) => BaseDB): SyncH
     return runDomain(entry, true, true);
   }
 
+  async function runTargetedRefetch(
+    request: { domain: string; pk: Record<string, unknown> },
+    scope: string,
+  ): Promise<number> {
+    const domain = getSyncDomain(request.domain);
+    if (!domain?.refetchOne) {
+      const error = new Error("domain has no refetchOne");
+      post({ type: "sync-error", domain: request.domain, scope, message: error.message });
+      throw error;
+    }
+    const entry = active.find((candidate) => candidate.name === request.domain);
+    ctx.now = Date.now();
+    try {
+      // Only append the args positional when one exists — some backward-compatibility callers
+      // assert the exact 2-arg call shape, which an always-present `undefined` third arg would break.
+      const written = (entry?.args !== undefined
+        ? await domain.refetchOne(ctx, request.pk, entry.args)
+        : await domain.refetchOne(ctx, request.pk)) ?? 0;
+      post({ type: "refetch-end", domain: request.domain, scope, written });
+
+      return written as number;
+    } catch (err) {
+      const { isAuth, message } = classifyError(err);
+      post({
+        type: isAuth ? "auth-error" : "sync-error",
+        domain: request.domain,
+        scope,
+        message,
+      });
+      // The HTTP write has already succeeded when callers reach this path. Rejecting is deliberate:
+      // resolving 0 lets a mutation UI report success while its cache stays stale and its controls
+      // are disabled by the recorded domain error.
+      throw err;
+    }
+  }
+
   async function refetchOne(
     requestOrDomain: { domain: string; pk: Record<string, unknown> } | string,
     maybePk?: Record<string, unknown>,
   ): Promise<number> {
     // Pre-Task-1 callers pass (domain, pk) as two positional args; detect by the first arg's type.
-    const { domain: domainName, pk } = typeof requestOrDomain === "string"
+    const request = typeof requestOrDomain === "string"
       ? { domain: requestOrDomain, pk: maybePk ?? {} }
       : requestOrDomain;
-    const domain = getSyncDomain(domainName);
-    if (!domain?.refetchOne) return 0;
-    ctx.now = Date.now();
+    const scope = scopeKeyOf(request.pk);
+    const queueKey = `${request.domain}:${scope}`;
+    const previous = refetchQueues.get(queueKey) ?? Promise.resolve();
+    // Same-scope reads must preserve call order: an older HTTP response must never land after a
+    // newer one and prune the newer cache state. Independent PK scopes remain concurrent.
+    const operation = runSharedDomainOperation(
+      request.domain,
+      () => previous.then(() => runTargetedRefetch(request, scope)),
+    );
+    const tail = operation.then(() => undefined, () => undefined);
+    refetchQueues.set(queueKey, tail);
 
-    return (await domain.refetchOne(ctx, pk)) ?? 0;
+    return operation.finally(() => {
+      if (refetchQueues.get(queueKey) === tail) refetchQueues.delete(queueKey);
+    });
   }
 
   function catalog(): CatalogItem[] {
