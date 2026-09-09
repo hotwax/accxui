@@ -169,3 +169,94 @@ describe("createSyncHarness catalog", () => {
     expect(harness.catalog()[0]).toMatchObject({ name: "bare", label: "bare" });
   });
 });
+
+/**
+ * `appDbBootstrap.ts` (main-thread bootstrap/dispatcher, still used by Order Manager) speaks the
+ * pre-Task-1 harness protocol: `updateToken`, `resyncDomain`, `resyncAll`, the two-arg
+ * `refetchOne(domain, pk)`, and `string[]` `domains`. Order Manager doesn't move onto the new
+ * protocol (`syncNow`/`syncDomainNow`/`setDomains`/object-shape `refetchOne`) until Task 6, so
+ * these shims must keep working until then. Task 12 deletes this whole block and its shim code.
+ */
+describe("backward compatibility (removed in Task 12)", () => {
+  beforeEach(() => clearSyncRegistry());
+
+  it("updateToken lets a token-less start begin syncing once a token arrives", async () => {
+    const a = domain({ name: "a" });
+    registerSyncDomain(a);
+    const harness = createSyncHarness(stubDb);
+
+    await harness.start({ ...START, token: "", domains: [{ name: "a" }] });
+    expect(a.sync).not.toHaveBeenCalled();
+
+    harness.updateToken("fresh-token");
+    await harness.syncNow();
+
+    expect(a.sync).toHaveBeenCalledTimes(1);
+    harness.stop();
+  });
+
+  it("resyncDomain deletes the login marker and forces that domain, bypassing its cadence", async () => {
+    const del = vi.fn(async () => {});
+    const db = { ...stubDb(), syncMeta: { get: async () => undefined, put: async () => {}, delete: del } };
+    const a = domain({ name: "a", syncClass: "A", intervalMs: 100_000 });
+    registerSyncDomain(a);
+    const harness = createSyncHarness(() => db);
+
+    await harness.start({ ...START, domains: [{ name: "a" }] });
+    expect(a.sync).toHaveBeenCalledTimes(1);
+
+    await harness.resyncDomain("a");
+
+    expect(del).toHaveBeenCalledWith("loginSync:a");
+    expect(a.sync).toHaveBeenCalledTimes(2);
+    harness.stop();
+  });
+
+  it("resyncAll deletes every registered domain's login marker and force-ticks", async () => {
+    const del = vi.fn(async () => {});
+    const db = { ...stubDb(), syncMeta: { get: async () => undefined, put: async () => {}, delete: del } };
+    const a = domain({ name: "a", syncClass: "A", intervalMs: 100_000 });
+    const b = domain({ name: "b", syncClass: "A", intervalMs: 100_000 });
+    registerSyncDomain(a); registerSyncDomain(b);
+    const harness = createSyncHarness(() => db);
+
+    await harness.start({ ...START, domains: [{ name: "a" }, { name: "b" }] });
+    expect(a.sync).toHaveBeenCalledTimes(1);
+    expect(b.sync).toHaveBeenCalledTimes(1);
+
+    await harness.resyncAll();
+
+    expect(del).toHaveBeenCalledWith("loginSync:a");
+    expect(del).toHaveBeenCalledWith("loginSync:b");
+    expect(a.sync).toHaveBeenCalledTimes(2);
+    expect(b.sync).toHaveBeenCalledTimes(2);
+    harness.stop();
+  });
+
+  it("refetchOne(domain, pk) reaches the domain's refetchOne with the pk", async () => {
+    const refetch = vi.fn(async () => 3);
+    const a = domain({ name: "a", refetchOne: refetch });
+    registerSyncDomain(a);
+    const harness = createSyncHarness(stubDb);
+    await harness.start({ ...START, domains: [] });
+
+    const written = await harness.refetchOne("a", { id: 1 });
+
+    expect(written).toBe(3);
+    expect(refetch).toHaveBeenCalledWith(expect.anything(), { id: 1 });
+    harness.stop();
+  });
+
+  it("start({ domains: string[] }) normalises each name to an activation and ticks it", async () => {
+    const a = domain({ name: "a" });
+    const b = domain({ name: "b" });
+    registerSyncDomain(a); registerSyncDomain(b);
+    const harness = createSyncHarness(stubDb);
+
+    await harness.start({ ...START, domains: ["a", "b"] });
+
+    expect(a.sync).toHaveBeenCalledTimes(1);
+    expect(b.sync).toHaveBeenCalledTimes(1);
+    harness.stop();
+  });
+});

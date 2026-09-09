@@ -15,6 +15,12 @@
  * in that fork until a later task promotes it: the exclusive/shared per-domain operation queues
  * that order a full snapshot against a targeted refetch, the ordered `refetchOne`, and 401 →
  * `auth-error` classification. This harness's `refetchOne` is the older, unordered version.
+ *
+ * Also carries a compatibility shim (`updateToken`, `resyncDomain`, `resyncAll`, the two-arg
+ * `refetchOne(domain, pk)`, and `string[]` `domains`) for the pre-Task-1 protocol that
+ * `common/db/sync/appDbBootstrap.ts` still speaks — Order Manager doesn't move onto the new
+ * protocol until Task 6. See the "backward compatibility" tests in
+ * `common/tests/syncHarness.spec.ts`; Task 12 removes the shim.
  */
 
 import { expose } from "comlink";
@@ -39,8 +45,14 @@ export interface HarnessStartPayload {
   omsInstance: string;
   /** How often the harness re-evaluates which domains are due. */
   baseTickMs?: number;
-  /** Activated domains. Omit to activate every registered class A/B domain (class C never ticks). */
-  domains?: ActiveDomain[];
+  /**
+   * Activated domains. Omit to activate every registered class A/B domain (class C never ticks).
+   *
+   * Also accepts a bare `string[]` — the pre-Task-1 protocol, still sent by
+   * `appDbBootstrap.ts`/Order Manager until Task 6. Each string is normalised to `{ name }`.
+   * Removed in Task 12.
+   */
+  domains?: ActiveDomain[] | string[];
 }
 
 export interface CatalogItem {
@@ -55,8 +67,14 @@ export interface SyncHarness {
   syncNow: () => Promise<void>;
   /** Force one domain to re-sync now, bypassing the once-per-login guard. */
   syncDomainNow: (domain: string) => Promise<number>;
-  /** Refetch one record after a mutation: `{ domain, pk }`. */
-  refetchOne: (request: { domain: string; pk: Record<string, unknown> }) => Promise<number>;
+  /**
+   * Refetch one record after a mutation. Accepts the current `{ domain, pk }` request, or the
+   * pre-Task-1 two-arg `(domain, pk)` shape — removed in Task 12.
+   */
+  refetchOne: (
+    requestOrDomain: { domain: string; pk: Record<string, unknown> } | string,
+    maybePk?: Record<string, unknown>,
+  ) => Promise<number>;
   /** Replace the activated domain set without respawning the worker. */
   setDomains: (domains: ActiveDomain[]) => void;
   stop: () => void;
@@ -64,9 +82,26 @@ export interface SyncHarness {
   domains: () => string[];
   /** Status-card data: every registered domain, with its declared label and sync class. */
   catalog: () => CatalogItem[];
+  /**
+   * Pre-Task-1 protocol below — kept only because `appDbBootstrap.ts` still speaks it until
+   * Task 6 migrates Order Manager onto `syncNow`/`syncDomainNow`/`setDomains`. Task 12 deletes
+   * these along with their tests.
+   */
+  updateToken: (token: string) => void;
+  resyncDomain: (domain: string) => Promise<void>;
+  resyncAll: () => Promise<void>;
 }
 
 const DEFAULT_BASE_TICK_MS = 5_000;
+
+const LOGIN_MARKER_PREFIX = "loginSync:";
+
+/** Normalises the pre-Task-1 `string[]` domains shape to `ActiveDomain[]`. */
+function normalizeDomains(domains: ActiveDomain[] | string[] | undefined): ActiveDomain[] | undefined {
+  if (!domains) return undefined;
+
+  return domains.map((entry) => (typeof entry === "string" ? { name: entry } : entry));
+}
 
 export function createSyncHarness(getDb: (omsInstance: string) => BaseDB): SyncHarness {
   let ctx: SyncContext = { maargUrl: "", token: "", omsInstance: "", now: Date.now() };
@@ -179,7 +214,7 @@ export function createSyncHarness(getDb: (omsInstance: string) => BaseDB): SyncH
     ctx = { maargUrl: payload.maargUrl, token: payload.token, omsInstance: payload.omsInstance, now: Date.now() };
     // "Activate everything" means "everything of class A or B" — a class-C domain exists only to
     // answer a targeted refetch and must never be polled.
-    active = payload.domains ?? getAllSyncDomains()
+    active = normalizeDomains(payload.domains) ?? getAllSyncDomains()
       .filter((d) => d.syncClass !== "C")
       .map((d) => ({ name: d.name }));
     baseTickMs = payload.baseTickMs ?? DEFAULT_BASE_TICK_MS;
@@ -218,7 +253,14 @@ export function createSyncHarness(getDb: (omsInstance: string) => BaseDB): SyncH
     return runDomain(entry, true, true);
   }
 
-  async function refetchOne({ domain: domainName, pk }: { domain: string; pk: Record<string, unknown> }): Promise<number> {
+  async function refetchOne(
+    requestOrDomain: { domain: string; pk: Record<string, unknown> } | string,
+    maybePk?: Record<string, unknown>,
+  ): Promise<number> {
+    // Pre-Task-1 callers pass (domain, pk) as two positional args; detect by the first arg's type.
+    const { domain: domainName, pk } = typeof requestOrDomain === "string"
+      ? { domain: requestOrDomain, pk: maybePk ?? {} }
+      : requestOrDomain;
     const domain = getSyncDomain(domainName);
     if (!domain?.refetchOne) return 0;
     ctx.now = Date.now();
@@ -234,6 +276,28 @@ export function createSyncHarness(getDb: (omsInstance: string) => BaseDB): SyncH
     }));
   }
 
+  // --- Pre-Task-1 protocol shim (removed in Task 12) ---
+
+  function updateToken(token: string): void {
+    ctx.token = token;
+  }
+
+  async function resyncDomain(domainName: string): Promise<void> {
+    const domain = getSyncDomain(domainName);
+    if (!domain) return;
+    const db = getDb(ctx.omsInstance);
+    await db.syncMeta.delete(`${LOGIN_MARKER_PREFIX}${domainName}`);
+    await syncDomainNow(domainName);
+  }
+
+  async function resyncAll(): Promise<void> {
+    const db = getDb(ctx.omsInstance);
+    for (const domain of getAllSyncDomains()) {
+      await db.syncMeta.delete(`${LOGIN_MARKER_PREFIX}${domain.name}`);
+    }
+    await tick(true, false);
+  }
+
   return {
     start,
     syncNow: () => tick(true, true),
@@ -243,6 +307,9 @@ export function createSyncHarness(getDb: (omsInstance: string) => BaseDB): SyncH
     stop,
     domains: () => registeredDomainNames(),
     catalog,
+    updateToken,
+    resyncDomain,
+    resyncAll,
   };
 }
 
