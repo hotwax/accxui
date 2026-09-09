@@ -23,6 +23,16 @@ function toQueryString(params: Record<string, unknown>): string {
   return search.toString();
 }
 
+/**
+ * An empty 200 is not an error. Moqui answers some list routes with no body at all when the set
+ * is empty, and `response.json()` throws a SyntaxError on it. A genuine parse failure (an HTML
+ * error page, say) has a different message and must still propagate.
+ */
+function isEmptyBodyError(err: unknown): boolean {
+  if (!(err instanceof SyntaxError)) return false;
+  return /unexpected end of (json )?input/i.test(String((err as Error).message ?? ""));
+}
+
 export default async function workerRemoteApi(customConfig: {
   url: string;
   method?: string;
@@ -71,10 +81,19 @@ export default async function workerRemoteApi(customConfig: {
   }
 
   const response = await fetch(fullUrl, fetchOptions);
-  const result = await response.json();
+
+  let result: any = null;
+  try {
+    result = await response.json();
+  } catch (err) {
+    if (!isEmptyBodyError(err)) throw err;
+    result = null;
+  }
 
   if (!response.ok) {
-    throw result;
+    // A parsed error body is thrown as-is: callers classify auth failures by sniffing its
+    // message, and wrapping it would break that. Only a bodyless failure becomes an Error.
+    throw result ?? new Error(`Request failed with status ${response.status}`);
   }
   return result;
 }

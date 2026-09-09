@@ -60,3 +60,55 @@ describe("workerRemoteApi query serialization", () => {
     expect(requestedUrl().searchParams.getAll("facilityId")).toEqual(["A", "B"]);
   });
 });
+
+const emptyBody = () => {
+  throw new SyntaxError("Unexpected end of JSON input");
+};
+
+describe("workerRemoteApi empty body handling", () => {
+  beforeEach(() => {
+    fetchMock.mockReset();
+  });
+
+  it("resolves null for a successful response with no body", async () => {
+    fetchMock.mockResolvedValue({ ok: true, status: 200, json: emptyBody });
+
+    await expect(
+      workerRemoteApi({ baseURL: "https://x.test/rest/s1/", url: "oms/facilityGroups/types" }),
+    ).resolves.toBeNull();
+  });
+
+  it("still throws for a failed response with no body, carrying the status", async () => {
+    fetchMock.mockResolvedValue({ ok: false, status: 502, json: emptyBody });
+
+    await expect(
+      workerRemoteApi({ baseURL: "https://x.test/rest/s1/", url: "oms/facilities" }),
+    ).rejects.toThrow(/502/);
+  });
+
+  // The existing contract: a failure WITH a parsed body throws that body, because callers
+  // classify auth errors by sniffing its message. Do not turn this into an Error.
+  it("still throws the parsed body for a failed response that has one", async () => {
+    fetchMock.mockResolvedValue({
+      ok: false,
+      status: 401,
+      json: async () => ({ errors: "User is not authorized" }),
+    });
+
+    await expect(
+      workerRemoteApi({ baseURL: "https://x.test/rest/s1/", url: "oms/facilities" }),
+    ).rejects.toEqual({ errors: "User is not authorized" });
+  });
+
+  it("rethrows a genuine parse error, which is not the same as an empty body", async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => { throw new SyntaxError("Unexpected token < in JSON at position 0"); },
+    });
+
+    await expect(
+      workerRemoteApi({ baseURL: "https://x.test/rest/s1/", url: "oms/facilities" }),
+    ).rejects.toThrow(/Unexpected token/);
+  });
+});
