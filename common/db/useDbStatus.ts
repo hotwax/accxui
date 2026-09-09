@@ -1,9 +1,10 @@
-import { computed, onUnmounted, ref } from "vue";
+import { computed, getCurrentInstance, onUnmounted, ref, watch } from "vue";
 import { liveQuery, type Subscription } from "dexie";
 import type { BaseDB } from "./baseDb";
 import { DB_SYNC_CHANNEL } from "./syncChannel";
 import { resyncDomain, resyncAll } from "./sync/appDbBootstrap";
 import { SEED_DOMAINS, SEED_SOURCES, SEED_TABLE_NAMES } from "./domains/seedDomains";
+import type { CatalogItem } from "./sync/pollingWorkerHarness";
 
 export interface SyncDomainCatalogItem {
   name: string;
@@ -11,6 +12,13 @@ export interface SyncDomainCatalogItem {
   label: string;
   syncClass?: "A" | "B";
 }
+
+/**
+ * Either shape a status card can be driven from: the pre-registry static array (both apps, until
+ * later tasks migrate), or a function that fetches the worker's registry-derived catalog over
+ * Comlink. The function form is awaited once on setup.
+ */
+export type DbStatusCatalogSource = SyncDomainCatalogItem[] | (() => Promise<CatalogItem[]>);
 
 export interface SyncDomainStatus extends SyncDomainCatalogItem {
   count: number;
@@ -43,12 +51,33 @@ export interface DbStatusActions {
 
 export function useDbStatus(
   db: BaseDB,
-  catalog: SyncDomainCatalogItem[] = DEFAULT_COMMON_SYNC_CATALOG,
+  catalogSource: DbStatusCatalogSource = DEFAULT_COMMON_SYNC_CATALOG,
   actions: DbStatusActions = { resyncDomain, resyncAll },
 ) {
   const domains = ref<SyncDomainStatus[]>([]);
   const loaded = ref(false);
   const refreshing = ref<string | null>(null);
+
+  /** True once the catalog source has settled — resolved, rejected, or (for an array) always. */
+  const catalogLoaded = ref(false);
+  /** The catalog actually driving the live query, regardless of which source shape it came from. */
+  const resolvedCatalog = ref<(SyncDomainCatalogItem | CatalogItem)[]>([]);
+
+  if (Array.isArray(catalogSource)) {
+    resolvedCatalog.value = catalogSource;
+    catalogLoaded.value = true;
+  } else {
+    catalogSource()
+      .then((items) => {
+        resolvedCatalog.value = items;
+        catalogLoaded.value = true;
+      })
+      .catch(() => {
+        // The worker may not be up yet. Leave the catalog empty rather than hang forever.
+        resolvedCatalog.value = [];
+        catalogLoaded.value = true;
+      });
+  }
 
   const parseSyncedAt = (markers: any[]) => {
     const map = new Map<string, number>();
@@ -68,59 +97,74 @@ export function useDbStatus(
     return map;
   };
 
-  const subscription: Subscription = liveQuery(async () => {
+  /**
+   * A registry-derived `CatalogItem` has no `table` — it's domain-keyed, not table-keyed. Fall
+   * back to the domain name, and swallow an unknown-table error into a `0` count rather than
+   * letting it blank the whole card. Task 11 reconciles domain names with table names.
+   */
+  const countForEntry = async (entry: SyncDomainCatalogItem | CatalogItem) => {
+    const tableName = (entry as SyncDomainCatalogItem).table ?? entry.name;
+    try {
+      return await db.table(tableName).count();
+    } catch {
+      return 0;
+    }
+  };
+
+  const computeRows = async (): Promise<SyncDomainStatus[]> => {
     const markers = await db.syncMeta.toArray();
     const syncedAtByDomain = parseSyncedAt(markers);
 
     const rows: SyncDomainStatus[] = [];
-    for (const entry of catalog) {
-      const table = db.table(entry.table);
-      const count = await table.count();
+    for (const entry of resolvedCatalog.value) {
+      const count = await countForEntry(entry);
       const syncedAt = syncedAtByDomain.get(entry.name) ?? null;
       rows.push({
         ...entry,
         count,
         syncedAt,
         status: count > 0 ? "success" : (syncedAt || entry.syncClass === "A" ? "empty" : "none"),
-      });
+      } as SyncDomainStatus);
     }
     return rows;
-  }).subscribe({
-    next: (rows) => {
-      domains.value = rows;
-      loaded.value = true;
-    },
-    error: () => {
-      loaded.value = true;
-    },
+  };
+
+  const subscribeToRows = (): Subscription =>
+    liveQuery(computeRows).subscribe({
+      next: (rows) => {
+        domains.value = rows;
+        loaded.value = true;
+      },
+      error: () => {
+        loaded.value = true;
+      },
+    });
+
+  let subscription: Subscription = subscribeToRows();
+
+  // An async source resolves after this composable has already subscribed against an empty
+  // catalog. Re-subscribe once it goes from empty to populated so the rows actually appear.
+  watch(resolvedCatalog, (next, previous) => {
+    if ((previous?.length ?? 0) === 0 && next.length > 0) {
+      subscription.unsubscribe();
+      subscription = subscribeToRows();
+    }
   });
 
   if (typeof BroadcastChannel !== "undefined") {
     try {
       const channel = new BroadcastChannel(DB_SYNC_CHANNEL);
       channel.onmessage = async () => {
-        const markers = await db.syncMeta.toArray();
-        const syncedAtByDomain = parseSyncedAt(markers);
-        const rows: SyncDomainStatus[] = [];
-        for (const entry of catalog) {
-          const table = db.table(entry.table);
-          const count = await table.count();
-          const syncedAt = syncedAtByDomain.get(entry.name) ?? null;
-          rows.push({
-            ...entry,
-            count,
-            syncedAt,
-            status: count > 0 ? "success" : (syncedAt || entry.syncClass === "A" ? "empty" : "none"),
-          });
-        }
-        domains.value = rows;
+        domains.value = await computeRows();
       };
     } catch {
       // Ignore
     }
   }
 
-  onUnmounted(() => subscription.unsubscribe());
+  if (getCurrentInstance()) {
+    onUnmounted(() => subscription.unsubscribe());
+  }
 
   const totalRows = computed(() => domains.value.reduce((sum, entry) => sum + entry.count, 0));
 
@@ -155,6 +199,7 @@ export function useDbStatus(
   return {
     domains,
     loaded,
+    catalogLoaded,
     refreshing,
     totalRows,
     oldestSyncedAt,
