@@ -174,13 +174,17 @@ describe("createSyncService", () => {
   });
 });
 
-import { serviceState } from "../db/sync/syncService";
+import { __resetErrorState, serviceState } from "../db/sync/syncService";
 
 describe("syncService error state", () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     workerStub.onmessage = null;
-    for (const key of Object.keys(serviceState.errors)) delete serviceState.errors[key];
+    // Resets the module-level `domainErrors`/`scopedDomainErrors` maps too, not just the visible
+    // `serviceState.errors` reflection — otherwise a scope left behind by one test (e.g. domain
+    // "d", scope "id=1") is silently reused by the next, and its assertions pass for the wrong
+    // reason (hitting the duplicate short-circuit in `recordSyncError` instead of inserting fresh).
+    __resetErrorState();
   });
 
   it("records a domain error from a sync-error status", async () => {
@@ -239,6 +243,28 @@ describe("syncService error state", () => {
     workerStub.onmessage!({ data: { type: "sync-error", domain: "d", scope: "id=2", message: "two" } } as MessageEvent);
 
     expect(serviceState.errors.d).toBe("two");
+    service.stop();
+  });
+
+  /**
+   * A repeated failure for the same domain+scope, with a different message, must be re-inserted at
+   * the end of the map so the domain's single visible message reflects the newest failure rather
+   * than a stale one — the ordering behaviour `recordSyncError`'s `delete()`-then-`set()` exists for.
+   *
+   * A second, untouched scope ("id=2") has to stay in the map for this to actually exercise the
+   * reordering: with only one scope present, `Map.set()` on an existing key updates its value in
+   * place without moving position, and `values()` would report the same "newest" answer whether or
+   * not the entry was moved — the assertion would pass even with the `delete()` removed.
+   */
+  it("re-reports a fresh message for the same domain and scope as the newest", async () => {
+    const service = createSyncService({ workerUrl: "/w.js" });
+    await service.start();
+
+    workerStub.onmessage!({ data: { type: "sync-error", domain: "d", scope: "id=1", message: "first" } } as MessageEvent);
+    workerStub.onmessage!({ data: { type: "sync-error", domain: "d", scope: "id=2", message: "other" } } as MessageEvent);
+    workerStub.onmessage!({ data: { type: "sync-error", domain: "d", scope: "id=1", message: "second" } } as MessageEvent);
+
+    expect(serviceState.errors.d).toBe("second");
     service.stop();
   });
 });

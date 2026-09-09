@@ -82,9 +82,24 @@ export const serviceState = reactive({
  * A domain can have several independently refetched scopes in flight (for example one carrier
  * party per detail screen). Keep their failures separately even though the public status contract
  * intentionally exposes one message per domain.
+ *
+ * Module-level, like `serviceState` itself: the design is one `createSyncService()` instance per
+ * app, owning the app's one worker, so there is exactly one error map to share. Two concurrently
+ * live services touching the same domain name would clobber each other's entries here — that is
+ * out of scope for this module because nothing in the framework runs two services at once today.
  */
 const domainErrors = new Map<string, string>();
 const scopedDomainErrors = new Map<string, Map<string, string>>();
+
+/**
+ * Test-only. Clears the module-level error maps and their reflection in `serviceState.errors` so
+ * tests don't leak scoped state into each other via the shared singleton maps.
+ */
+export function __resetErrorState(): void {
+  domainErrors.clear();
+  scopedDomainErrors.clear();
+  for (const key of Object.keys(serviceState.errors)) delete serviceState.errors[key];
+}
 
 function updateVisibleError(domain: string): void {
   const domainError = domainErrors.get(domain);
