@@ -164,13 +164,15 @@ export async function pageNewestFirst(options: {
   batchSize: number;
   /** Narrow a page to the records worth keeping; returning fewer than given stops paging. */
   keep?: (page: any[]) => any[];
+  maxPages?: number;
   /** Identifies the domain in diagnostics. Defaults to `url`. */
   label?: string;
 }): Promise<any[]> {
-  const { ctx, url, collectionKey, params, total, batchSize, keep, label = url } = options;
+  const { ctx, url, collectionKey, params, total, batchSize, keep, maxPages = 40, label = url } = options;
   const collected: any[] = [];
+  let pageIndex = 0;
 
-  for (let pageIndex = 0; collected.length < total; pageIndex++) {
+  for (; pageIndex < maxPages && collected.length < total; pageIndex++) {
     const resp = await workerGet(ctx, url, { ...params, pageSize: batchSize, pageIndex });
     const page: any[] = unwrapCollection(resp, collectionKey);
     if (!page.length) break;
@@ -184,6 +186,12 @@ export async function pageNewestFirst(options: {
     }
 
     if (page.length < batchSize) break; // last page
+  }
+
+  if (pageIndex >= maxPages && collected.length < total) {
+    console.warn(
+      `[db] ${label}: stopped at the ${maxPages}-page backstop after ${collected.length} records — the set may be TRUNCATED.`,
+    );
   }
 
   return collected.slice(0, total);

@@ -12,7 +12,7 @@ import type { BaseDB } from "./baseDb";
 import { dbClient } from "./dbClient";
 import { getAppDb } from "./appDbRegistry";
 import type { QueryOptions } from "./types";
-import { bootstrapState } from "./sync/appDbBootstrap";
+import { serviceState } from "./sync/syncService";
 
 export interface DbListResult<T = Record<string, any>> {
   records: Ref<T[]>;
@@ -53,7 +53,7 @@ export function useDb<T = Record<string, any>>(
 
   const first = computed(() => records.value[0]);
   const count = computed(() => records.value.length);
-  const hydrated = computed(() => emitted.value && (records.value.length > 0 || !bootstrapState.running));
+  const hydrated = computed(() => emitted.value && (records.value.length > 0 || !serviceState.running));
 
   let subscription: Subscription | null = null;
 

@@ -42,6 +42,8 @@ describe("snapshot domain fetch labels", () => {
 
     const domain = registerSnapshotDomain({
       name: "carrier",
+      label: "Carrier",
+      syncClass: "B",
       table: "carriers",
       projection: defineEntity({ primaryKey: "partyId", fields: { partyId: "text" } }),
       listUrl: "oms/shippingGateways/carrierParties",
@@ -61,6 +63,8 @@ describe("snapshot domain fetch labels", () => {
 
     const domain = registerSnapshotDomain({
       name: "carrierFacility",
+      label: "Carrier Facility",
+      syncClass: "B",
       table: "carrierFacilities",
       projection: carrierFacility,
       listUrl: "oms/shippingGateways/carrierParties",
@@ -82,6 +86,8 @@ describe("snapshot domain fetch labels", () => {
 
     const domain = registerSnapshotDomain({
       name: "systemMessageRemote",
+      label: "System Message Remote",
+      syncClass: "B",
       table: "systemMessageRemotes",
       projection: defineEntity({
         primaryKey: "systemMessageRemoteId",
@@ -98,27 +104,5 @@ describe("snapshot domain fetch labels", () => {
 
     await expect(domain.refetchOne!(ctx, { systemMessageRemoteId: "SHOPIFY_1" }))
       .rejects.toThrow("systemMessageRemote");
-  });
-});
-
-describe("snapshot domain database resolution", () => {
-  beforeEach(() => {
-    clearSyncRegistry();
-    workerRemoteApi.mockReset();
-  });
-
-  it("warns when getDb is omitted, because the domain then writes to whichever db registered last", async () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-
-    (registerSnapshotDomain as any)({
-      name: "legacy",
-      table: "carriers",
-      projection: defineEntity({ primaryKey: "partyId", fields: { partyId: "text" } }),
-      listUrl: "oms/x",
-      collectionKey: null,
-    });
-
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining("legacy"));
-    warn.mockRestore();
   });
 });

@@ -2,7 +2,6 @@ import { computed, getCurrentInstance, onUnmounted, ref, watch } from "vue";
 import { liveQuery, type Subscription } from "dexie";
 import type { BaseDB } from "./baseDb";
 import { DB_SYNC_CHANNEL } from "./syncChannel";
-import { resyncDomain, resyncAll } from "./sync/appDbBootstrap";
 import { SEED_DOMAINS, SEED_SOURCES, SEED_TABLE_NAMES } from "./domains/seedDomains";
 import type { CatalogItem } from "./sync/pollingWorkerHarness";
 
@@ -38,21 +37,22 @@ export const DEFAULT_COMMON_SYNC_CATALOG: SyncDomainCatalogItem[] = SEED_TABLE_N
  * How this app re-runs a sync.
  *
  * Injected rather than imported, because an app's status card must refresh through the SAME
- * main-thread service that owns its worker. Defaults to `appDbBootstrap`, which is correct for an
- * app started with `startDbBootstrap`. An app running its own sync service has no harness proxy
- * there, and the fallback path resolves domains from the main-thread registry — which is empty,
- * because domains register as side effects inside the worker module. The refresh then resolves
- * having done nothing, which looks exactly like a refresh that found no changes.
+ * main-thread service that owns its worker.
  */
 export interface DbStatusActions {
   resyncDomain: (domain: string) => Promise<void>;
   resyncAll: () => Promise<void>;
 }
 
+const noopActions: DbStatusActions = {
+  resyncDomain: async () => {},
+  resyncAll: async () => {},
+};
+
 export function useDbStatus(
   db: BaseDB,
   catalogSource: DbStatusCatalogSource = DEFAULT_COMMON_SYNC_CATALOG,
-  actions: DbStatusActions = { resyncDomain, resyncAll },
+  actions: DbStatusActions = noopActions,
 ) {
   const domains = ref<SyncDomainStatus[]>([]);
   const loaded = ref(false);

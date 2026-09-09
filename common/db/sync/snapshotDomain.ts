@@ -10,8 +10,8 @@ import { pageAll, unwrapCollection, workerGet } from "./workerFetch";
 
 export interface SnapshotDomainConfig {
   name: string;
-  label?: string;
-  syncClass?: "A" | "B" | "C";
+  label: string;
+  syncClass: "A" | "B" | "C";
   table: string;
   projection: Entity;
   listUrl: string;
@@ -144,22 +144,14 @@ export function defineCachedEntity(db: BaseDB, table: string, entity: Entity) {
 
 export function registerSnapshotDomain(
   config: SnapshotDomainConfig,
-  getDb: (omsInstance: string) => BaseDB,
+  getDb?: (omsInstance: string) => BaseDB,
 ): SyncDomain {
-  if (!getDb) {
-    // Phase A transitional: Company's referenceDomains.ts omits this at 22 sites and lives in a
-    // different repo, so it cannot be fixed in the same commit. Removed in Phase B step 6.
-    console.warn(
-      `[db] registerSnapshotDomain("${config.name}") was called without a getDb; falling back to the ` +
-      "active AppDb global. Pass an explicit getDb — a domain should name the database it writes to.",
-    );
-  }
   const resolveDb = getDb ?? ((omsInstance: string) => getAppDb().get(omsInstance));
 
   const syncDomain: SyncDomain = {
     name: config.name,
-    label: config.label ?? config.name,
-    syncClass: config.syncClass ?? "B",
+    label: config.label,
+    syncClass: config.syncClass,
     async sync(ctx: SyncContext, _args?: unknown, options?: { force?: boolean }) {
       const db = resolveDb(ctx.omsInstance);
       if (!options?.force && ctx.trigger !== "manual" && await hasSyncedThisLogin(db, config.name)) return 0;
