@@ -24,5 +24,8 @@ export * from "./sync/registerDomains";
 export * from "./sync/pollingWorkerHarness";
 export * from "./sync/pollingTokenChannel";
 export * from "./sync/syncService";
+export * from "./sync/createAppDbSync";
+export * from "./cacheReconciliationError";
+export * from "./cacheScopeKey";
 export { createSyncService as createSyncServiceV2 } from "./sync/syncService";
 export type { SyncService as SyncServiceV2, SyncServiceOptions as SyncServiceOptionsV2 } from "./sync/syncService";
