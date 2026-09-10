@@ -33,7 +33,7 @@ export function useSeedData(targetDb?: DbTarget) {
   /** Read a whole table, degrading to an empty list. */
   async function rows(table: string): Promise<Row[]> {
     try {
-      return await getClient().all(table);
+      return await getClient().entity(table).all();
     } catch (error) {
       console.warn(`[seed] Could not read ${table} from the local database:`, error);
       return [];
@@ -46,7 +46,7 @@ export function useSeedData(targetDb?: DbTarget) {
     if (missing) return undefined;
 
     try {
-      return await getClient().get(table, key);
+      return await getClient().entity(table).get(key);
     } catch (error) {
       console.warn(`[seed] Could not read ${table}/${key} from the local database:`, error);
       return undefined;

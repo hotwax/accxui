@@ -6,7 +6,7 @@ import type { Entity } from "../defineEntity";
 import { canonicalKey, diffStaleKeys, entityKeyOf, isUnkeyableFetch, newestValue, projectRow, projectRows } from "../projection";
 import type { DbKey, DbRow, SyncContext, SyncDomain } from "../types";
 import { registerSyncDomain } from "./syncRegistry";
-import { pageAll, unwrapCollection, workerGet } from "./workerFetch";
+import { pageAll, unwrapCollection, workerGet } from "../../core/workerRemoteApi";
 
 export interface SnapshotDomainConfig {
   name: string;
@@ -53,7 +53,7 @@ function keysOfRows(rows: DbRow[], entity: Entity): DbKey[] {
 }
 
 export function defineCachedEntity(db: BaseDB, table: string, entity: Entity) {
-  const client = dbClient(db);
+  const entityOps = dbClient(db).entity(table);
   const tableRef = db.table<DbRow, DbKey>(table);
 
   return {
@@ -73,12 +73,12 @@ export function defineCachedEntity(db: BaseDB, table: string, entity: Entity) {
         const freshKeys = keysOfRows(rows, entity);
         const staleKeys = diffStaleKeys(existingKeys, freshKeys);
         if (staleKeys.length > 0) {
-          await client.bulkRemove(table, staleKeys);
+          await entityOps.bulkRemove(staleKeys);
           pruned = staleKeys.length;
         }
 
         if (rows.length > 0) {
-          await client.bulkPut(table, rows);
+          await entityOps.bulkPut(rows as any[]);
         }
       });
       return { written: rows.length, pruned };
@@ -86,12 +86,12 @@ export function defineCachedEntity(db: BaseDB, table: string, entity: Entity) {
 
     async upsertMany(rawRows: any[]) {
       const rows = projectRows(rawRows, entity, Date.now());
-      if (rows.length > 0) await client.bulkPut(table, rows);
+      if (rows.length > 0) await entityOps.bulkPut(rows as any[]);
       return rows.length;
     },
 
     async remove(key: DbKey) {
-      await client.remove(table, key);
+      await entityOps.remove(key);
     },
 
     /**

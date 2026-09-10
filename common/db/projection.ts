@@ -62,7 +62,7 @@ export function projectRow(
     if (row[field] === undefined) return null;
   }
 
-  return { ...row, syncedAt: now } as DbRow;
+  return { ...row, raw, cachedAt: now, syncedAt: now } as DbRow;
 }
 
 /** Project many records, dropping any without a usable key. */
@@ -148,3 +148,18 @@ export function keepNewerThan(
 ): Array<Record<string, unknown>> {
   return rawRows.filter((raw) => (toMillis(raw?.[dateField]) ?? 0) > cursor);
 }
+
+/**
+ * Is this date-effective row in force at `now`?
+ *
+ * Moqui models association lifetimes as `fromDate`/`thruDate` rather than deleting rows.
+ * Treat a `thruDate` strictly less than or equal to `now` as expired.
+ */
+export function isEffectiveNow(row: Record<string, unknown> | undefined, now: number): boolean {
+  const from = toMillis(row?.fromDate);
+  const thru = toMillis(row?.thruDate);
+  if (from !== undefined && from > now) return false;
+  if (thru !== undefined && thru <= now) return false;
+  return true;
+}
+

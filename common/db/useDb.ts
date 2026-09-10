@@ -62,7 +62,7 @@ export function useDb<T = Record<string, any>>(
     subscription = null;
 
     try {
-      subscription = dbClient(targetDb).live<T>(table, currentOptions).subscribe({
+      subscription = dbClient(targetDb).entity<T>(table).live(currentOptions).subscribe({
         next: (rows) => {
           records.value = rows;
           emitted.value = true;

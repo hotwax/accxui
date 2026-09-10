@@ -14,7 +14,7 @@ import type { Entity } from "./defineEntity";
 import type { SyncDomainCatalogItem } from "./useDbStatus";
 import { SEED_DOMAINS, SEED_SOURCES } from "./domains/seedDomains";
 import { BaseDB } from "./baseDb";
-import { type DbClient, dbClient } from "./dbClient";
+import { type DbClient, type EntityClient, dbClient } from "./dbClient";
 import { setAppDb } from "./appDbRegistry";
 
 export interface AppDbDefinition {
@@ -40,6 +40,8 @@ export interface AppDb {
   raw(): BaseDB;
   /** DbClient for the signed-in instance, resolved per call so reads follow a switch. */
   client(): DbClient;
+  /** EntityClient for the signed-in instance and named table. */
+  entity<T = Record<string, any>>(table: string): EntityClient<T>;
   readonly schema: Record<string, string>;
   readonly entities: Record<string, Entity>;
   /** The composed data tables. Excludes `syncMeta`, which BaseDB injects. */
@@ -113,6 +115,7 @@ export function defineAppDb(def: AppDbDefinition): AppDb {
     },
     raw,
     client: () => dbClient(raw()),
+    entity: (table) => dbClient(raw()).entity(table),
     schema: stores,
     entities: def.schema.entities,
     tableNames: Object.keys(stores),

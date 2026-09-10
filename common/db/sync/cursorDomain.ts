@@ -14,7 +14,7 @@ import { keepNewerThan } from "../projection";
 import type { SyncContext, SyncDomain } from "../types";
 import { defineCachedEntity } from "./snapshotDomain";
 import { registerSyncDomain } from "./syncRegistry";
-import { pageNewestFirst } from "./workerFetch";
+import { pageNewestFirst } from "../../core/workerRemoteApi";
 
 export interface CursorDomainConfig {
   name: string;

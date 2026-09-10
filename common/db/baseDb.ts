@@ -108,3 +108,11 @@ export async function ensureDbReady(db: BaseDB): Promise<void> {
     }
   }
 }
+
+/** Drop the superseded fixed-name cache databases, if present. */
+export async function deleteLegacyCaches(): Promise<void> {
+  await Promise.allSettled([
+    Dexie.delete("DataManagerLogCacheDB"),
+    Dexie.delete("CompanyCacheDB"),
+  ]);
+}

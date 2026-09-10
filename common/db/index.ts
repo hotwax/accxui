@@ -18,7 +18,6 @@ export * from "./useDbStatus";
 export * from "./appDbRegistry";
 export * from "./useSeedData";
 export * from "./sync/syncRegistry";
-export * from "./sync/workerFetch";
 export * from "./sync/snapshotDomain";
 export * from "./sync/cursorDomain";
 export * from "./sync/pollingWorkerHarness";
