@@ -85,17 +85,6 @@ function parseGoodIdentifications(raw: unknown): ProductIdentification[] {
   });
 }
 
-/**
- * Solr returns a multi-valued field as an array, but a doc carrying exactly one value can arrive as a
- * bare string, so normalise both to a list. Blank entries are dropped rather than kept as "": a
- * caller checking `productFeatures.length` should not see a feature that has no value.
- */
-function parseProductFeatures(raw: any): string[] {
-  const values = Array.isArray(raw) ? raw : raw === undefined || raw === null || raw === "" ? [] : [raw];
-
-  return values.map((value) => String(value).trim()).filter(Boolean);
-}
-
 function mapDocToProduct(doc: any): ResolvedProduct {
   const goodIdentifications = parseGoodIdentifications(doc?.goodIdentifications);
 
@@ -107,7 +96,7 @@ function mapDocToProduct(doc: any): ResolvedProduct {
     internalName: String(doc?.internalName || ""),
     mainImageUrl: String(doc?.mainImageUrl || ""),
     goodIdentifications,
-    productFeatures: parseProductFeatures(doc?.productFeatures),
+    productFeatures: doc?.productFeatures || [],
   };
 }
 
