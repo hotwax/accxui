@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { defineEntity } from "../db/defineEntity";
 import { canonicalKey, entityKeyOf, projectRow } from "../db/projection";
-import { snapshotKeyOf } from "../db/sync/snapshotDomain";
+import { snapshotKeyOf } from "../db/sync/defineSnapshotDomain";
 
 const groupFacility = defineEntity({
   primaryKey: "facilityGroupId,facilityId,fromDate",

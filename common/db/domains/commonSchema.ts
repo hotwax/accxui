@@ -2,8 +2,8 @@
  * The 29 HotWax OMS seed reference tables, each declared exactly once.
  *
  * Keyed by IndexedDB store name, so `commonSchema.stores` is what Dexie's `version().stores()`
- * wants with no name/table mapping in between. `label` and `source` live in the sibling
- * `seedDomains.ts`, keyed by the same table names.
+ * wants with no name/table mapping in between. Standard domains live in the sibling
+ * `commonDomains.ts`, keyed by the same table names.
  *
  * Imports only `defineEntity`/`defineSchema`, both of which import only `./types` — app db modules
  * reach this file and the sync workers import those, so nothing here may pull in `vue`.

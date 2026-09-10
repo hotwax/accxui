@@ -1,10 +1,19 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const workerRemoteApi = vi.hoisted(() => vi.fn());
-vi.mock("../core/workerRemoteApi", () => ({ default: workerRemoteApi }));
+vi.mock("../core/workerRemoteApi", () => ({
+  default: workerRemoteApi,
+  pageNewestFirst: async (opts: any) => {
+    const res = await workerRemoteApi(opts);
+    if (!res) return [];
+    let items = Array.isArray(res) ? res : (opts.collectionKey && res[opts.collectionKey] ? res[opts.collectionKey] : [res]);
+    if (opts.keep) items = opts.keep(items);
+    return items;
+  },
+}));
 
 import { defineEntity } from "../db/defineEntity";
-import { registerCursorDomain } from "../db/sync/cursorDomain";
+import { registerCursorDomain } from "../db/sync/defineCursorDomain";
 import { clearSyncRegistry } from "../db/sync/syncRegistry";
 import type { SyncContext } from "../db/types";
 

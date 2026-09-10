@@ -2,14 +2,14 @@ import { computed, getCurrentInstance, onUnmounted, ref, watch } from "vue";
 import { liveQuery, type Subscription } from "dexie";
 import type { BaseDB } from "./baseDb";
 import { DB_SYNC_CHANNEL } from "./syncChannel";
-import { SEED_DOMAINS, SEED_SOURCES, SEED_TABLE_NAMES } from "./domains/seedDomains";
+import { COMMON_TABLE_NAMES, commonDomainsByTable } from "./domains/commonDomains";
 import type { CatalogItem } from "./sync/pollingWorkerHarness";
 
 export interface SyncDomainCatalogItem {
   name: string;
   table: string;
   label: string;
-  syncClass?: "A" | "B";
+  syncClass?: "A" | "B" | "C";
 }
 
 /**
@@ -25,12 +25,12 @@ export interface SyncDomainStatus extends SyncDomainCatalogItem {
   status: "success" | "empty" | "none";
 }
 
-/** Every seed domain, derived from SEED_SOURCES. Prefer `appDb.statusCatalog`. */
-export const DEFAULT_COMMON_SYNC_CATALOG: SyncDomainCatalogItem[] = SEED_TABLE_NAMES.map((table) => ({
-  name: SEED_SOURCES[table].name,
+/** Every seed domain, derived from commonDomainsByTable. Prefer `appDb.statusCatalog`. */
+export const DEFAULT_COMMON_SYNC_CATALOG: SyncDomainCatalogItem[] = COMMON_TABLE_NAMES.map((table) => ({
+  name: commonDomainsByTable[table].name,
   table,
-  label: SEED_SOURCES[table].label,
-  syncClass: "B" as const,
+  label: commonDomainsByTable[table].label,
+  syncClass: commonDomainsByTable[table].syncClass,
 }));
 
 /**

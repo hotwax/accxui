@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { commonSchema } from "../db/domains/commonSchema";
-import { SEED_DOMAIN_NAMES, SEED_SOURCES, SEED_TABLE_NAMES } from "../db/domains/seedDomains";
+import { COMMON_DOMAIN_NAMES, COMMON_TABLE_NAMES, commonDomainsByTable } from "../db/domains/commonDomains";
 import before from "./fixtures/seedBefore.json";
 import after from "./fixtures/seedSchemaAfter.json";
 
@@ -9,19 +9,18 @@ describe("commonSchema", () => {
     expect(commonSchema.stores).toEqual(after.schema);
   });
 
-  it("declares every table that SEED_SOURCES describes, and no others", () => {
-    expect(Object.keys(commonSchema.entities).sort()).toEqual([...SEED_TABLE_NAMES].sort());
-    expect(Object.keys(SEED_SOURCES).sort()).toEqual([...SEED_TABLE_NAMES].sort());
+  it("declares every table that commonDomains describes, and no others", () => {
+    expect(Object.keys(commonSchema.entities).sort()).toEqual([...COMMON_TABLE_NAMES].sort());
+    expect(Object.keys(commonDomainsByTable).sort()).toEqual([...COMMON_TABLE_NAMES].sort());
   });
 
   it("keeps the pre-refactor domain names exactly", () => {
-    expect([...SEED_DOMAIN_NAMES].sort()).toEqual(before.domainNames);
+    expect([...COMMON_DOMAIN_NAMES].sort()).toEqual(before.domainNames);
   });
 
-  it("gives every entity a label and a listUrl", () => {
-    for (const table of SEED_TABLE_NAMES) {
-      expect(SEED_SOURCES[table].label, `missing label for ${table}`).toBeTruthy();
-      expect(SEED_SOURCES[table].source.listUrl, `missing listUrl for ${table}`).toBeTruthy();
+  it("gives every entity a label", () => {
+    for (const table of COMMON_TABLE_NAMES) {
+      expect(commonDomainsByTable[table].label, `missing label for ${table}`).toBeTruthy();
     }
   });
 

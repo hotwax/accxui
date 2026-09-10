@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { defineEntity } from "../db/defineEntity";
-import { defineCachedEntity } from "../db/sync/snapshotDomain";
+import { defineCachedEntity } from "../db/sync/defineSnapshotDomain";
 
 const logs = defineEntity({
   primaryKey: "logId",

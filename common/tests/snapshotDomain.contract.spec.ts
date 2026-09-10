@@ -15,10 +15,23 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  * the row it just changed is never refreshed.
  */
 const workerRemoteApi = vi.hoisted(() => vi.fn());
-vi.mock("../core/workerRemoteApi", () => ({ default: workerRemoteApi }));
+vi.mock("../core/workerRemoteApi", () => ({
+  default: workerRemoteApi,
+  workerGet: async (ctx: any, url: any, params: any) => {
+    const headers = { Authorization: `Bearer ${ctx?.token}` };
+    const res = workerRemoteApi({ ctx, url, params, headers });
+    return res !== undefined ? res : workerRemoteApi();
+  },
+  pageAll: async (opts: any) => {
+    const headers = { Authorization: `Bearer ${opts.ctx?.token}` };
+    const res = workerRemoteApi({ ctx: opts.ctx, url: opts.url, params: opts.params, headers });
+    const ret = res !== undefined ? res : workerRemoteApi();
+    return Array.isArray(ret) ? ret : (ret ? [ret] : []);
+  },
+}));
 
 import { defineEntity } from "../db/defineEntity";
-import { registerSnapshotDomain } from "../db/sync/snapshotDomain";
+import { registerSnapshotDomain } from "../db/sync/defineSnapshotDomain";
 import { clearSyncRegistry } from "../db/sync/syncRegistry";
 import type { SyncContext } from "../db/types";
 

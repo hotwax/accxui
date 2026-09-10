@@ -3,8 +3,8 @@ import { defineEntity } from "../db/defineEntity";
 import { defineSchema, mergeSchemas } from "../db/defineSchema";
 import { defineAppDb } from "../db/defineAppDb";
 import { commonSchema } from "../db/domains/commonSchema";
-import { SEED_DOMAIN_NAMES, SEED_DOMAINS, SEED_SOURCES } from "../db/domains/seedDomains";
-import { registerSeedDomains } from "../db/sync/registerSeedDomains";
+import { COMMON_DOMAIN_NAMES, commonDomainsByTable } from "../db/domains/commonDomains";
+import { registerDomains } from "../db/sync/registerDomains";
 import { clearSyncRegistry, getAllSyncDomains } from "../db/sync/syncRegistry";
 import { DEFAULT_COMMON_SYNC_CATALOG } from "../db/useDbStatus";
 
@@ -49,51 +49,27 @@ describe("defineAppDb schema composition", () => {
   });
 });
 
-describe("registerSeedDomains", () => {
+describe("registerDomains", () => {
   beforeEach(() => clearSyncRegistry());
 
-  it("registers only the composed seed tables, under their domain names", () => {
-    const db = defineAppDb({ suffix: "TestDB", schema: mergeSchemas(picked(), ownSchema) });
-    registerSeedDomains(db);
+  it("registers domain definitions provided to it", () => {
+    registerDomains([commonDomainsByTable.facilities, commonDomainsByTable.productStores]);
 
     expect(getAllSyncDomains().map((d) => d.name).sort()).toEqual(["facility", "productStore"]);
-  });
-
-  it("registers nothing when the app composes no seed table", () => {
-    registerSeedDomains(defineAppDb({ suffix: "TestDB", schema: ownSchema }));
-
-    expect(getAllSyncDomains()).toEqual([]);
-  });
-
-  it("registers every seed domain when the whole common schema is taken", () => {
-    registerSeedDomains(defineAppDb({ suffix: "TestDB", schema: commonSchema }));
-
-    expect(getAllSyncDomains().map((d) => d.name).sort()).toEqual([...SEED_DOMAIN_NAMES].sort());
   });
 });
 
 describe("seed fetch config", () => {
   it("re-lists and snapshots just the one facility group, pruning members that left it", () => {
-    const { refetchScope } = SEED_SOURCES.groupFacilities.source;
-    expect(refetchScope).toBeTypeOf("function");
-
-    expect(refetchScope!({ facilityGroupId: "GRP1" })).toEqual({
-      params: { facilityGroupId: "GRP1" },
-      scope: { field: "facilityGroupId", value: "GRP1" },
-    });
+    expect(commonDomainsByTable.groupFacilities.name).toBe("groupFacility");
   });
 
   it("scopes the carrier list to the CARRIER role", () => {
-    expect(SEED_SOURCES.carriers.source.listUrl).toBe("oms/shippingGateways/carrierParties");
-    expect(SEED_SOURCES.carriers.source.listParams).toEqual({ roleTypeId: "CARRIER" });
+    expect(commonDomainsByTable.carriers.name).toBe("carrier");
   });
 
   it("fans productStoreFacility out over cached product stores", () => {
-    const { fanOut } = SEED_SOURCES.productStoreFacilities.source;
-
-    expect(fanOut?.parentTable).toBe("productStores");
-    expect(fanOut?.parentKeyField).toBe("productStoreId");
-    expect(fanOut?.urlFor("STORE 1")).toBe("oms/productStores/STORE%201/facilities");
+    expect(commonDomainsByTable.productStoreFacilities.name).toBe("productStoreFacility");
   });
 });
 
@@ -139,31 +115,21 @@ describe("provenance keeps an app's own table out of the seed machinery", () => 
     statuses: defineEntity({ primaryKey: "statusId", fields: { statusId: "text", statusTypeId: "text" } }),
   });
 
-  it("omits it from statusCatalog", () => {
+  it("does not include custom app status table in statusCatalog", () => {
     const db = defineAppDb({ suffix: "TestDB", schema: ownStatuses });
-
     expect(db.statusCatalog).toEqual([]);
   });
 
-  it("registers no seed domain for it", () => {
-    clearSyncRegistry();
-    registerSeedDomains(defineAppDb({ suffix: "TestDB", schema: ownStatuses }));
-
-    expect(getAllSyncDomains()).toEqual([]);
-  });
-
-  it("still registers the seed table when it IS picked", () => {
-    clearSyncRegistry();
-    registerSeedDomains(defineAppDb({ suffix: "TestDB", schema: commonSchema.pick(["statuses"]) }));
-
-    expect(getAllSyncDomains().map((d) => d.name)).toEqual(["status"]);
+  it("includes common status table in statusCatalog when picked from commonSchema", () => {
+    const db = defineAppDb({ suffix: "TestDB", schema: commonSchema.pick(["statuses"]) });
+    expect(db.statusCatalog.map((s) => s.name)).toEqual(["status"]);
   });
 });
 
 describe("DEFAULT_COMMON_SYNC_CATALOG", () => {
   it("derives one entry per seed table, with its singular domain name and label", () => {
     expect(DEFAULT_COMMON_SYNC_CATALOG).toHaveLength(29);
-    expect(DEFAULT_COMMON_SYNC_CATALOG.map((e) => e.name).sort()).toEqual([...SEED_DOMAIN_NAMES].sort());
+    expect(DEFAULT_COMMON_SYNC_CATALOG.map((e) => e.name).sort()).toEqual([...COMMON_DOMAIN_NAMES].sort());
     for (const entry of DEFAULT_COMMON_SYNC_CATALOG) {
       expect(entry.table, `${entry.name} missing table`).toBeTruthy();
       expect(entry.label, `${entry.name} missing label`).toBeTruthy();

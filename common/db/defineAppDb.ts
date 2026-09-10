@@ -12,7 +12,7 @@
 import type { AppSchema } from "./defineSchema";
 import type { Entity } from "./defineEntity";
 import type { SyncDomainCatalogItem } from "./useDbStatus";
-import { SEED_DOMAINS, SEED_SOURCES } from "./domains/seedDomains";
+import { commonDomainsByTable } from "./domains/commonDomains";
 import { BaseDB } from "./baseDb";
 import { type DbClient, type EntityClient, dbClient } from "./dbClient";
 import { setAppDb } from "./appDbRegistry";
@@ -63,12 +63,12 @@ export function defineAppDb(def: AppDbDefinition): AppDb {
   // Derived from the composed tables, so it can never list a table the database does not have.
   const statusCatalog: SyncDomainCatalogItem[] = Object.keys(stores)
     // Provenance, not name. An app may declare its own table with a seed table's name.
-    .filter((table) => def.schema.seedTables.has(table) && table in SEED_SOURCES)
+    .filter((table) => def.schema.seedTables.has(table) && table in commonDomainsByTable)
     .map((table) => ({
-      name: SEED_SOURCES[table as keyof typeof SEED_SOURCES].name,
+      name: commonDomainsByTable[table].name,
       table,
-      label: SEED_SOURCES[table as keyof typeof SEED_SOURCES].label,
-      syncClass: "B" as const,
+      label: commonDomainsByTable[table].label,
+      syncClass: commonDomainsByTable[table].syncClass,
     }));
 
   class AppDatabase extends BaseDB {

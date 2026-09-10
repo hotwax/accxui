@@ -45,6 +45,8 @@ export interface SyncContext {
 
 export interface SyncDomain {
   name: string;
+  /** Primary IndexedDB table for this domain. */
+  table?: string;
   /** Status-card text. Required from Phase B. */
   label: string;
   /**

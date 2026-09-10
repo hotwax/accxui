@@ -13,7 +13,7 @@ export interface SnapshotDomainConfig {
   label: string;
   syncClass: "A" | "B" | "C";
   table: string;
-  projection: Entity;
+  projection?: Entity;
   listUrl: string;
   collectionKey?: string | null;
   strictCollection?: boolean;
@@ -142,7 +142,7 @@ export function defineCachedEntity(db: BaseDB, table: string, entity: Entity) {
   };
 }
 
-export function registerSnapshotDomain(
+export function defineSnapshotDomain(
   config: SnapshotDomainConfig,
   getDb?: (omsInstance: string) => BaseDB,
 ): SyncDomain {
@@ -150,10 +150,16 @@ export function registerSnapshotDomain(
 
   const syncDomain: SyncDomain = {
     name: config.name,
+    table: config.table,
     label: config.label,
     syncClass: config.syncClass,
     async sync(ctx: SyncContext, _args?: unknown, options?: { force?: boolean }) {
       const db = resolveDb(ctx.omsInstance);
+      const projection = config.projection ?? getAppDb().entities[config.table];
+      if (!projection) {
+        throw new Error(`[db] domain "${config.name}": no entity projection found for table "${config.table}".`);
+      }
+
       if (!options?.force && ctx.trigger !== "manual" && await hasSyncedThisLogin(db, config.name)) return 0;
 
       let rawRecords: any[] = [];
@@ -172,7 +178,7 @@ export function registerSnapshotDomain(
             params: config.listParams,
             batchSize: config.batchSize ?? 250,
             unpaged: config.unpaged,
-            keyOf: (r) => snapshotKeyOf({ ...r, [config.fanOut!.parentKeyField]: parentId }, config.projection),
+            keyOf: (r) => snapshotKeyOf({ ...r, [config.fanOut!.parentKeyField]: parentId }, projection),
           });
           rawRecords.push(...fanRows.map((r: any) => ({ ...r, [config.fanOut!.parentKeyField]: parentId })));
         }
@@ -186,11 +192,11 @@ export function registerSnapshotDomain(
           params: config.listParams,
           batchSize: config.batchSize ?? 250,
           unpaged: config.unpaged,
-          keyOf: (r) => snapshotKeyOf(r, config.projection),
+          keyOf: (r) => snapshotKeyOf(r, projection),
         });
       }
 
-      if (rawRecords.length > 0 && isUnkeyableFetch(rawRecords, config.projection)) {
+      if (rawRecords.length > 0 && isUnkeyableFetch(rawRecords, projection)) {
         console.warn(`[db] ${config.name}: fetched ${rawRecords.length} records but keys could not be built. Aborting snapshot replace.`);
         return 0;
       }
@@ -202,7 +208,7 @@ export function registerSnapshotDomain(
         return 0;
       }
 
-      const entityOps = defineCachedEntity(db, config.table, config.projection);
+      const entityOps = defineCachedEntity(db, config.table, projection);
       const fanned = await entityOps.snapshotReplace(rawRecords, config.scopeOnSync);
 
       if (rawRecords.length === 0 || fanned.written > 0) {
@@ -214,7 +220,11 @@ export function registerSnapshotDomain(
 
     async refetchOne(ctx: SyncContext, pk: Record<string, unknown>) {
       const db = resolveDb(ctx.omsInstance);
-      const entityOps = defineCachedEntity(db, config.table, config.projection);
+      const projection = config.projection ?? getAppDb().entities[config.table];
+      if (!projection) {
+        throw new Error(`[db] domain "${config.name}": no entity projection found for table "${config.table}".`);
+      }
+      const entityOps = defineCachedEntity(db, config.table, projection);
 
       if (!config.byPk && config.fanOut) {
         const { parentKeyField, urlFor } = config.fanOut;
@@ -230,10 +240,10 @@ export function registerSnapshotDomain(
           params: config.listParams,
           batchSize: config.batchSize ?? 250,
           unpaged: config.unpaged,
-          keyOf: (r) => snapshotKeyOf({ ...r, [parentKeyField]: parentId }, config.projection),
+          keyOf: (r) => snapshotKeyOf({ ...r, [parentKeyField]: parentId }, projection),
         });
         const stamped = fetched.map((row: any) => ({ ...row, [parentKeyField]: parentId }));
-        if (stamped.length > 0 && isUnkeyableFetch(stamped, config.projection)) return 0;
+        if (stamped.length > 0 && isUnkeyableFetch(stamped, projection)) return 0;
 
         const { written } = await entityOps.snapshotReplace(stamped, { field: parentKeyField, value: parentId });
         return written;
@@ -247,7 +257,7 @@ export function registerSnapshotDomain(
           if (raw) {
             return await entityOps.upsertMany([raw]);
           } else {
-            const key = entityKeyOf(pk, config.projection);
+            const key = entityKeyOf(pk, projection);
             if (key !== undefined) await entityOps.remove(key);
             return 0;
           }
@@ -268,10 +278,10 @@ export function registerSnapshotDomain(
           label: config.name,
           params: { ...config.listParams, ...scopeConfig.params },
           batchSize: config.batchSize ?? 250,
-          keyOf: (r) => snapshotKeyOf(r, config.projection),
+          keyOf: (r) => snapshotKeyOf(r, projection),
         });
 
-        if (scopedRecords.length > 0 && isUnkeyableFetch(scopedRecords, config.projection)) return 0;
+        if (scopedRecords.length > 0 && isUnkeyableFetch(scopedRecords, projection)) return 0;
 
         const { written } = await entityOps.snapshotReplace(scopedRecords, scopeConfig.scope);
         return written;
@@ -280,7 +290,14 @@ export function registerSnapshotDomain(
     },
   };
 
-  return registerSyncDomain(syncDomain);
+  return syncDomain;
+}
+
+export function registerSnapshotDomain(
+  config: SnapshotDomainConfig,
+  getDb?: (omsInstance: string) => BaseDB,
+): SyncDomain {
+  return registerSyncDomain(defineSnapshotDomain(config, getDb));
 }
 
 

@@ -1,10 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const workerRemoteApi = vi.hoisted(() => vi.fn());
-vi.mock("../core/workerRemoteApi", () => ({ default: workerRemoteApi }));
+vi.mock("../core/workerRemoteApi", () => ({
+  default: workerRemoteApi,
+  pageAll: async (opts: any) => { throw new Error(opts.label); },
+}));
 
 import { defineEntity } from "../db/defineEntity";
-import { registerSnapshotDomain } from "../db/sync/snapshotDomain";
+import { registerSnapshotDomain } from "../db/sync/defineSnapshotDomain";
 import { clearSyncRegistry } from "../db/sync/syncRegistry";
 import type { SyncContext } from "../db/types";
 
