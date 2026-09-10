@@ -1,13 +1,14 @@
 import { reactive } from "vue";
 import type { AppDb } from "../defineAppDb";
 import { clearDatabaseTables } from "../baseDb";
-import { createSyncService, serviceState, type SyncService } from "./syncService";
+import { createSyncService as defaultCreateSyncService, serviceState, type SyncService } from "./syncService";
 import { CacheReconciliationError } from "../cacheReconciliationError";
 import { cacheScopeKey } from "../cacheScopeKey";
 
 export interface AppDbSyncConfig {
   db: AppDb;
-  workerUrl: URL | (() => URL);
+  getWorkerUrl?: () => URL;
+  createSyncService?: typeof defaultCreateSyncService;
   onStatus?: (status: Record<string, any>) => void;
 }
 
@@ -109,9 +110,10 @@ export function createAppDbSync(config: AppDbSyncConfig): AppDbSync {
     if (starting) return starting;
     const generation = ++startGeneration;
 
-    const url = typeof config.workerUrl === "function" ? config.workerUrl() : config.workerUrl;
-    const attemptService = createSyncService({
-      workerUrl: url,
+    const factory = config.createSyncService ?? defaultCreateSyncService;
+    const workerUrl = config.getWorkerUrl ? config.getWorkerUrl() : (undefined as any);
+    const attemptService = factory({
+      workerUrl,
       db: config.db.raw(),
       onStatus: (status: Record<string, any>) => {
         if (generation !== startGeneration || service !== attemptService) return;
