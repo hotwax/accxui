@@ -37,9 +37,19 @@ export interface ResolvedProduct {
   internalName: string;
   mainImageUrl: string;
   goodIdentifications: ProductIdentification[];
+  /**
+   * The variant's distinguishing features, as the OMS indexes them: one
+   * `"<productFeatureTypeId>/<description>"` entry per feature, multi-valued
+   * (`doc.productFeatures.add("${typeId}/${pfa.description}")` in the OMS's Solr indexer).
+   *
+   * Raw rather than formatted, because callers disagree on presentation — `commonUtil.getFeatures`
+   * sorts by type and joins the values for a label, while a filter UI wants the pairs intact. Empty
+   * for a product with no features, so a caller can fall back to `productName` without a null check.
+   */
+  productFeatures: string[];
 }
 
-const PRODUCT_FIELDS = "productId productName parentProductName internalName goodIdentifications mainImageUrl";
+const PRODUCT_FIELDS = "productId productName parentProductName internalName goodIdentifications mainImageUrl productFeatures";
 /** Solr takes the whole id list in one filter clause, so this caps the clause rather than the fetch. */
 const BATCH_SIZE = 200;
 
@@ -75,6 +85,17 @@ function parseGoodIdentifications(raw: unknown): ProductIdentification[] {
   });
 }
 
+/**
+ * Solr returns a multi-valued field as an array, but a doc carrying exactly one value can arrive as a
+ * bare string, so normalise both to a list. Blank entries are dropped rather than kept as "": a
+ * caller checking `productFeatures.length` should not see a feature that has no value.
+ */
+function parseProductFeatures(raw: any): string[] {
+  const values = Array.isArray(raw) ? raw : raw === undefined || raw === null || raw === "" ? [] : [raw];
+
+  return values.map((value) => String(value).trim()).filter(Boolean);
+}
+
 function mapDocToProduct(doc: any): ResolvedProduct {
   const goodIdentifications = parseGoodIdentifications(doc?.goodIdentifications);
 
@@ -86,6 +107,7 @@ function mapDocToProduct(doc: any): ResolvedProduct {
     internalName: String(doc?.internalName || ""),
     mainImageUrl: String(doc?.mainImageUrl || ""),
     goodIdentifications,
+    productFeatures: parseProductFeatures(doc?.productFeatures),
   };
 }
 
