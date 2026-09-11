@@ -1,292 +1,299 @@
 /**
- * Standard HotWax OMS Reference (Class B) Snapshot Domain Registrations.
+ * Standard HotWax OMS Reference (Class B) Snapshot Domain Definitions.
  */
 
-import type { BaseDB } from "../baseDb";
-import { registerSnapshotDomain } from "../sync/snapshotDomain";
-import {
-  carrierProjection,
-  carrierShipmentMethodProjection,
-  communicationEventTypeProjection,
-  contactMechPurposeTypeProjection,
-  enumProjection,
-  enumTypeProjection,
-  facilityGroupProjection,
-  facilityProjection,
-  facilityTypeProjection,
-  geoAssocProjection,
-  geoProjection,
-  groupFacilityProjection,
-  orderAdjustmentTypeProjection,
-  partyRelationshipTypeProjection,
-  paymentMethodTypeProjection,
-  productStoreEmailSettingProjection,
-  productStoreFacilityGroupProjection,
-  productStoreFacilityProjection,
-  productStoreProjection,
-  productStoreShipmentMethodProjection,
-  returnItemTypeProjection,
-  returnReasonProjection,
-  returnTypeProjection,
-  roleTypeProjection,
-  shipmentMethodTypeProjection,
-  shopifyShopLocationProjection,
-  shopifyShopProjection,
-  statusFlowTransitionProjection,
-  statusProjection,
-} from "./commonSeedEntities";
+import { defineSnapshotDomain } from "../sync/defineSnapshotDomain";
+import type { SyncDomain } from "../types";
 
-export function registerCommonSeedDomains(getDb: (omsInstance: string) => BaseDB): void {
-  registerSnapshotDomain({
+export const commonDomains: Record<string, SyncDomain> = {
+  productStore: defineSnapshotDomain({
     name: "productStore",
+    label: "Product stores",
+    syncClass: "B",
     table: "productStores",
-    projection: productStoreProjection,
     listUrl: "admin/productStores",
     collectionKey: null,
     byPk: (pk) => ({ url: `admin/productStores/${encodeURIComponent(String(pk.productStoreId))}` }),
-  }, getDb);
+  }),
 
-  registerSnapshotDomain({
+  status: defineSnapshotDomain({
     name: "status",
+    label: "Statuses",
+    syncClass: "B",
     table: "statuses",
-    projection: statusProjection,
     listUrl: "admin/status",
     collectionKey: null,
     batchSize: 500,
-  }, getDb);
+  }),
 
-  registerSnapshotDomain({
+  enum: defineSnapshotDomain({
     name: "enum",
+    label: "Enumerations",
+    syncClass: "B",
     table: "enums",
-    projection: enumProjection,
     listUrl: "admin/enums",
     collectionKey: null,
     batchSize: 500,
-  }, getDb);
+  }),
 
-  registerSnapshotDomain({
+  enumType: defineSnapshotDomain({
     name: "enumType",
+    label: "Enumeration types",
+    syncClass: "B",
     table: "enumTypes",
-    projection: enumTypeProjection,
     listUrl: "admin/enumTypes",
     collectionKey: null,
-  }, getDb);
+  }),
 
-  registerSnapshotDomain({
+  facility: defineSnapshotDomain({
     name: "facility",
+    label: "Facilities",
+    syncClass: "B",
     table: "facilities",
-    projection: facilityProjection,
     listUrl: "oms/facilities",
     collectionKey: null,
     byPk: (pk) => ({ url: `oms/facilities/${encodeURIComponent(String(pk.facilityId))}` }),
-  }, getDb);
+  }),
 
-  registerSnapshotDomain({
+  facilityType: defineSnapshotDomain({
     name: "facilityType",
+    label: "Facility types",
+    syncClass: "B",
     table: "facilityTypes",
-    projection: facilityTypeProjection,
     listUrl: "oms/facilityTypes",
     collectionKey: null,
-  }, getDb);
+  }),
 
-  registerSnapshotDomain({
+  facilityGroup: defineSnapshotDomain({
     name: "facilityGroup",
+    label: "Facility groups",
+    syncClass: "B",
     table: "facilityGroups",
-    projection: facilityGroupProjection,
     listUrl: "oms/facilityGroups",
     collectionKey: null,
-  }, getDb);
+  }),
 
-  registerSnapshotDomain({
+  groupFacility: defineSnapshotDomain({
     name: "groupFacility",
+    label: "Facility group members",
+    syncClass: "B",
     table: "groupFacilities",
-    projection: groupFacilityProjection,
     listUrl: "oms/groupFacilities",
     collectionKey: null,
-  }, getDb);
+    refetchScope: (pk) => ({
+      params: { facilityGroupId: pk.facilityGroupId },
+      scope: { field: "facilityGroupId", value: pk.facilityGroupId },
+    }),
+  }),
 
-  registerSnapshotDomain({
+  geo: defineSnapshotDomain({
     name: "geo",
+    label: "Geos (countries/states)",
+    syncClass: "B",
     table: "geos",
-    projection: geoProjection,
     listUrl: "admin/geos",
     collectionKey: null,
     batchSize: 500,
-  }, getDb);
+  }),
 
-  registerSnapshotDomain({
+  geoAssoc: defineSnapshotDomain({
     name: "geoAssoc",
+    label: "Geo associations",
+    syncClass: "B",
     table: "geoAssocs",
-    projection: geoAssocProjection,
     listUrl: "admin/geos/assocs",
     collectionKey: null,
     batchSize: 500,
-  }, getDb);
+  }),
 
-  registerSnapshotDomain({
+  carrier: defineSnapshotDomain({
     name: "carrier",
+    label: "Shipping Carriers",
+    syncClass: "B",
     table: "carriers",
-    projection: carrierProjection,
     listUrl: "oms/shippingGateways/carrierParties",
-    listParams: {
-      roleTypeId: "CARRIER",
-    },
+    listParams: { roleTypeId: "CARRIER" },
     collectionKey: null,
-  }, getDb);
+  }),
 
-  registerSnapshotDomain({
+  shipmentMethodType: defineSnapshotDomain({
     name: "shipmentMethodType",
+    label: "Shipment method types",
+    syncClass: "B",
     table: "shipmentMethodTypes",
-    projection: shipmentMethodTypeProjection,
     listUrl: "oms/shippingGateways/shipmentMethodTypes",
     collectionKey: null,
-  }, getDb);
+  }),
 
-  registerSnapshotDomain({
+  carrierShipmentMethod: defineSnapshotDomain({
     name: "carrierShipmentMethod",
+    label: "Carrier Shipment Methods",
+    syncClass: "B",
     table: "carrierShipmentMethods",
-    projection: carrierShipmentMethodProjection,
     listUrl: "oms/shippingGateways/carrierShipmentMethods",
     collectionKey: null,
-  }, getDb);
+  }),
 
-  registerSnapshotDomain({
+  paymentMethodType: defineSnapshotDomain({
     name: "paymentMethodType",
+    label: "Payment method types",
+    syncClass: "B",
     table: "paymentMethodTypes",
-    projection: paymentMethodTypeProjection,
     listUrl: "oms/paymentMethodTypes",
     collectionKey: null,
-  }, getDb);
+  }),
 
-  registerSnapshotDomain({
+  returnReason: defineSnapshotDomain({
     name: "returnReason",
+    label: "Return Reasons",
+    syncClass: "B",
     table: "returnReasons",
-    projection: returnReasonProjection,
     listUrl: "oms/returnReasons",
     collectionKey: null,
-  }, getDb);
+  }),
 
-  registerSnapshotDomain({
+  returnType: defineSnapshotDomain({
     name: "returnType",
+    label: "Return Types",
+    syncClass: "B",
     table: "returnTypes",
-    projection: returnTypeProjection,
     listUrl: "oms/returnTypes",
     collectionKey: null,
-  }, getDb);
+  }),
 
-  registerSnapshotDomain({
+  returnItemType: defineSnapshotDomain({
     name: "returnItemType",
+    label: "Return Item Types",
+    syncClass: "B",
     table: "returnItemTypes",
-    projection: returnItemTypeProjection,
     listUrl: "oms/returnItemTypes",
     collectionKey: null,
-  }, getDb);
+  }),
 
-  registerSnapshotDomain({
+  roleType: defineSnapshotDomain({
     name: "roleType",
+    label: "Role types",
+    syncClass: "B",
     table: "roleTypes",
-    projection: roleTypeProjection,
     listUrl: "oms/roleTypes",
     collectionKey: null,
-  }, getDb);
+  }),
 
-  registerSnapshotDomain({
+  orderAdjustmentType: defineSnapshotDomain({
     name: "orderAdjustmentType",
+    label: "Order Adjustment Types",
+    syncClass: "B",
     table: "orderAdjustmentTypes",
-    projection: orderAdjustmentTypeProjection,
     listUrl: "oms/shippingGateways/orderAdjustmentTypes",
     collectionKey: null,
-  }, getDb);
+  }),
 
-  registerSnapshotDomain({
+  contactMechPurposeType: defineSnapshotDomain({
     name: "contactMechPurposeType",
+    label: "Contact Purpose Types",
+    syncClass: "B",
     table: "contactMechPurposeTypes",
-    projection: contactMechPurposeTypeProjection,
     listUrl: "oms/contactMechPurposeTypes",
     collectionKey: null,
-  }, getDb);
+  }),
 
-  registerSnapshotDomain({
+  communicationEventType: defineSnapshotDomain({
     name: "communicationEventType",
+    label: "Communication Types",
+    syncClass: "B",
     table: "communicationEventTypes",
-    projection: communicationEventTypeProjection,
     listUrl: "oms/communicationEventTypes",
     collectionKey: null,
-  }, getDb);
+  }),
 
-  registerSnapshotDomain({
+  partyRelationshipType: defineSnapshotDomain({
     name: "partyRelationshipType",
+    label: "Relationship Types",
+    syncClass: "B",
     table: "partyRelationshipTypes",
-    projection: partyRelationshipTypeProjection,
     listUrl: "oms/partyRelationshipTypes",
     collectionKey: null,
-  }, getDb);
+  }),
 
-  registerSnapshotDomain({
+  statusFlowTransition: defineSnapshotDomain({
     name: "statusFlowTransition",
+    label: "Status Flow Transitions",
+    syncClass: "B",
     table: "statusFlowTransitions",
-    projection: statusFlowTransitionProjection,
     listUrl: "admin/statusFlows/transitions",
     collectionKey: null,
-  }, getDb);
+  }),
 
-  registerSnapshotDomain({
+  productStoreFacility: defineSnapshotDomain({
     name: "productStoreFacility",
+    label: "Store facilities",
+    syncClass: "B",
     table: "productStoreFacilities",
-    projection: productStoreFacilityProjection,
     listUrl: "oms/productStores",
     fanOut: {
       parentTable: "productStores",
       parentKeyField: "productStoreId",
       urlFor: (storeId) => `oms/productStores/${encodeURIComponent(storeId)}/facilities`,
     },
-  }, getDb);
+  }),
 
-  registerSnapshotDomain({
+  productStoreFacilityGroup: defineSnapshotDomain({
     name: "productStoreFacilityGroup",
+    label: "Store Facility Groups",
+    syncClass: "B",
     table: "productStoreFacilityGroups",
-    projection: productStoreFacilityGroupProjection,
     listUrl: "oms/productStores",
     fanOut: {
       parentTable: "productStores",
       parentKeyField: "productStoreId",
       urlFor: (storeId) => `oms/productStores/${encodeURIComponent(storeId)}/facilityGroups`,
     },
-  }, getDb);
+  }),
 
-  registerSnapshotDomain({
+  productStoreShipmentMethod: defineSnapshotDomain({
     name: "productStoreShipmentMethod",
+    label: "Store Shipment Methods",
+    syncClass: "B",
     table: "productStoreShipmentMethods",
-    projection: productStoreShipmentMethodProjection,
     listUrl: "oms/productStores",
     fanOut: {
       parentTable: "productStores",
       parentKeyField: "productStoreId",
       urlFor: (storeId) => `oms/productStores/${encodeURIComponent(storeId)}/shipmentMethods`,
     },
-  }, getDb);
+  }),
 
-  registerSnapshotDomain({
+  productStoreEmailSetting: defineSnapshotDomain({
     name: "productStoreEmailSetting",
+    label: "Store Email Settings",
+    syncClass: "B",
     table: "productStoreEmailSettings",
-    projection: productStoreEmailSettingProjection,
     listUrl: "oms/productStoreEmailSettings",
     collectionKey: null,
-  }, getDb);
+  }),
 
-  registerSnapshotDomain({
+  shopifyShop: defineSnapshotDomain({
     name: "shopifyShop",
+    label: "Shopify Shops",
+    syncClass: "B",
     table: "shopifyShops",
-    projection: shopifyShopProjection,
     listUrl: "oms/shopifyShops/shops",
     collectionKey: null,
-  }, getDb);
+  }),
 
-  registerSnapshotDomain({
+  shopifyShopLocation: defineSnapshotDomain({
     name: "shopifyShopLocation",
+    label: "Shopify Shop Locations",
+    syncClass: "B",
     table: "shopifyShopLocations",
-    projection: shopifyShopLocationProjection,
     listUrl: "oms/shopifyShops/locations",
     collectionKey: null,
-  }, getDb);
-}
+  }),
+};
+
+export const commonDomainsByTable: Record<string, SyncDomain> = Object.fromEntries(
+  Object.values(commonDomains).map((domain) => [domain.table, domain])
+);
+
+export const COMMON_TABLE_NAMES = Object.keys(commonDomainsByTable);
+export const COMMON_DOMAIN_NAMES = Object.keys(commonDomains);
