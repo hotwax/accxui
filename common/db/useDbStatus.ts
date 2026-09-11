@@ -1,6 +1,6 @@
 import { computed, getCurrentInstance, onUnmounted, ref, watch } from "vue";
 import { liveQuery, type Subscription } from "dexie";
-import type { BaseDB } from "./baseDb";
+import { type BaseDB, ensureDbReady } from "./baseDb";
 import { DB_SYNC_CHANNEL } from "./syncChannel";
 import { COMMON_TABLE_NAMES, commonDomainsByTable } from "./domains/commonDomains";
 import type { CatalogItem } from "./sync/pollingWorkerHarness";
@@ -69,12 +69,12 @@ export function useDbStatus(
   } else {
     catalogSource()
       .then((items) => {
-        resolvedCatalog.value = items;
+        resolvedCatalog.value = items && items.length > 0 ? items : DEFAULT_COMMON_SYNC_CATALOG;
         catalogLoaded.value = true;
       })
       .catch(() => {
-        // The worker may not be up yet. Leave the catalog empty rather than hang forever.
-        resolvedCatalog.value = [];
+        // The worker may not be up yet. Fall back to default catalog.
+        resolvedCatalog.value = DEFAULT_COMMON_SYNC_CATALOG;
         catalogLoaded.value = true;
       });
   }
@@ -112,6 +112,11 @@ export function useDbStatus(
   };
 
   const computeRows = async (): Promise<SyncDomainStatus[]> => {
+    try {
+      await ensureDbReady(db);
+    } catch {
+      // Ignore if open/rebuild fails; subsequent table calls will handle gracefully
+    }
     const markers = await db.syncMeta.toArray();
     const syncedAtByDomain = parseSyncedAt(markers);
 

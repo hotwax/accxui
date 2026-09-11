@@ -58,6 +58,7 @@ const SHAPE_MARKER_KEY = "dbShapeVersion";
  */
 export async function ensureRowShape(db: BaseDB): Promise<void> {
   try {
+    await ensureDbReady(db);
     const marker = await db.syncMeta.get(SHAPE_MARKER_KEY);
     if (Number(marker?.version) === DB_SHAPE_VERSION) return;
 
