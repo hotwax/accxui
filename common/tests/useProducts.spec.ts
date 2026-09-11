@@ -47,6 +47,35 @@ describe("useProducts (shared product master)", () => {
     ]);
   });
 
+  it("requests productFeatures and keeps the type/value pairs the OMS indexes", async () => {
+    runSolrQuery.mockResolvedValueOnce({ data: { response: { docs: [
+      solrDoc("P1", { productFeatures: ["Size/S", "Color/Espresso Suede"] }),
+    ] } } });
+
+    const { products, resolve } = useProducts();
+    await resolve(["P1"]);
+
+    expect(runSolrQuery.mock.calls[0][0].json.params.fl).toContain("productFeatures");
+    expect(products.value.get("P1")?.productFeatures).toEqual(["Size/S", "Color/Espresso Suede"]);
+  });
+
+  it("normalises a single-value or absent productFeatures to a list", async () => {
+    runSolrQuery.mockResolvedValueOnce({ data: { response: { docs: [
+      // Solr returns a multi-valued field as an array, but a doc with exactly one value can arrive
+      // as a bare string; a product with no features has the field absent entirely.
+      solrDoc("P1", { productFeatures: "Size/S" }),
+      solrDoc("P2"),
+      solrDoc("P3", { productFeatures: ["Size/M", "", "  "] }),
+    ] } } });
+
+    const { products, resolve } = useProducts();
+    await resolve(["P1", "P2", "P3"]);
+
+    expect(products.value.get("P1")?.productFeatures).toEqual(["Size/S"]);
+    expect(products.value.get("P2")?.productFeatures).toEqual([]);
+    expect(products.value.get("P3")?.productFeatures).toEqual(["Size/M"]);
+  });
+
   it("never asks Solr twice for an id already requested", async () => {
     runSolrQuery.mockResolvedValue({ data: { response: { docs: [solrDoc("P1")] } } });
     const { resolve } = useProducts();
