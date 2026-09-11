@@ -101,6 +101,29 @@ describe("defineAppDb", () => {
     expect(close).toHaveBeenCalled();
   });
 
+  it("keeps a held entity client on the live instance after a switch", async () => {
+    const appDb = defineAppDb({ suffix: "LateDB", schema: ownSchema });
+    let instance = "placeholder-oms";
+    appDb.setOmsInstanceResolver(() => instance);
+
+    // A worker domain module captures its entity client at import time, before start() tells
+    // the worker which OMS instance it syncs — so it resolves the placeholder instance.
+    const widgets = appDb.entity("widgets");
+    const placeholder = appDb.get("placeholder-oms");
+    const placeholderTable = vi.spyOn(placeholder, "table");
+
+    instance = "live-oms";
+    const live = appDb.get("live-oms"); // start(): swaps the handle and closes the placeholder
+    const liveTable = vi.spyOn(live, "table");
+
+    // No indexedDB in this environment, so the read itself cannot succeed. Which handle it
+    // reaches for is the point: the closed placeholder throws DatabaseClosedError forever.
+    await widgets.count().catch(() => undefined);
+
+    expect(liveTable).toHaveBeenCalledWith("widgets");
+    expect(placeholderTable).not.toHaveBeenCalled();
+  });
+
   it("throws from raw() until a resolver is registered", () => {
     const bare = defineAppDb({ suffix: "BareDB", schema: ownSchema });
     expect(() => bare.raw()).toThrow(/no OMS instance resolver/i);

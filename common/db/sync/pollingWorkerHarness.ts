@@ -33,12 +33,13 @@ export interface HarnessStartPayload {
   omsInstance: string;
   /** How often the harness re-evaluates which domains are due. */
   baseTickMs?: number;
-  /** Activated domains. Omit to activate every registered class A/B domain (class C never ticks). */
+  /** Activated domains. Omit to activate registered class B domains (class A domains are view-scoped, class C are on-demand). */
   domains?: ActiveDomain[];
 }
 
 export interface CatalogItem {
   name: string;
+  table?: string;
   label: string;
   syncClass: "A" | "B" | "C";
 }
@@ -215,7 +216,7 @@ export function createSyncHarness(getDb: (omsInstance: string) => BaseDB): SyncH
     stop();
     ctx = { maargUrl: payload.maargUrl, token: payload.token, omsInstance: payload.omsInstance, now: Date.now() };
     active = payload.domains ?? getAllSyncDomains()
-      .filter((d) => d.syncClass !== "C")
+      .filter((d) => d.syncClass === "B")
       .map((d) => ({ name: d.name }));
     baseTickMs = payload.baseTickMs ?? DEFAULT_BASE_TICK_MS;
     try {
@@ -294,6 +295,7 @@ export function createSyncHarness(getDb: (omsInstance: string) => BaseDB): SyncH
   function catalog(): CatalogItem[] {
     return getAllSyncDomains().map((d) => ({
       name: d.name,
+      ...(d.table ? { table: d.table } : {}),
       label: d.label,
       syncClass: d.syncClass,
     }));

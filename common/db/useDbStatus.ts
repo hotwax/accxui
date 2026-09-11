@@ -103,8 +103,11 @@ export function useDbStatus(
    * letting it blank the whole card. Task 11 reconciles domain names with table names.
    */
   const countForEntry = async (entry: SyncDomainCatalogItem | CatalogItem) => {
-    const tableName = (entry as SyncDomainCatalogItem).table ?? entry.name;
+    const tableName = (entry as SyncDomainCatalogItem).table ?? (entry as CatalogItem).table ?? entry.name;
     try {
+      if (!db.isOpen()) {
+        await ensureDbReady(db);
+      }
       return await db.table(tableName).count();
     } catch {
       return 0;

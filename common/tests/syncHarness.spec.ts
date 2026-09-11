@@ -91,7 +91,7 @@ describe("createSyncHarness lifecycle", () => {
     harness.stop();
   });
 
-  it("activates every class A and B domain when domains are omitted", async () => {
+  it("activates class B domains and excludes class A view-scoped domains when domains are omitted", async () => {
     const a = domain({ name: "a", syncClass: "A", intervalMs: 10_000 });
     const b = domain({ name: "b", syncClass: "B" });
     registerSyncDomain(a); registerSyncDomain(b);
@@ -99,7 +99,7 @@ describe("createSyncHarness lifecycle", () => {
 
     await harness.start({ ...START });
 
-    expect(a.sync).toHaveBeenCalledTimes(1);
+    expect(a.sync).not.toHaveBeenCalled();
     expect(b.sync).toHaveBeenCalledTimes(1);
     harness.stop();
   });
@@ -152,12 +152,12 @@ describe("createSyncHarness catalog", () => {
    * exists to make unrepresentable.
    */
   it("lists exactly the registered domains, with their declared label and class", () => {
-    registerSyncDomain(domain({ name: "a", label: "Alpha", syncClass: "A", intervalMs: 1000 }));
+    registerSyncDomain(domain({ name: "a", table: "as", label: "Alpha", syncClass: "A", intervalMs: 1000 }));
     registerSyncDomain(domain({ name: "c", label: "Gamma", syncClass: "C" }));
     const harness = createSyncHarness(stubDb);
 
     expect(harness.catalog()).toEqual([
-      { name: "a", label: "Alpha", syncClass: "A" },
+      { name: "a", table: "as", label: "Alpha", syncClass: "A" },
       { name: "c", label: "Gamma", syncClass: "C" },
     ]);
   });

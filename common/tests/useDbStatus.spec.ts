@@ -46,4 +46,18 @@ describe("useDbStatus catalog source", () => {
 
     expect(domains.value).toEqual([]);
   });
+
+  it("queries the specified table when catalog item contains table property", async () => {
+    const tableSpy = vi.fn(() => ({ count: async () => 42 }));
+    const db = {
+      syncMeta: { toArray: async () => [] },
+      table: tableSpy,
+    } as any;
+    const source = vi.fn(async () => [{ name: "productStore", table: "productStores", label: "Product Stores", syncClass: "B" as const }]);
+
+    const { catalogLoaded } = useDbStatus(db, source, actions);
+    await vi.waitFor(() => expect(catalogLoaded.value).toBe(true));
+
+    expect(source).toHaveBeenCalledTimes(1);
+  });
 });

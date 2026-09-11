@@ -48,3 +48,22 @@ describe("dbClient compound keys", () => {
     expect(table.get).toHaveBeenCalledWith(1700000000000);
   });
 });
+
+describe("dbClient database binding", () => {
+  it("resolves the current database per operation when given a resolver", async () => {
+    const first = fakeDb();
+    const second = fakeDb();
+    let active = first.db;
+    const client = dbClient(() => active);
+
+    // Held across the switch, exactly as a worker sync domain holds its entity client.
+    const entity = client.entity("facilities");
+    await entity.get("FAC_1");
+    active = second.db;
+    await entity.get("FAC_2");
+
+    expect(first.table.get).toHaveBeenCalledWith("FAC_1");
+    expect(second.table.get).toHaveBeenCalledWith("FAC_2");
+    expect(first.table.get).not.toHaveBeenCalledWith("FAC_2");
+  });
+});

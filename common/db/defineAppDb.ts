@@ -107,6 +107,15 @@ export function defineAppDb(def: AppDbDefinition): AppDb {
     return get(resolveOmsInstance());
   }
 
+  /**
+   * ONE late-binding client for the app. Built from `raw` (the resolver), never from a handle, so
+   * a client or entity a caller holds — the worker sync domains hold theirs in module-scope
+   * consts, created at import time before `start()` names the instance — resolves the live
+   * database on every operation. Capturing a handle instead pinned those callers to the handle
+   * `get()` closes on an instance switch, and every later read threw DatabaseClosedError.
+   */
+  const lateClient = dbClient(raw);
+
   const appDb: AppDb = {
     name,
     get,
@@ -114,8 +123,8 @@ export function defineAppDb(def: AppDbDefinition): AppDb {
       resolveOmsInstance = resolve;
     },
     raw,
-    client: () => dbClient(raw()),
-    entity: (table) => dbClient(raw()).entity(table),
+    client: () => lateClient,
+    entity: (table) => lateClient.entity(table),
     schema: stores,
     entities: def.schema.entities,
     tableNames: Object.keys(stores),
