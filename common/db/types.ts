@@ -2,29 +2,21 @@
  * Shared Type Definitions for the AccxUI Local Database Framework.
  */
 
-import type { Observable } from "dexie";
-
-/** A stored row: indexed/normalized fields + untouched server object in raw. */
+/** A stored row: the projected fields, plus when they were synced. */
 export interface DbRow {
   [field: string]: unknown;
-  raw: Record<string, unknown>;
   syncedAt: number;
 }
 
+/**
+ * A stored row's primary key. A scalar for a single-field key; an array, in the entity's declared
+ * field order, for a Dexie compound key (`[a+b]`).
+ */
+export type DbKey = string | number | Array<string | number>;
+
 export type FieldKind = "text" | "count" | "date" | "structured";
 
-export interface EntityProjection {
-  /** Primary-key field name on the stored row (must project to a non-empty string). */
-  keyField: string;
-  /** Field name -> how to coerce it. Every listed field is hoisted to the row's top level. */
-  fields: Record<string, FieldKind>;
-  /** Optional synthetic key builder for entities with composite natural keys. */
-  buildKey?: (raw: Record<string, unknown>) => string | undefined;
-  /** Stored-field name -> source field to read from if different. */
-  rename?: Record<string, string>;
-}
-
-export interface LiveQueryOptions {
+export interface QueryOptions {
   /** Filter by an indexed field via where(scope.field).equals(scope.value). */
   scope?: { field: string; value: unknown };
   /** Multiple equalities resolved through an indexed field. */
@@ -43,17 +35,6 @@ export interface LiveQueryOptions {
   order?: "asc" | "desc";
 }
 
-export interface DbEntity<T = Record<string, any>> {
-  table: string;
-  projection: EntityProjection;
-  /** Live reactive query over the table. */
-  live: (options?: LiveQueryOptions) => Observable<DbRow[]>;
-  /** Read a single record by primary key (instant lookup). */
-  get: (key: string) => Promise<T | undefined>;
-  /** Read all records matching options (promise-based snapshot). */
-  all: (options?: LiveQueryOptions) => Promise<T[]>;
-}
-
 export interface SyncContext {
   token: string;
   now: number;
@@ -64,9 +45,34 @@ export interface SyncContext {
 
 export interface SyncDomain {
   name: string;
-  cadenceMs?: number;
-  sync: (ctx: SyncContext) => Promise<void>;
-  refetchOne?: (pk: Record<string, unknown>, ctx: SyncContext) => Promise<void>;
+  /** Primary IndexedDB table for this domain. */
+  table?: string;
+  /** Status-card text. Required from Phase B. */
+  label: string;
+  /**
+   * A: cadenced, polled while a view that needs it is open.
+   * B: reference/config — once per login, then only on mutation.
+   * C: write-through only — never ticked, but still listed and still refetchable.
+   */
+  syncClass: "A" | "B" | "C";
+  /** Poll cadence for class A. Omit for B and C. `ActiveDomain.intervalMs` overrides it. */
+  intervalMs?: number;
+  sync: (ctx: SyncContext, args?: unknown, options?: { force?: boolean }) => Promise<number | void>;
+  /**
+   * Refetch one record after a mutation.
+   *
+   * Context FIRST, like `sync` — a harness holds one context and hands it to whichever domain is
+   * due, and it cannot tell a factory-built domain from a hand-written one. When the two orders
+   * disagree the mismatch is silent: the domain reads its key fields off the context (all
+   * `undefined`) and issues the request with the primary key where the token belongs, while the
+   * mutation that triggered it has already succeeded.
+   */
+  refetchOne?: (
+    ctx: SyncContext,
+    pk: Record<string, unknown>,
+    args?: unknown,
+  ) => Promise<number | void>;
 }
+
 
 export type DbSchemaDefinition = Record<string, string>;

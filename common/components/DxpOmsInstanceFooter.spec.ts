@@ -91,7 +91,8 @@ describe('DxpOmsInstanceFooter', () => {
   });
 
   it('colors the timezone as danger only when the app says it is mismatched', () => {
-    expect(note(render({ timeZone: 'America/Los_Angeles' })).attributes('data-color')).toBe('');
+    const localZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    expect(note(render({ timeZone: localZone })).attributes('data-color')).toBe('');
     expect(
       note(render({ timeZone: 'America/Los_Angeles', timeZoneMismatched: true })).attributes('data-color')
     ).toBe('danger');
