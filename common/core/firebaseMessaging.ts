@@ -10,7 +10,7 @@ const initialiseFirebaseApp = async (
 ) => {
   if (!await isSupported()) {
     console.error("Notifications not supported");
-    return;
+    return Promise.reject("Notifications not supported");
   }
 
   const app = initializeApp(appFirebaseConfig);
@@ -35,6 +35,7 @@ const initialiseFirebaseApp = async (
     };
   } else {
     console.warn("Notification permission denied.");
+    return Promise.reject("Notifications permission denied.");
   }
 };
 
