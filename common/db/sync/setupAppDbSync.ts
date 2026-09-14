@@ -37,7 +37,7 @@ export const bootstrapState = reactive<{
   errors: serviceState.errors,
 });
 
-export function createAppDbSync(config: AppDbSyncConfig): AppDbSync {
+export function setupAppDbSync(config: AppDbSyncConfig): AppDbSync {
   let service: SyncService | null = null;
   let starting: Promise<void> | null = null;
   let startGeneration = 0;

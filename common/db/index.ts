@@ -23,7 +23,7 @@ export * from "./sync/defineCursorDomain";
 export * from "./sync/pollingWorkerHarness";
 export * from "./sync/pollingTokenChannel";
 export * from "./sync/syncService";
-export * from "./sync/createAppDbSync";
+export * from "./sync/setupAppDbSync";
 export * from "./cacheReconciliationError";
 export * from "./cacheScopeKey";
 export { createSyncService as createSyncServiceV2 } from "./sync/syncService";
