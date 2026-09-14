@@ -35,12 +35,13 @@ export async function startDbBootstrap(config: BootstrapConfig): Promise<void> {
   bootstrapState.error = null;
 
   try {
-    if (!workerInstance) {
+    if (!workerInstance || !harnessProxy) {
       workerInstance = config.workerFactory();
       harnessProxy = wrap<SyncHarness>(workerInstance);
     }
 
-    await harnessProxy.start({
+    const harness = harnessProxy;
+    await harness.start({
       token: config.token,
       maargUrl: config.maargUrl,
       omsInstance: config.omsInstance,
