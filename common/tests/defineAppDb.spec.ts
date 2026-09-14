@@ -4,8 +4,7 @@ import { defineSchema, mergeSchemas } from "../db/defineSchema";
 import { defineAppDb } from "../db/defineAppDb";
 import { commonSchema } from "../db/domains/commonSchema";
 import { COMMON_DOMAIN_NAMES, commonDomainsByTable } from "../db/domains/commonDomains";
-import { registerDomains } from "../db/sync/registerDomains";
-import { clearSyncRegistry, getAllSyncDomains } from "../db/sync/syncRegistry";
+import { clearSyncRegistry, getAllSyncDomains, registerDomains } from "../db/sync/syncRegistry";
 import { DEFAULT_COMMON_SYNC_CATALOG } from "../db/useDbStatus";
 
 const ownSchema = defineSchema({

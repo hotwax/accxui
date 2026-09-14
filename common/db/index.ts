@@ -20,7 +20,6 @@ export * from "./sync/syncRegistry";
 export * from "./sync/defineSyncDomain";
 export * from "./sync/defineSnapshotDomain";
 export * from "./sync/defineCursorDomain";
-export * from "./sync/registerDomains";
 export * from "./sync/pollingWorkerHarness";
 export * from "./sync/pollingTokenChannel";
 export * from "./sync/syncService";

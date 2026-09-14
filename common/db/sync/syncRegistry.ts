@@ -14,6 +14,10 @@ export function registerSyncDomain(domain: SyncDomain): SyncDomain {
   return domain;
 }
 
+export function registerDomains(domains: SyncDomain[]): SyncDomain[] {
+  return domains.map((domain) => registerSyncDomain(domain));
+}
+
 export function unregisterSyncDomain(name: string): void {
   registry.delete(name);
 }
