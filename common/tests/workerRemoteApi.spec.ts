@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import workerRemoteApi from "../core/workerRemoteApi";
+import workerRemoteApi, { pageAll } from "../core/workerRemoteApi";
 
 const fetchMock = vi.fn();
 vi.stubGlobal("fetch", fetchMock);
@@ -110,5 +110,67 @@ describe("workerRemoteApi empty body handling", () => {
     await expect(
       workerRemoteApi({ baseURL: "https://x.test/rest/s1/", url: "oms/facilities" }),
     ).rejects.toThrow(/Unexpected token/);
+  });
+});
+
+/**
+ * A snapshot domain replaces the scope it fetched: rows the fetch did not return are pruned. So a
+ * TRUNCATED walk is not a smaller result, it is data loss — `requireComplete` makes the walk fail
+ * instead of handing back a partial set the caller would treat as authoritative.
+ */
+describe("pageAll requireComplete", () => {
+  const ctx = { token: "t", maargUrl: "https://x.test/rest/s1/", omsInstance: "demo", now: 0 } as any;
+
+  beforeEach(() => {
+    fetchMock.mockReset();
+  });
+
+  /** Always a full page, so the walk never ends on its own and runs into the page backstop. */
+  const endlessPages = (batchSize: number) => {
+    let id = 0;
+    fetchMock.mockImplementation(async () => ok(
+      Array.from({ length: batchSize }, () => ({ id: `ROW_${id++}` })),
+    ));
+  };
+
+  it("throws when the page backstop cuts the walk short", async () => {
+    endlessPages(2);
+
+    await expect(pageAll({
+      ctx, url: "sob/x", collectionKey: null, batchSize: 2, maxPages: 3,
+      requireComplete: true, keyOf: (r: any) => r.id,
+    })).rejects.toThrow(/truncated/i);
+  });
+
+  it("returns the partial set without requireComplete, as before", async () => {
+    endlessPages(2);
+
+    const rows = await pageAll({
+      ctx, url: "sob/x", collectionKey: null, batchSize: 2, maxPages: 3,
+      keyOf: (r: any) => r.id,
+    });
+
+    expect(rows).toHaveLength(6);
+  });
+
+  it("throws when the endpoint ignores pageIndex and repeats a page", async () => {
+    // Same two rows forever: the walk cannot advance, so the set is incomplete.
+    fetchMock.mockResolvedValue(ok([{ id: "A" }, { id: "B" }]));
+
+    await expect(pageAll({
+      ctx, url: "sob/x", collectionKey: null, batchSize: 2, maxPages: 5,
+      requireComplete: true, keyOf: (r: any) => r.id,
+    })).rejects.toThrow(/pageIndex/i);
+  });
+
+  it("does not throw on a walk that finished normally", async () => {
+    fetchMock.mockResolvedValue(ok([{ id: "A" }]));
+
+    const rows = await pageAll({
+      ctx, url: "sob/x", collectionKey: null, batchSize: 2, maxPages: 5,
+      requireComplete: true, keyOf: (r: any) => r.id,
+    });
+
+    expect(rows).toHaveLength(1);
   });
 });

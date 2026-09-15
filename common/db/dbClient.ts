@@ -119,17 +119,33 @@ function buildQuery(tableRef: Table<any, string>, options: QueryOptions = {}) {
  * that existed at import time — which `defineAppDb.get()` closes on the switch, leaving every
  * later read to fail with DatabaseClosedError.
  */
-export function dbClient(source: BaseDB | (() => BaseDB)): DbClient {
+export function dbClient(
+  source: BaseDB | (() => BaseDB),
+  schemaEntities?: Record<string, Entity>,
+): DbClient {
   const resolveDb = typeof source === "function" ? source : () => source;
   const tableOf = (table: string) => resolveDb().table<any, DbKey>(table);
-  const entities = new Map<string, EntityClient<any>>();
+  const clients = new Map<string, EntityClient<any>>();
 
   const client: DbClient = {
     entity<T = Record<string, any>>(table: string): EntityClient<T> {
-      let instance = entities.get(table);
+      let instance = clients.get(table);
       if (!instance) {
-        // Resolved per call, not captured: an entity definition belongs to the live database.
-        const entityDefOf = () => (resolveDb() as any).entities?.[table] as Entity | undefined;
+        /**
+         * The projection comes from the composed SCHEMA, not from the Dexie handle — a Dexie
+         * database carries stores, not entity declarations, so reading it off the handle silently
+         * yields undefined and every write degrades to storing the raw server record.
+         */
+        const entityDefOf = (): Entity => {
+          const entity = schemaEntities?.[table];
+          if (!entity) {
+            throw new Error(
+              `[db] dbClient: no entity definition for table "${table}". ` +
+              "A write cannot be projected without one; declare the table in the app schema.",
+            );
+          }
+          return entity;
+        };
         const dexieTable = async () => {
           const db = resolveDb();
           if (db && typeof db.isOpen === "function" && !db.isOpen()) {
@@ -190,26 +206,28 @@ export function dbClient(source: BaseDB | (() => BaseDB)): DbClient {
 
           async upsertMany(rawRows) {
             const entityDef = entityDefOf();
-            const rows = entityDef ? projectRows(rawRows, entityDef, Date.now()) : (rawRows as any[]);
+            const rows = projectRows(rawRows, entityDef, Date.now());
             if (rows.length > 0) await (await dexieTable()).bulkPut(rows as any[]);
             return rows.length;
           },
 
           async snapshotReplace(rawRows, scope) {
             const entityDef = entityDefOf();
-            const rows = entityDef ? projectRows(rawRows, entityDef, Date.now()) : (rawRows as any[]);
+            const rows = projectRows(rawRows, entityDef, Date.now());
             let pruned = 0;
             const tableRef = await dexieTable();
             await resolveDb().transaction("rw", [table], async () => {
               let existingKeys: DbKey[] = [];
               if (scope) {
+                // The scope narrows WHICH rows are candidates; the keys to delete are still their
+                // own primary keys, never the scope value they share.
                 const scoped = await tableRef.where(scope.field).equals(scope.value as any).toArray();
-                existingKeys = entityDef ? keysOfRows(scoped, entityDef) : scoped.map((r: any) => r[scope.field]);
+                existingKeys = keysOfRows(scoped, entityDef);
               } else {
                 existingKeys = (await tableRef.toCollection().primaryKeys()) as DbKey[];
               }
 
-              const freshKeys = entityDef ? keysOfRows(rows, entityDef) : rows.map((r: any) => r.id ?? r.key);
+              const freshKeys = keysOfRows(rows, entityDef);
               const stale = diffStaleKeys(existingKeys, freshKeys);
               if (stale.length > 0) {
                 await tableRef.bulkDelete(stale);
@@ -288,7 +306,7 @@ export function dbClient(source: BaseDB | (() => BaseDB)): DbClient {
             return rows as T[];
           },
         };
-        entities.set(table, instance);
+        clients.set(table, instance);
       }
       return instance as EntityClient<T>;
     },

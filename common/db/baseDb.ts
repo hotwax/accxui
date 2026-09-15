@@ -47,9 +47,9 @@ export async function clearDatabaseTables(db: BaseDB): Promise<void> {
 /**
  * Bumped whenever the stored row shape changes in a way existing rows cannot satisfy.
  * On mismatch the data tables are cleared once and the worker refills them.
- * v2: `raw` removed from stored rows.
+ * v3: `raw` and `cachedAt` removed from stored rows — a row is the declared fields plus `syncedAt`.
  */
-export const DB_SHAPE_VERSION = 2;
+export const DB_SHAPE_VERSION = 3;
 const SHAPE_MARKER_KEY = "dbShapeVersion";
 
 /**

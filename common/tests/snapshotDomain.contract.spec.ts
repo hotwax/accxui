@@ -140,3 +140,58 @@ describe("snapshot domain call contract", () => {
     await expect(domain.refetchOne!(ctx, { jobName: "queue_ShopifyOrderSync" })).resolves.toBe(1);
   });
 });
+
+/**
+ * Characterization of the once-per-login guard, pinned before the dead `ctx.trigger` clause was
+ * removed from it. Every manual path — `syncNow`, `syncDomainNow`, `resyncDomain` — reaches the
+ * domain as `{ force: true }`, so `force` is the whole bypass contract.
+ */
+describe("snapshot domain once-per-login guard", () => {
+  beforeEach(() => {
+    clearSyncRegistry();
+    workerRemoteApi.mockReset();
+  });
+
+  const syncedDb = () => ({
+    ...stubDb(),
+    syncMeta: {
+      get: async () => ({ synced: true }),  // already synced this login
+      put: async () => {},
+      delete: async () => {},
+    },
+  });
+
+  const guardedDomain = () => registerSnapshotDomain(
+    {
+      name: "serviceJob",
+      label: "Service jobs",
+      syncClass: "B",
+      table: "serviceJobs",
+      projection: serviceJob,
+      listUrl: "admin/serviceJobs",
+      collectionKey: "serviceJobList",
+    },
+    () => syncedDb(),
+  );
+
+  it("skips an auto sync once the domain has synced this login", async () => {
+    await guardedDomain().sync(ctx);
+
+    expect(workerRemoteApi).not.toHaveBeenCalled();
+  });
+
+  it("runs anyway when forced, which is how every manual refresh arrives", async () => {
+    // Returned, not resolved: the pageAll mock above reads the value synchronously.
+    workerRemoteApi.mockReturnValue([]);
+
+    await guardedDomain().sync(ctx, undefined, { force: true });
+
+    expect(workerRemoteApi).toHaveBeenCalled();
+  });
+
+  it("ignores an unrelated field on the context when deciding to skip", async () => {
+    await guardedDomain().sync({ ...ctx, trigger: "manual" } as any);
+
+    expect(workerRemoteApi).not.toHaveBeenCalled();
+  });
+});

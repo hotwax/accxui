@@ -117,7 +117,15 @@ function updateVisibleError(domain: string): void {
   }
 }
 
-function recordSyncError(domain: string, message: string, scope?: string): void {
+/**
+ * Record a sync failure against a domain, optionally against one PK scope within it.
+ *
+ * Exported because this module is the SINGLE owner of the error maps behind `serviceState.errors`.
+ * Callers outside the worker status stream — a failed `start()`, a failed post-mutation refetch —
+ * report through here rather than keeping a parallel set of maps over the same object, which would
+ * make two writers race to decide which scoped message is the visible one.
+ */
+export function recordSyncError(domain: string, message: string, scope?: string): void {
   if (scope) {
     const scoped = scopedDomainErrors.get(domain) ?? new Map<string, string>();
     // The worker posts the scoped failure before its Comlink promise rejects. The service catch
@@ -138,13 +146,13 @@ function recordSyncError(domain: string, message: string, scope?: string): void 
   updateVisibleError(domain);
 }
 
-function clearDomainErrors(domain: string): void {
+export function clearDomainErrors(domain: string): void {
   domainErrors.delete(domain);
   scopedDomainErrors.delete(domain);
   updateVisibleError(domain);
 }
 
-function clearScopeError(domain: string, scope: string): void {
+export function clearScopeError(domain: string, scope: string): void {
   const scoped = scopedDomainErrors.get(domain);
   scoped?.delete(scope);
   if (scoped?.size === 0) { scopedDomainErrors.delete(domain); }
@@ -186,6 +194,10 @@ export function createSyncService(opts: SyncServiceOptions): SyncService {
     const data = event.data || {};
     if (data.type === "auth-error") {
       pushTokenIfChanged(); // token may have just rotated — push the latest at once
+      if (data.domain) {
+        const scope = typeof data.scope === "string" && data.scope ? data.scope : undefined;
+        recordSyncError(String(data.domain), String(data.message ?? "auth error"), scope);
+      }
       opts.onAuthError?.(String(data.message ?? "auth error"));
     }
     if (data.type === "sync-end" && data.domain) {

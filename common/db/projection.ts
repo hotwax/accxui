@@ -41,6 +41,10 @@ const COERCE: Record<FieldKind, (value: unknown) => unknown> = {
 /**
  * Project one raw server record into a stored row.
  *
+ * The stored row is the DECLARED fields plus `syncedAt` — nothing else. The untouched server
+ * payload is deliberately not kept alongside it: storing both doubles every row, and a field a
+ * screen needs belongs in `fields` where the schema can index and coerce it.
+ *
  * Returns null when the record cannot be keyed — for a compound key that means ANY member failed to
  * project. There is no synthetic key to build: the key members are ordinary declared fields, so
  * they are coerced by their declared kind like everything else.
@@ -62,7 +66,7 @@ export function projectRow(
     if (row[field] === undefined) return null;
   }
 
-  return { ...row, raw, cachedAt: now, syncedAt: now } as DbRow;
+  return { ...row, syncedAt: now } as DbRow;
 }
 
 /** Project many records, dropping any without a usable key. */

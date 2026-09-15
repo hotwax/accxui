@@ -164,6 +164,15 @@ export async function pageAll(options: {
   collectionKey?: string | null;
   /** Fail on an unrecognized envelope instead of unwrapping it to an empty list. */
   strictCollection?: boolean;
+  /**
+   * Fail rather than return a TRUNCATED set.
+   *
+   * A snapshot domain replaces the scope it fetched, pruning whatever the fetch did not return, so
+   * a walk cut short by the page backstop or by an endpoint that ignores `pageIndex` would delete
+   * live rows. Those two cases only warn by default, because an incremental caller can tolerate a
+   * short read; a snapshot caller cannot, and sets this.
+   */
+  requireComplete?: boolean;
   params?: Record<string, unknown>;
   batchSize?: number;
   unpaged?: boolean;
@@ -175,6 +184,7 @@ export async function pageAll(options: {
   const {
     ctx, url, collectionKey, strictCollection = false, params = {},
     batchSize = 250, unpaged = false, keyOf, maxPages = 40, label = url,
+    requireComplete = false,
   } = options;
   if (unpaged || batchSize === 0) {
     // Single request, but still ask for a full page: Moqui defaults to 20 rows when no page
@@ -223,9 +233,10 @@ export async function pageAll(options: {
     // short-page break above: a legitimate final page whose rows all duplicate earlier ones (e.g.
     // every row on it was already seen) is a normal end of pagination, not a stuck pageIndex.
     if (newKeysCount === 0) {
-      console.warn(
-        `[db] ${label}: page ${pageIndex} returned no new records — the endpoint appears to ignore pageIndex; stopping with ${all.length}.`,
-      );
+      const message =
+        `[db] ${label}: page ${pageIndex} returned no new records — the endpoint appears to ignore pageIndex; stopping with ${all.length}.`;
+      if (requireComplete) throw new Error(message);
+      console.warn(message);
       break;
     }
     pageIndex++;
@@ -234,9 +245,10 @@ export async function pageAll(options: {
   // The loop increments pageIndex on a normal iteration, so reaching maxPages here means the walk
   // was cut short rather than finished. Warn — a silently truncated set looks like a complete one.
   if (pageIndex >= maxPages) {
-    console.warn(
-      `[db] ${label}: stopped at the ${maxPages}-page backstop after ${all.length} records — the set may be TRUNCATED.`,
-    );
+    const message =
+      `[db] ${label}: stopped at the ${maxPages}-page backstop after ${all.length} records — the set may be TRUNCATED.`;
+    if (requireComplete) throw new Error(message);
+    console.warn(message);
   }
 
   return all;

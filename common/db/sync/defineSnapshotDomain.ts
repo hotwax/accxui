@@ -6,7 +6,7 @@ import type { Entity } from "../defineEntity";
 import { canonicalKey, diffStaleKeys, entityKeyOf, isUnkeyableFetch, newestValue, projectRow, projectRows } from "../projection";
 import type { DbKey, DbRow, SyncContext, SyncDomain } from "../types";
 import { registerSyncDomain } from "./syncRegistry";
-import { pageAll, unwrapCollection, workerGet } from "../../core/workerRemoteApi";
+import { pageAll, workerGet } from "../../core/workerRemoteApi";
 
 export interface SnapshotDomainConfig {
   name: string;
@@ -160,7 +160,7 @@ export function defineSnapshotDomain(
         throw new Error(`[db] domain "${config.name}": no entity projection found for table "${config.table}".`);
       }
 
-      if (!options?.force && ctx.trigger !== "manual" && await hasSyncedThisLogin(db, config.name)) return 0;
+      if (!options?.force && await hasSyncedThisLogin(db, config.name)) return 0;
 
       let rawRecords: any[] = [];
 
@@ -203,7 +203,7 @@ export function defineSnapshotDomain(
 
       // Safety check: avoid wiping a populated table on zero-row fetch during auto sync
       const currentCount = await db.table(config.table).count();
-      if (!options?.force && ctx.trigger !== "manual" && rawRecords.length === 0 && currentCount > 0) {
+      if (!options?.force && rawRecords.length === 0 && currentCount > 0) {
         console.warn(`[db] ${config.name}: fetch returned 0 records while cache holds ${currentCount} rows. Refusing to snapshot replace on auto sync.`);
         return 0;
       }

@@ -1,7 +1,14 @@
 import { reactive } from "vue";
 import type { AppDb } from "../defineAppDb";
 import { clearDatabaseTables } from "../baseDb";
-import { createSyncService as defaultCreateSyncService, serviceState, type SyncService } from "./syncService";
+import {
+  clearDomainErrors,
+  clearScopeError,
+  createSyncService as defaultCreateSyncService,
+  recordSyncError,
+  serviceState,
+  type SyncService,
+} from "./syncService";
 import { CacheReconciliationError } from "../cacheReconciliationError";
 import { cacheScopeKey } from "../cacheScopeKey";
 
@@ -42,55 +49,6 @@ export function setupAppDbSync(config: AppDbSyncConfig): AppDbSync {
   let starting: Promise<void> | null = null;
   let startGeneration = 0;
 
-  const domainErrors = new Map<string, string>();
-  const scopedDomainErrors = new Map<string, Map<string, string>>();
-
-  function updateVisibleError(domain: string): void {
-    const domainError = domainErrors.get(domain);
-    if (domainError !== undefined) {
-      bootstrapState.errors[domain] = domainError;
-      return;
-    }
-    const scoped = scopedDomainErrors.get(domain);
-    const messages = scoped ? [...scoped.values()] : [];
-    if (messages.length) {
-      bootstrapState.errors[domain] = messages[messages.length - 1];
-    } else {
-      delete bootstrapState.errors[domain];
-    }
-  }
-
-  function recordSyncError(domain: string, message: string, scope?: string): void {
-    if (scope) {
-      const scoped = scopedDomainErrors.get(domain) ?? new Map<string, string>();
-      if (scoped.get(scope) === message) {
-        updateVisibleError(domain);
-        return;
-      }
-      scoped.delete(scope);
-      scoped.set(scope, message);
-      scopedDomainErrors.set(domain, scoped);
-    } else {
-      domainErrors.set(domain, message);
-    }
-    updateVisibleError(domain);
-  }
-
-  function clearDomainErrors(domain: string): void {
-    domainErrors.delete(domain);
-    scopedDomainErrors.delete(domain);
-    updateVisibleError(domain);
-  }
-
-  function clearScopeError(domain: string, scope: string): void {
-    const scoped = scopedDomainErrors.get(domain);
-    scoped?.delete(scope);
-    if (scoped?.size === 0) {
-      scopedDomainErrors.delete(domain);
-    }
-    updateVisibleError(domain);
-  }
-
   async function clearSyncMarkers(): Promise<void> {
     try {
       const syncMeta = config.db.raw().syncMeta;
@@ -115,6 +73,12 @@ export function setupAppDbSync(config: AppDbSyncConfig): AppDbSync {
     const attemptService = factory({
       workerUrl,
       db: config.db.raw(),
+      /**
+       * Error bookkeeping lives in ONE place — `syncService`'s maps, reached through the helpers
+       * imported above. This handler routes the same statuses because a caller may supply its own
+       * `createSyncService` (tests do), and then this is the only listener that runs. Every helper
+       * is idempotent, so the real service having already recorded the message changes nothing.
+       */
       onStatus: (status: Record<string, any>) => {
         if (generation !== startGeneration || service !== attemptService) return;
         if (status.type === "sync-end" && status.domain) {
@@ -170,8 +134,6 @@ export function setupAppDbSync(config: AppDbSyncConfig): AppDbSync {
     }
     starting = null;
     bootstrapState.running = false;
-    domainErrors.clear();
-    scopedDomainErrors.clear();
     await clearDatabaseTables(config.db.raw()).catch(() => {});
   }
 

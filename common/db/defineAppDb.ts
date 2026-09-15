@@ -114,7 +114,7 @@ export function defineAppDb(def: AppDbDefinition): AppDb {
    * database on every operation. Capturing a handle instead pinned those callers to the handle
    * `get()` closes on an instance switch, and every later read threw DatabaseClosedError.
    */
-  const lateClient = dbClient(raw);
+  const lateClient = dbClient(raw, def.schema.entities);
 
   const appDb: AppDb = {
     name,
