@@ -27,22 +27,30 @@ vi.mock("../db/sync/pollingTokenChannel", () => ({
   createTokenPublisher: () => ({ publish: vi.fn(), close: vi.fn() }),
 }));
 
+import Dexie from "dexie";
 import { createSyncService } from "../db/sync/syncService";
-import { DB_SHAPE_VERSION } from "../db/baseDb";
+
+let deletedDatabases: string[] = [];
+import { __resetDbVersionChecks } from "../db/baseDb";
 
 /**
  * A minimal `BaseDB`-shaped stub: enough of `syncMeta.get`/`put`, `transaction`, `table` and
- * `getTableNames` for `ensureRowShape`/`clearDatabaseTables` (in `common/db/baseDb.ts`) to run
+ * `getTableNames` for `ensureDbReady`/`clearDatabaseTables` (in `common/db/baseDb.ts`) to run
  * against, without a real Dexie instance.
  */
-function createDbStub(storedVersion: number | undefined) {
-  let version = storedVersion;
+function createDbStub(recordedVersion: number | undefined, declaredVersion = 2) {
+  let version = recordedVersion;
+  let open = true;
   const cleared: string[] = [];
   const putCalls: Array<Record<string, unknown>> = [];
   const tableNames = ["widgets"];
 
   return {
     name: "test-db",
+    declaredVersion,
+    isOpen: () => open,
+    open: vi.fn(async () => { open = true; }),
+    close: vi.fn(() => { open = false; }),
     getTableNames: () => tableNames,
     table: (tableName: string) => ({
       clear: vi.fn(async () => { cleared.push(tableName); }),
@@ -50,10 +58,10 @@ function createDbStub(storedVersion: number | undefined) {
     transaction: async (_mode: string, _tables: string[], fn: () => Promise<void>) => { await fn(); },
     syncMeta: {
       get: vi.fn(async (key: string) =>
-        key === "dbShapeVersion" && version !== undefined ? { key, version } : undefined),
+        key === "schemaVersion" && version !== undefined ? { key, version } : undefined),
       put: vi.fn(async (record: Record<string, unknown>) => {
         putCalls.push(record);
-        if (record.key === "dbShapeVersion") version = record.version as number;
+        if (record.key === "schemaVersion") version = record.version as number;
       }),
     },
     cleared,
@@ -64,6 +72,9 @@ function createDbStub(storedVersion: number | undefined) {
 describe("createSyncService", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    __resetDbVersionChecks();
+    deletedDatabases = [];
+    vi.spyOn(Dexie, "delete").mockImplementation(async (name: string) => { deletedDatabases.push(name); });
     workerStub.onmessage = null;
   });
 
@@ -149,27 +160,39 @@ describe("createSyncService", () => {
     service.stop();
   });
 
-  it("clears the local tables and writes the current marker when the stored row shape is stale", async () => {
-    const db = createDbStub(DB_SHAPE_VERSION - 1);
+  it("rebuilds and records the declared version when the database was built by another one", async () => {
+    const db = createDbStub(1, 2);
     const service = createSyncService({ workerUrl: "/w.js", db: db as any });
 
     await service.start();
 
-    expect(db.cleared).toEqual(["widgets"]);
+    expect(deletedDatabases).toEqual(["test-db"]);
     expect(db.putCalls).toContainEqual(
-      expect.objectContaining({ key: "dbShapeVersion", version: DB_SHAPE_VERSION }),
+      expect.objectContaining({ key: "schemaVersion", version: 2 }),
     );
     service.stop();
   });
 
-  it("does not clear the local tables when the stored row shape already matches", async () => {
-    const db = createDbStub(DB_SHAPE_VERSION);
+  it("leaves the database alone when the declared version already matches", async () => {
+    const db = createDbStub(2, 2);
     const service = createSyncService({ workerUrl: "/w.js", db: db as any });
 
     await service.start();
 
-    expect(db.cleared).toEqual([]);
+    expect(deletedDatabases).toEqual([]);
     expect(db.putCalls).toEqual([]);
+    service.stop();
+  });
+
+  it("checks the database before the worker is spawned, so nothing races the rebuild", async () => {
+    const db = createDbStub(1, 2);
+    const service = createSyncService({ workerUrl: "/w.js", db: db as any });
+
+    await service.start();
+
+    // The rebuild completed while this realm held the only connection.
+    expect(deletedDatabases).toEqual(["test-db"]);
+    expect(harnessStub.start).toHaveBeenCalled();
     service.stop();
   });
 });

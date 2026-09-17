@@ -146,9 +146,15 @@ export function dbClient(
           }
           return entity;
         };
+        /**
+         * Every operation passes through here, so `ensureDbReady` gates every read and write —
+         * no query runs, and no `liveQuery` subscribes, against a database whose declared version
+         * has not been verified. The version check inside it is memoised per database, so this
+         * costs one already-resolved await after the first call.
+         */
         const dexieTable = async () => {
           const db = resolveDb();
-          if (db && typeof db.isOpen === "function" && !db.isOpen()) {
+          if (db && typeof db.isOpen === "function") {
             await ensureDbReady(db);
           }
           return tableOf(table);

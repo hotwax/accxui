@@ -21,8 +21,12 @@ export interface AppDbDefinition {
   /** Name suffix: "CompanyDB" produces `{omsInstance}-CompanyDB`. */
   suffix: string;
   /**
-   * Dexie schema version. Additive changes — a new table, an added or removed secondary index —
-   * upgrade in place on a bump. A changed primary key cannot; see BaseDB's constructor.
+   * The schema version, and the only knob. Bump it for ANY change to this schema — a new table, an
+   * added or removed index, a changed primary key, a changed `fields` map or `rename`.
+   *
+   * A database recording a different version is dropped and rebuilt on first use rather than
+   * migrated; see `ensureDbReady`. Nothing detects a FORGOTTEN bump — rows keep the previous
+   * build's shape with no error — so treat bumping this as part of changing the schema.
    */
   version?: number;
   /** The composed schema: `commonSchema.pick([...])` merged with the app's own via `mergeSchemas`. */
@@ -44,6 +48,8 @@ export interface AppDb {
   entity<T = Record<string, any>>(table: string): EntityClient<T>;
   readonly schema: Record<string, string>;
   readonly entities: Record<string, Entity>;
+  /** The declared schema version. A database recording a different one is rebuilt on first use. */
+  readonly version: number;
   /** The composed data tables. Excludes `syncMeta`, which BaseDB injects. */
   readonly tableNames: string[];
   /** One entry per composed table that has a seed source. The app's own tables are absent. */
@@ -127,6 +133,7 @@ export function defineAppDb(def: AppDbDefinition): AppDb {
     entity: (table) => lateClient.entity(table),
     schema: stores,
     entities: def.schema.entities,
+    version,
     tableNames: Object.keys(stores),
     statusCatalog,
     seedTables: def.schema.seedTables,

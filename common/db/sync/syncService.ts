@@ -4,7 +4,7 @@
  * Merges three prior implementations into one:
  *   - `pollingService.ts`'s worker lifecycle (spawn via `WorkerFactory`, token push over
  *     BroadcastChannel, status routing, the auth-error hook);
- *   - `appDbBootstrap.ts`'s row-shape check: `ensureRowShape` now lives on `baseDb.ts` (a database
+ *   - `appDbBootstrap.ts`'s readiness check: `ensureDbReady` lives on `baseDb.ts` (a database
  *     concern, shared with `clearDatabaseTables`) and this service runs it against the caller's
  *     `BaseDB`, when one is given, before spawning the worker — see `SyncServiceOptions.db`;
  *   - Company's `appCacheBootstrap.ts` idempotent once-per-login `start()`: the in-flight
@@ -23,7 +23,7 @@ import { WorkerFactory } from "../../core/workerFactory";
 import { createTokenPublisher } from "./pollingTokenChannel";
 import type { ActiveDomain } from "./syncRegistry";
 import type { CatalogItem, SyncHarness } from "./pollingWorkerHarness";
-import { type BaseDB, ensureRowShape } from "../baseDb";
+import { type BaseDB, ensureDbReady } from "../baseDb";
 
 export interface SyncServiceOptions {
   /** The Web Worker URL or instance (e.g. `new URL('./appSync.worker.ts', import.meta.url)`) */
@@ -37,9 +37,11 @@ export interface SyncServiceOptions {
   /** Called when the worker reports an auth failure; wire to the app's re-auth/logout. */
   onAuthError?: (message: string) => void;
   /**
-   * The app's database, for the row-shape check (`ensureRowShape`) run once before the worker
-   * spawns. Optional because an app that does not version its stored row shape omits it. Order
-   * Manager passes it once it moves onto this service (Task 6).
+   * The app's database, opened and version-checked (`ensureDbReady`) before the worker spawns.
+   *
+   * The check is idempotent and every read reaches it anyway, so this is an ORDERING guarantee
+   * rather than the only opportunity: doing it here means a rebuild happens while this realm holds
+   * the only connection, before the worker opens its own.
    */
   db?: BaseDB;
   /** App-local token-change watcher cadence (default 15s). */
@@ -225,9 +227,9 @@ export function createSyncService(opts: SyncServiceOptions): SyncService {
     serviceState.running = true;
 
     const attempt = (async () => {
-      // Row-shape check runs first, before the worker exists to race it. `ensureRowShape` never
-      // throws (it swallows and warns) — a shape-check failure must never block boot.
-      if (opts.db) await ensureRowShape(opts.db);
+      // Runs first, before the worker exists to race it. `ensureDbReady` never throws (it swallows
+      // and warns) — a failed check must never block boot.
+      if (opts.db) await ensureDbReady(opts.db);
       if (generation !== startGeneration) return; // terminated (stop()) while the shape check ran
 
       const targetUrl = typeof opts.workerUrl === "string"

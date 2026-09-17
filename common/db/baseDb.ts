@@ -7,15 +7,20 @@ import Dexie, { type Table } from "dexie";
 export class BaseDB extends Dexie {
   syncMeta!: Table<Record<string, any>, string>;
   protected _tableNames: string[] = [];
+  /** The schema version this build declares. `ensureDbReady` rebuilds when a database disagrees. */
+  readonly declaredVersion: number;
 
   /**
-   * `version` is declared, not inferred. Dexie upgrades ADDITIVE changes in place — new tables,
-   * added or removed secondary indexes — so bumping it is enough for those. It throws
-   * "Not yet support for changing primary key" when a store's keyPath changes, which no version
-   * bump can carry; `ensureDbReady` deletes and rebuilds the database in that case.
+   * `version` is the ONE knob. Bump it for any schema change at all — a new table, an added or
+   * removed index, a changed primary key, a changed `fields` map or `rename`. A database that
+   * records a different version is dropped and rebuilt rather than migrated (see `ensureDbReady`),
+   * because nothing stored here is authoritative: every row is re-derivable from the OMS, so
+   * rebuilding is cheaper than reasoning about which changes Dexie can carry in place and which
+   * leave rows the new code cannot read.
    */
   constructor(dbName: string, schema: Record<string, string>, version = 1) {
     super(dbName);
+    this.declaredVersion = version;
     const combinedSchema = {
       ...schema,
       syncMeta: "key",
@@ -44,30 +49,23 @@ export async function clearDatabaseTables(db: BaseDB): Promise<void> {
   }
 }
 
-/**
- * Bumped whenever the stored row shape changes in a way existing rows cannot satisfy.
- * On mismatch the data tables are cleared once and the worker refills them.
- * v3: `raw` and `cachedAt` removed from stored rows — a row is the declared fields plus `syncedAt`.
- */
-export const DB_SHAPE_VERSION = 3;
-const SHAPE_MARKER_KEY = "dbShapeVersion";
+/** The key under which a database records the schema version it was built with. */
+const SCHEMA_VERSION_KEY = "schemaVersion";
 
 /**
- * Clear the local data tables once whenever `DB_SHAPE_VERSION` has moved past what this database
- * last recorded. Never throws — a failed shape check must not block boot.
+ * Databases whose declared version has already been verified in this realm, keyed by database name.
+ *
+ * Only the CHECK is memoised, never the open: `ensureDbReady` stays re-runnable so a connection
+ * that closed later — an OMS-instance switch closes the previous handle, and Dexie closes one
+ * itself when another tab fires `versionchange` — is reopened rather than answered "ready".
+ *
+ * Keyed by name, so switching instance verifies the other tenant's database on its first use.
  */
-export async function ensureRowShape(db: BaseDB): Promise<void> {
-  try {
-    await ensureDbReady(db);
-    const marker = await db.syncMeta.get(SHAPE_MARKER_KEY);
-    if (Number(marker?.version) === DB_SHAPE_VERSION) return;
+const versionChecked = new Map<string, Promise<void>>();
 
-    console.info(`[db] Row shape changed, clearing local tables for ${db.name}.`);
-    await clearDatabaseTables(db);
-    await db.syncMeta.put({ key: SHAPE_MARKER_KEY, version: DB_SHAPE_VERSION, timestamp: Date.now() });
-  } catch (error) {
-    console.warn("[db] Row shape check failed:", error);
-  }
+/** Test-only: forget which databases have been verified. */
+export function __resetDbVersionChecks(): void {
+  versionChecked.clear();
 }
 
 const LOGIN_MARKER_PREFIX = "loginSync:";
@@ -93,7 +91,7 @@ export async function markSyncedThisLogin(db: BaseDB, domain: string): Promise<v
   }
 }
 
-export async function ensureDbReady(db: BaseDB): Promise<void> {
+async function openDb(db: BaseDB): Promise<void> {
   try {
     if (!db.isOpen()) {
       await db.open();
@@ -108,6 +106,56 @@ export async function ensureDbReady(db: BaseDB): Promise<void> {
       console.error(`[db] Rebuild failed for ${db.name}:`, rebuildErr);
     }
   }
+}
+
+/**
+ * Drop and rebuild when the database was built by a different declared version.
+ *
+ * An absent marker counts as a mismatch, so installs predating the marker land on a known state,
+ * and so does a LOWER declared version, which is what a rolled-back deploy looks like.
+ *
+ * Reads `syncMeta` through raw Dexie rather than `dbClient`: every `dbClient` operation calls
+ * `ensureDbReady`, so routing this through it would re-enter the gate that is awaiting this.
+ */
+async function verifyDeclaredVersion(db: BaseDB): Promise<void> {
+  const recorded = (await db.syncMeta.get(SCHEMA_VERSION_KEY))?.version;
+  if (Number(recorded) === db.declaredVersion) return;
+
+  console.info(
+    `[db] ${db.name} was built by version ${recorded ?? "an unrecorded build"}, ` +
+    `this build declares ${db.declaredVersion} — rebuilding.`,
+  );
+  db.close();
+  await Dexie.delete(db.name);
+  await db.open();
+  await db.syncMeta.put({
+    key: SCHEMA_VERSION_KEY,
+    version: db.declaredVersion,
+    timestamp: Date.now(),
+  });
+}
+
+/**
+ * Make the database usable: open it, and rebuild it if it was built by a different version.
+ *
+ * Every read and write reaches this — `dbClient` awaits it before each operation, the worker
+ * harness on start, and the status card — so no query can run, and no `liveQuery` can subscribe,
+ * against a database that has not been verified. That ordering is what makes the rebuild safe:
+ * `Dexie.delete` blocks on open connections, and by construction there are none yet.
+ */
+export async function ensureDbReady(db: BaseDB): Promise<void> {
+  await openDb(db);
+
+  let checked = versionChecked.get(db.name);
+  if (!checked) {
+    // Swallowed, never rethrown, and not retried: a failed check must not block boot, and
+    // re-attempting a destructive rebuild on every read would be worse than serving what is there.
+    checked = verifyDeclaredVersion(db).catch((error) => {
+      console.warn(`[db] Version check failed for ${db.name}:`, error);
+    });
+    versionChecked.set(db.name, checked);
+  }
+  await checked;
 }
 
 /** Drop the superseded fixed-name cache databases, if present. */
