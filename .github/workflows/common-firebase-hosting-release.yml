@@ -74,14 +74,46 @@ jobs:
         run: |
           set -euo pipefail
 
+          # Strip one matching pair of surrounding quotes from a secret, so every consumer below gets
+          # raw JSON: the .env line re-quotes it itself, while the service worker is plain JS and needs
+          # an object literal. A quoted secret reaching the worker verbatim makes firebaseConfig a
+          # STRING, initializeApp throws, the worker fails to evaluate, and login dies with
+          # "messaging/failed-service-worker-registration".
+          strip_quotes() {
+            local v="$1"
+            case "$v" in
+              "'"*"'") v="${v#\'}"; v="${v%\'}" ;;
+              '"'*'"') v="${v#\"}"; v="${v%\"}" ;;
+            esac
+            printf '%s' "$v"
+          }
+          VITE_FIREBASE_CONFIG="$(strip_quotes "${VITE_FIREBASE_CONFIG:-}")"
+          VITE_FIREBASE_VAPID_KEY="$(strip_quotes "${VITE_FIREBASE_VAPID_KEY:-}")"
+
           prepare_env() {
             cp .env.example .env
             if [ -n "$VITE_FIREBASE_CONFIG" ]; then
               sed -i "s|^VITE_FIREBASE_CONFIG=.*|VITE_FIREBASE_CONFIG=$VITE_FIREBASE_CONFIG|g" .env
               sed -i "s|^VITE_FIREBASE_VAPID_KEY=.*|VITE_FIREBASE_VAPID_KEY='$VITE_FIREBASE_VAPID_KEY'|g" .env
               # public/ is plain JS and cannot read import.meta.env, so patch its inlined config too.
+              # Unquoted here on purpose: this has to land as an object literal, not a string.
               if [ -f public/firebase-messaging-sw.js ]; then
                 sed -i "s|const firebaseConfig =.*|const firebaseConfig = $VITE_FIREBASE_CONFIG|g" public/firebase-messaging-sw.js
+
+                # Fail the build rather than ship a worker that throws on evaluation. This exact
+                # regression reached production and took sign-in down with it.
+                node -e '
+                  const fs = require("fs");
+                  const file = "public/firebase-messaging-sw.js";
+                  const line = (fs.readFileSync(file, "utf8").match(/const firebaseConfig = (.*)/) || [])[1];
+                  if (!line) { console.error(`${file}: firebaseConfig assignment not found`); process.exit(1); }
+                  const value = line.trim();
+                  if (value.startsWith("\"") || value.startsWith("'"'"'")) {
+                    console.error(`${file}: firebaseConfig is a quoted string, not an object literal.`);
+                    console.error("The VITE_FIREBASE_CONFIG secret is wrapped in quotes and they reached the worker.");
+                    process.exit(1);
+                  }
+                '
               fi
             fi
           }
