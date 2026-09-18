@@ -402,6 +402,9 @@ importers:
       '@capacitor/ios':
         specifier: 'catalog:'
         version: 8.2.0(@capacitor/core@8.2.0)
+      '@grafana/faro-web-sdk':
+        specifier: 'catalog:'
+        version: 2.11.0
       '@ionic/core':
         specifier: 'catalog:'
         version: 8.8.0
@@ -423,6 +426,9 @@ importers:
       mitt:
         specifier: 'catalog:'
         version: 3.0.1
+      pdfjs-dist:
+        specifier: 6.2.108
+        version: 6.2.108
       pinia:
         specifier: 3.0.4
         version: 3.0.4(typescript@6.0.2)(vue@3.5.30(typescript@6.0.2))
