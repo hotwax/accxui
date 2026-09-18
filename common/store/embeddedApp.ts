@@ -61,5 +61,8 @@ export const useEmbeddedAppStore = defineStore('embeddedApp', {
       this.token.expiration = expiration;
     }
   },
-  persist: true
+  // `shopifyAppBridge` must never be persisted: it is a live App Bridge client whose methods are
+  // dropped by JSON serialization, so rehydrating it yields a truthy but non-functional object that
+  // outlives the embedded session it belonged to. It is recreated by appBridgeLogin on every load.
+  persist: { omit: ["shopifyAppBridge"] }
 });
