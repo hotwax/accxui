@@ -54,7 +54,19 @@ export const useNotificationStore = defineStore("notification", {
         commonUtil.showToast(translate("New notification received."));
       }
     },
-    async fetchNotificationPreferences(enumTypeId: string, applicationId: string, userId: string, topicNameGenerator: (enumId: string) => string) {
+    /*
+     * Topic subscriptions are scoped to a DEVICE on the backend (NotificationTopicUser carries a
+     * deviceId, and subscribe#Topic requires one), so a preference is "on" only for the device it
+     * was switched on from. Every method below therefore names the device: the one passed in, or
+     * failing that the one this store registered. When neither exists nothing is sent, which keeps
+     * the same request shape a user-scoped backend accepts.
+     */
+    deviceScope(deviceId?: string) {
+      const forDevice = deviceId || this.firebaseDeviceId;
+      return forDevice ? { deviceId: forDevice } : {};
+    },
+    /** `deviceId` narrows the switches to THIS device's subscriptions; without it another device's "on" would show here as on. */
+    async fetchNotificationPreferences(enumTypeId: string, applicationId: string, userId: string, topicNameGenerator: (enumId: string) => string, deviceId?: string) {
       let enumerationResp: any[] = [];
       let userSubscribedTopics: any[] = [];
       try {
@@ -68,7 +80,7 @@ export const useNotificationStore = defineStore("notification", {
         resp = await api({
           url: "firebase/user/notificationtopic",
           method: "get",
-          params: { topicTypeId: applicationId, userId: userId, pageSize: 200 }
+          params: { topicTypeId: applicationId, userId: userId, pageSize: 200, ...this.deviceScope(deviceId) }
         });
         userSubscribedTopics = resp.data.map((userPref: any) => userPref.topic);
       } catch (error) {
@@ -109,38 +121,49 @@ export const useNotificationStore = defineStore("notification", {
       }
     },
 
-    async fetchAllNotificationPrefs(applicationId: string, userId: string) {
+    /** Every device's rows unless `deviceId` is given — the cross-device view, so no default here. */
+    async fetchAllNotificationPrefs(applicationId: string, userId: string, deviceId?: string) {
       try {
         const resp: any = await api({
           url: "firebase/user/notificationtopic",
           method: "get",
-          params: { topicTypeId: applicationId, userId: userId, pageSize: 200 }
+          params: { topicTypeId: applicationId, userId: userId, pageSize: 200, ...(deviceId ? { deviceId } : {}) }
         });
         this.allNotificationPrefs = resp.data;
       } catch (error) {
         logger.error(error);
       }
     },
-    async subscribeTopic(topicName: string, applicationId: string) {
+    /*
+     * Both of these THROW on failure. They used to swallow it, so a 400 from the backend still left
+     * the caller's "preferences updated" path running and the switch flipped on screen while the
+     * server had changed nothing. Callers already carry the failure branch; this lets it run.
+     * api() resolves with an error body as well as throwing, so that body counts as failure too.
+     */
+    async subscribeTopic(topicName: string, applicationId: string, deviceId?: string) {
       try {
-        await api({
+        const resp: any = await api({
           url: "firebase/topic",
           method: "post",
-          data: { topicName, applicationId }
+          data: { topicName, applicationId, ...this.deviceScope(deviceId) }
         });
+        if (commonUtil.hasError(resp)) throw resp;
       } catch (error) {
         logger.error(error);
+        throw error;
       }
     },
-    async unsubscribeTopic(topicName: string, applicationId: string) {
+    async unsubscribeTopic(topicName: string, applicationId: string, deviceId?: string) {
       try {
-        await api({
+        const resp: any = await api({
           url: "firebase/topic",
           method: "delete",
-          data: { topicName, applicationId }
+          data: { topicName, applicationId, ...this.deviceScope(deviceId) }
         });
+        if (commonUtil.hasError(resp)) throw resp;
       } catch (error) {
         logger.error(error);
+        throw error;
       }
     },
     clearNotificationState() {
