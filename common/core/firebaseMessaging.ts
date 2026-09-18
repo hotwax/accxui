@@ -1,3 +1,4 @@
+import logger from "../core/logger";
 import { initializeApp } from "firebase/app";
 import { getMessaging, getToken, onMessage, isSupported } from "firebase/messaging";
 import { DateTime } from "luxon";
@@ -9,7 +10,7 @@ const initialiseFirebaseApp = async (
   onMessageReceived: (payload: any) => void
 ) => {
   if (!await isSupported()) {
-    console.error("Notifications not supported");
+    logger.error("Notifications not supported");
     return;
   }
 
@@ -34,7 +35,7 @@ const initialiseFirebaseApp = async (
       onMessageReceived({ notification: event.data, isForeground: false });
     };
   } else {
-    console.warn("Notification permission denied.");
+    logger.warn("Notification permission denied.");
   }
 };
 

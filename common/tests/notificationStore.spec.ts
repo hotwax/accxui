@@ -37,9 +37,10 @@ describe("topic subscription is scoped to the device", () => {
     expect(lastCall().data.deviceId).toBe("DEVICE-B");
   });
 
-  it("sends no device id at all when neither exists, so a user-scoped backend still gets the old shape", async () => {
+  it("identifies no device when neither exists, so nothing misleading reaches a user-scoped backend", async () => {
     const store = useNotificationStore();
     await store.subscribeTopic(TOPIC, "BOPIS");
+    // Not as an empty string: the backend answers an empty deviceId with "Field cannot be empty".
     expect(lastCall().data).toEqual({ topicName: TOPIC, applicationId: "BOPIS" });
   });
 
@@ -84,18 +85,27 @@ describe("reading preferences", () => {
   const enums = [{ enumId: "NEW_BOPIS_ODR" }, { enumId: "OPEN_BOPIS_ODR" }];
   const topicFor = (enumId: string) => `oms-100013-${enumId}`;
 
-  it("asks for THIS device's rows and marks a switch on only from those", async () => {
+  it("asks for THIS device's rows when told which, and marks a switch on only from those", async () => {
     const store = useNotificationStore();
     store.setFirebaseDeviceId("DEVICE-A");
     api.mockImplementation(async (req: any) => req.url === "admin/enums"
       ? { data: enums }
       : { data: req.params.deviceId === "DEVICE-A" ? [{ topic: topicFor("NEW_BOPIS_ODR"), deviceId: "DEVICE-A" }] : [] });
 
-    await store.fetchNotificationPreferences("NOTIF_BOPIS", "BOPIS", "100410", topicFor);
+    await store.fetchNotificationPreferences("NOTIF_BOPIS", "BOPIS", "100410", topicFor, "DEVICE-A");
 
     const topicReq = api.mock.calls.map(([r]) => r).find((r) => r.url === "firebase/user/notificationtopic");
     expect(topicReq.params).toMatchObject({ topicTypeId: "BOPIS", userId: "100410", deviceId: "DEVICE-A" });
     expect(store.getNotificationPrefs.map((p: any) => [p.enumId, p.isEnabled])).toEqual([["NEW_BOPIS_ODR", true], ["OPEN_BOPIS_ODR", false]]);
+  });
+
+  it("reads unfiltered when no device is named: rows written before the deviceId column have none, and filtering on it would read as 'no subscriptions' on a working device", async () => {
+    const store = useNotificationStore();
+    store.setFirebaseDeviceId("DEVICE-A");
+    api.mockResolvedValue({ data: [] });
+    await store.fetchNotificationPreferences("NOTIF_BOPIS", "BOPIS", "100410", topicFor);
+    const topicReq = api.mock.calls.map(([r]) => r).find((r) => r.url === "firebase/user/notificationtopic");
+    expect(topicReq.params).not.toHaveProperty("deviceId");
   });
 
   it("fetchAllNotificationPrefs stays cross-device unless a device is named", async () => {
