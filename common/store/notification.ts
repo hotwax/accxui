@@ -4,6 +4,17 @@ import logger from "../core/logger";
 import { commonUtil } from "../utils/commonUtil";
 import { translate } from "../core/i18n";
 
+/**
+ * The backend refuses a second NotificationTopicUser row for the same topic, user and device with
+ * a duplicate-key error. The device IS subscribed, which is the end state the caller asked for, so
+ * this counts as success rather than a failure the UI has to explain.
+ */
+function isAlreadySubscribed(error: any): boolean {
+  const body = error?.response?.data ?? error?.data ?? error;
+  const text = typeof body === "string" ? body : JSON.stringify(body ?? "");
+  return /already exists|duplicate entry/i.test(text);
+}
+
 interface NotificationState {
   notifications: any[];
   notificationPrefs: any[];
@@ -135,12 +146,18 @@ export const useNotificationStore = defineStore("notification", {
       }
     },
     /*
-     * Both of these THROW on failure. They used to swallow it, so a 400 from the backend still left
-     * the caller's "preferences updated" path running and the switch flipped on screen while the
-     * server had changed nothing. Callers already carry the failure branch; this lets it run.
+     * Both REPORT whether the backend confirmed the change instead of throwing. They used to return
+     * nothing at all, so a refused toggle still ran the caller's "preferences updated" path and the
+     * switch flipped on screen while the server had changed nothing.
+     *
+     * Reporting rather than throwing is deliberate: every existing caller awaits these inside a try
+     * whose catch also guards the token registration that follows, so a rejection here would skip
+     * past the preference update and de-register the device — a failed toggle would stop push on
+     * that device entirely. Callers that care read the result; the rest behave exactly as before.
+     *
      * api() resolves with an error body as well as throwing, so that body counts as failure too.
      */
-    async subscribeTopic(topicName: string, applicationId: string, deviceId?: string) {
+    async subscribeTopic(topicName: string, applicationId: string, deviceId?: string): Promise<boolean> {
       try {
         const resp: any = await api({
           url: "firebase/topic",
@@ -148,12 +165,14 @@ export const useNotificationStore = defineStore("notification", {
           data: { topicName, applicationId, ...this.deviceScope(deviceId) }
         });
         if (commonUtil.hasError(resp)) throw resp;
+        return true;
       } catch (error) {
+        if (isAlreadySubscribed(error)) return true;
         logger.error(error);
-        throw error;
+        return false;
       }
     },
-    async unsubscribeTopic(topicName: string, applicationId: string, deviceId?: string) {
+    async unsubscribeTopic(topicName: string, applicationId: string, deviceId?: string): Promise<boolean> {
       try {
         const resp: any = await api({
           url: "firebase/topic",
@@ -161,9 +180,10 @@ export const useNotificationStore = defineStore("notification", {
           data: { topicName, applicationId, ...this.deviceScope(deviceId) }
         });
         if (commonUtil.hasError(resp)) throw resp;
+        return true;
       } catch (error) {
         logger.error(error);
-        throw error;
+        return false;
       }
     },
     clearNotificationState() {

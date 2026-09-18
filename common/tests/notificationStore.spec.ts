@@ -51,15 +51,32 @@ describe("topic subscription is scoped to the device", () => {
   });
 });
 
-describe("failures are no longer swallowed", () => {
-  it("rethrows when the backend rejects the subscribe, so the caller's failure path runs", async () => {
-    api.mockRejectedValue({ response: { status: 400 } });
-    await expect(useNotificationStore().subscribeTopic(TOPIC, "BOPIS")).rejects.toMatchObject({ response: { status: 400 } });
+describe("failures are reported rather than thrown or swallowed", () => {
+  it("returns false when the backend rejects the subscribe", async () => {
+    api.mockRejectedValue({ response: { status: 400, data: { errors: "Field cannot be empty (Device ID)" } } });
+    await expect(useNotificationStore().subscribeTopic(TOPIC, "BOPIS")).resolves.toBe(false);
   });
 
-  it("treats an error body on a 200 as failure too", async () => {
+  it("returns false for an error body on a 200 too", async () => {
     api.mockResolvedValue({ status: 200, data: { _ERROR_MESSAGE_: "Field cannot be empty (Device ID)" } });
-    await expect(useNotificationStore().unsubscribeTopic(TOPIC, "BOPIS")).rejects.toMatchObject({ data: { _ERROR_MESSAGE_: expect.stringContaining("Device ID") } });
+    await expect(useNotificationStore().unsubscribeTopic(TOPIC, "BOPIS")).resolves.toBe(false);
+  });
+
+  it("does NOT throw: every caller awaits these inside a try that also guards the token registration, so a rejection would de-register the device", async () => {
+    api.mockRejectedValue({ response: { status: 500 } });
+    const store = useNotificationStore();
+    await expect(store.subscribeTopic(TOPIC, "BOPIS")).resolves.toBe(false);
+    await expect(store.unsubscribeTopic(TOPIC, "BOPIS")).resolves.toBe(false);
+  });
+
+  it("counts an already-subscribed row as success, because that is the end state asked for", async () => {
+    // What lovers-uat actually answers for a duplicate.
+    api.mockRejectedValue({ response: { status: 400, data: { errorCode: 400, errors: "Error creating FirebaseNotificationTopicUser [...]: record already exists or related record does not exist [23000]\nDuplicate entry '...' for key 'firebase_notification_topic_user.PRIMARY'\n" } } });
+    await expect(useNotificationStore().subscribeTopic(TOPIC, "BOPIS")).resolves.toBe(true);
+  });
+
+  it("reports a successful call as true", async () => {
+    await expect(useNotificationStore().subscribeTopic(TOPIC, "BOPIS")).resolves.toBe(true);
   });
 });
 
