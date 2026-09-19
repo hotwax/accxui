@@ -203,5 +203,20 @@ export const useNotificationStore = defineStore("notification", {
       this.firebaseDeviceId = "";
     }
   },
-  persist: true
+  persist: {
+    /*
+     * `isFirebaseInitialised` is session state, not user data, and must NOT be persisted.
+     *
+     * It records whether the Firebase SDK has been initialised in THIS page context. The SDK
+     * instance does not survive a reload, but a persisted flag does, so after any reload the
+     * flag rehydrates as `true` against a freshly empty SDK. Every caller then takes the early
+     * return in `initialiseFirebaseMessaging` and the app silently ends up with no `onMessage`
+     * handler, no background-message listener and no registration token, while still reporting
+     * itself as initialised.
+     *
+     * That is not a rare edge case: `VitePWA({ registerType: "autoUpdate" })` reloads the app
+     * without asking, so a store device reaches this state on its own.
+     */
+    omit: ["isFirebaseInitialised"]
+  }
 });
