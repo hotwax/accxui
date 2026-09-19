@@ -24,7 +24,12 @@
           @ionChange="emit('update:productStore', $event.detail.value, $event)"
         >
           <ion-label slot="label">
-            <p class="overline">{{ displayInstanceLabel }}</p>
+            <p class="overline">
+              {{ displayInstanceLabel }}<ion-note
+                v-if="displayTimeZone"
+                :color="isTimeZoneMismatched ? 'danger' : ''"
+              >{{ displayInstanceLabel ? ' ' : '' }}{{ displayTimeZone }}{{ displayZoneTime ? ` ${displayZoneTime}` : '' }}</ion-note>
+            </p>
             <template v-if="selectLabel">{{ selectLabel }}</template>
           </ion-label>
           <ion-select-option
@@ -37,14 +42,14 @@
         </ion-select>
 
         <ion-label v-else class="ion-text-wrap">
-          <p class="overline">{{ displayInstanceLabel }}</p>
+          <p class="overline">
+            {{ displayInstanceLabel }}<ion-note
+              v-if="displayTimeZone"
+              :color="isTimeZoneMismatched ? 'danger' : ''"
+            >{{ displayInstanceLabel ? ' ' : '' }}{{ displayTimeZone }}{{ displayZoneTime ? ` ${displayZoneTime}` : '' }}</ion-note>
+          </p>
           {{ currentStoreLabel }}
         </ion-label>
-
-        <ion-note v-if="displayTimeZone" slot="end" class="ion-text-end" :color="isTimeZoneMismatched ? 'danger' : ''">
-          {{ displayTimeZone }}
-          <p v-if="displayZoneTime">{{ displayZoneTime }}</p>
-        </ion-note>
       </ion-item>
     </ion-toolbar>
   </ion-footer>
