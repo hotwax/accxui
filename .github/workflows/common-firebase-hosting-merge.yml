@@ -61,10 +61,38 @@ jobs:
 
       - name: Set Firebase and VAPID Config
         run: |
+          # Same quoting rule as the release workflow: the secret may be stored wrapped in quotes, and
+          # public/firebase-messaging-sw.js is plain JS that needs an object literal. A quoted secret
+          # reaching the worker verbatim makes firebaseConfig a STRING, initializeApp throws, the worker
+          # fails to evaluate, and login dies with "messaging/failed-service-worker-registration".
+          strip_quotes() {
+            local v="$1"
+            case "$v" in
+              "'"*"'") v="${v#\'}"; v="${v%\'}" ;;
+              '"'*'"') v="${v#\"}"; v="${v%\"}" ;;
+            esac
+            printf '%s' "$v"
+          }
+          VITE_FIREBASE_CONFIG="$(strip_quotes "${VITE_FIREBASE_CONFIG:-}")"
+          VITE_FIREBASE_VAPID_KEY="$(strip_quotes "${VITE_FIREBASE_VAPID_KEY:-}")"
+
           if [[ -n "$VITE_FIREBASE_CONFIG" ]]; then
             sed -i "s|^VITE_FIREBASE_CONFIG=.*|VITE_FIREBASE_CONFIG=$VITE_FIREBASE_CONFIG|g" .env
             sed -i "s|^VITE_FIREBASE_VAPID_KEY=.*|VITE_FIREBASE_VAPID_KEY='$VITE_FIREBASE_VAPID_KEY'|g" .env
             sed -i "s|const firebaseConfig =.*|const firebaseConfig = $VITE_FIREBASE_CONFIG|g" public/firebase-messaging-sw.js
+
+            # Fail the build rather than ship a worker that throws on evaluation.
+            node -e '
+              const fs = require("fs");
+              const file = "public/firebase-messaging-sw.js";
+              const line = (fs.readFileSync(file, "utf8").match(/const firebaseConfig = (.*)/) || [])[1];
+              if (!line) { console.error(`${file}: firebaseConfig assignment not found`); process.exit(1); }
+              const value = line.trim();
+              if (value.startsWith("\"") || value.startsWith("'"'"'")) {
+                console.error(`${file}: firebaseConfig is a quoted string, not an object literal.`);
+                process.exit(1);
+              }
+            '
           fi
         env:
           VITE_FIREBASE_CONFIG: ${{ secrets.VITE_FIREBASE_CONFIG }}
