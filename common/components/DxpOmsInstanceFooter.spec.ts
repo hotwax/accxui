@@ -109,6 +109,14 @@ describe('DxpOmsInstanceFooter', () => {
     expect(note(withClock).text()).toContain('5:47 PM');
   });
 
+  it('keeps the timezone and clock in the instance metadata line', () => {
+    const wrapper = render({ instanceLabel: 'rails-oms', timeZone: 'UTC', zoneTime: '12:03 AM' });
+
+    expect(wrapper.find('.overline').text()).toBe('rails-oms · UTC · 12:03 AM');
+    expect(wrapper.find('.overline').find('[data-stub="ion-note"]').exists()).toBe(true);
+    expect(note(wrapper).find('p').exists()).toBe(false);
+  });
+
   it('falls back to the store id when a store has no name', () => {
     const wrapper = render({
       productStores: [{ productStoreId: 'STORE' }],
@@ -137,4 +145,3 @@ describe('DxpOmsInstanceFooter', () => {
     accxuiConfig.value.current = {};
   });
 });
-
