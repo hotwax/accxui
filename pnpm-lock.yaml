@@ -908,8 +908,8 @@ importers:
         specifier: ^3.6.5
         version: 3.49.0
       dexie:
-        specifier: ^4.0.7
-        version: 4.4.2
+        specifier: 'catalog:'
+        version: 4.4.3
       http-status-codes:
         specifier: 'catalog:'
         version: 2.2.0
@@ -4745,9 +4745,6 @@ packages:
 
   dexie@4.0.7:
     resolution: {integrity: sha512-M+Lo6rk4pekIfrc2T0o2tvVJwL6EAAM/B78DNfb8aaxFVoI1f8/rz5KTxuAnApkwqTSuxx7T5t0RKH7qprapGg==}
-
-  dexie@4.4.2:
-    resolution: {integrity: sha512-zMtV8q79EFE5U8FKZvt0Y/77PCU/Hr/RDxv1EDeo228L+m/HTbeN2AjoQm674rhQCX8n3ljK87lajt7UQuZfvw==}
 
   dexie@4.4.3:
     resolution: {integrity: sha512-N+3IGQ3HPlyO2YAkntGAwitm42BpBGV86MttzUMiRzWLa4NGh0pltVRcUVF4ybL/OnXjCrr9k7SDPIKkFYP2Lg==}
@@ -11457,8 +11454,6 @@ snapshots:
   detect-libc@2.1.2: {}
 
   dexie@4.0.7: {}
-
-  dexie@4.4.2: {}
 
   dexie@4.4.3: {}
 
