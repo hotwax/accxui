@@ -200,7 +200,6 @@ export const useNotificationStore = defineStore("notification", {
       this.hasUnreadNotifications = true;
       this.allNotificationPrefs = [];
       this.isFirebaseInitialised = false;
-      this.firebaseDeviceId = "";
     }
   },
   persist: true
