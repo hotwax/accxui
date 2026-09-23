@@ -71,6 +71,11 @@ jobs:
           MAX_VERSIONS: ${{ inputs.maxVersions }}
           VITE_FIREBASE_CONFIG: ${{ secrets.VITE_FIREBASE_CONFIG }}
           VITE_FIREBASE_VAPID_KEY: ${{ secrets.VITE_FIREBASE_VAPID_KEY }}
+          # In a reusable workflow the github context is the CALLER's, so these describe the push that
+          # asked for this deploy: a tag (a release) or a branch (a deploy branch such as v5.3.0-ls).
+          TRIGGER_REF_TYPE: ${{ github.ref_type }}
+          TRIGGER_REF_NAME: ${{ github.ref_name }}
+          TRIGGER_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
 
@@ -151,33 +156,47 @@ jobs:
             tail -n "$MAX_VERSIONS"
           )
           [ -n "${latest:-}" ] || { echo "::error::no vX.Y.Z tags found"; exit 1; }
-          echo "root=$latest versions=${versions[*]:-<none>}"
+
+          # What serves at root depends on what triggered us. A tag push is a release: root is the newest
+          # release, as before. A BRANCH push is a request to deploy that branch — the caller opted into
+          # it by listing the branch under on.push.branches — so root must be the pushed commit. Picking
+          # the newest tag regardless deployed main's v5.3.1 over a push to v5.3.0-ls: the branch's own
+          # merged fixes never reached its UAT, while the run reported success.
+          if [ "${TRIGGER_REF_TYPE:-}" = "branch" ]; then
+            root_ref="$TRIGGER_SHA"
+            root_label="$TRIGGER_REF_NAME@${TRIGGER_SHA:0:7}"
+          else
+            root_ref="$latest"
+            root_label="$latest"
+          fi
+          echo "root=$root_label versions=${versions[*]:-<none>}"
 
           # firebase deploy publishes all of dist/, so the whole tree is assembled locally first. Root
           # goes first: its outDir is dist/ and Vite empties that, wiping any version folder present.
           rm -rf dist
-          checkout "$latest"
+          checkout "$root_ref"
           build ""
-          # Still checked out, so build its versioned bundle now and skip a second checkout + install.
-          if printf '%s\n' "${versions[@]:-}" | grep -qx "$latest"; then build "$latest"; fi
+          # If root IS the newest tag it is still checked out: build its versioned bundle now and skip a
+          # second checkout + install. A branch root gets no /vX.Y.Z/ path of its own; the tags below do.
+          if [ "$root_ref" = "$latest" ] && printf '%s\n' "${versions[@]:-}" | grep -qx "$latest"; then build "$latest"; fi
 
           for v in "${versions[@]:-}"; do
-            if [ -z "$v" ] || [ "$v" = "$latest" ]; then continue; fi
+            if [ -z "$v" ] || { [ "$root_ref" = "$latest" ] && [ "$v" = "$latest" ]; }; then continue; fi
             checkout "$v"
             build "$v"
           done
           [ -f dist/index.html ] || { echo "::error::root bootstrap was overwritten"; exit 1; }
 
-          # Hosting config comes from the release serving root; the loop left us on the oldest one.
+          # Hosting config comes from whatever serves root; the loop left us on the oldest version.
           # Version rewrites first, catch-all last: Firebase is first-match-wins and the catch-all has to
           # fall through to the root bootstrap.
-          git checkout --quiet "$latest" -- firebase.json .firebaserc
+          git checkout --quiet "$root_ref" -- firebase.json .firebaserc
           rewrites=$(printf '%s\n' "${versions[@]:-}" | { grep -v '^$' || true; } | jq -R . | jq -s \
             'map({source:("/"+.+"/**"), destination:("/"+.+"/index.html")}) + [{source:"**",destination:"/index.html"}]')
           jq --argjson r "$rewrites" '.hosting |= map(.rewrites = $r)' firebase.json > fb.tmp && mv fb.tmp firebase.json
           jq -c '.hosting[] | {target, rewrites}' firebase.json
           find dist -mindepth 1 -maxdepth 1 -type d | sort
-          echo "DEPLOY_MSG=Root $latest + versions ${versions[*]:-none}" >> "$GITHUB_ENV"
+          echo "DEPLOY_MSG=Root $root_label + versions ${versions[*]:-none}" >> "$GITHUB_ENV"
 
       - name: Deploy to Firebase
         working-directory: apps/${{ inputs.appDir }}
@@ -190,6 +209,9 @@ jobs:
           firebase deploy --token "$HOTWAX_PUBLIC_SECRET" -m "$DEPLOY_MSG" --only hosting:uat
 
   release:
+    # A branch push has no release tag to describe or label; without this guard the job fails with
+    # "No names found" on every deploy-branch push and paints the whole run red.
+    if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
 
     steps:
