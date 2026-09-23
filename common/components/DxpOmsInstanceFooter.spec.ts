@@ -91,7 +91,9 @@ describe('DxpOmsInstanceFooter', () => {
   });
 
   it('colors the timezone as danger only when the app says it is mismatched', () => {
-    expect(note(render({ timeZone: 'America/Los_Angeles' })).attributes('data-color')).toBe('');
+    expect(
+      note(render({ timeZone: 'America/Los_Angeles', timeZoneMismatched: false })).attributes('data-color')
+    ).toBe('');
     expect(
       note(render({ timeZone: 'America/Los_Angeles', timeZoneMismatched: true })).attributes('data-color')
     ).toBe('danger');
@@ -110,9 +112,9 @@ describe('DxpOmsInstanceFooter', () => {
   });
 
   it('keeps the timezone and clock in the instance metadata line', () => {
-    const wrapper = render({ instanceLabel: 'rails-oms', timeZone: 'UTC', zoneTime: '12:03 AM' });
+    const wrapper = render({ instanceLabel: 'test-oms', timeZone: 'UTC', zoneTime: '12:03 AM' });
 
-    expect(wrapper.find('.overline').text()).toBe('rails-oms · UTC · 12:03 AM');
+    expect(wrapper.find('.overline').text()).toBe('test-oms · UTC · 12:03 AM');
     expect(wrapper.find('.overline').find('[data-stub="ion-note"]').exists()).toBe(true);
     expect(note(wrapper).find('p').exists()).toBe(false);
   });
