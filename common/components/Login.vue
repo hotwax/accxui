@@ -146,6 +146,7 @@ import { commonUtil } from "../utils/commonUtil";
 import { useAuth } from "../composables/useAuth";
 import { accxuiConfig } from "../core/configRegistry";
 import { discoverLocalApiServers, type LocalApiServer, type LocalApiServerSignal } from "../core/localApiServerDiscovery";
+import { getDevCredentialsFor, hasAnyDevCredentials, hasDevCredentialsFor, normalizeOmsUrl } from "../utils/devCredentials";
 
 let route = null as any;
 
@@ -210,25 +211,20 @@ const canDiscoverLocalApiServers = () => {
   return import.meta.env.DEV && typeof window !== "undefined";
 };
 
-const getDevCredentials = () => {
-  const devUsername = import.meta.env.VITE_DEV_USERNAME || import.meta.env.VITE_USERNAME;
-  const devPassword = import.meta.env.VITE_DEV_PASSWORD || import.meta.env.VITE_PASSWORD;
-  return { devUsername, devPassword };
-};
+// The server the page is currently pointed at, as either an alias label or a URL.
+const getCurrentOms = () =>
+  (cookieHelper().get("oms") || instanceUrl.value || accxuiConfig.value?.oms || "").toString().trim();
 
-const canDevAutoLogin = () => {
-  const { devUsername, devPassword } = getDevCredentials();
-  return Boolean(import.meta.env.DEV && devUsername && devPassword);
-};
+const canDevAutoLogin = () => hasAnyDevCredentials();
 
-const normalizeOmsUrl = (url: string) => url.trim().toLowerCase().replace(/\/+$/, "");
-
-const configuredDevUsername = computed(() => getDevCredentials().devUsername || "");
+const configuredDevUsername = computed(() => getDevCredentialsFor(getCurrentOms())?.username || "");
 
 const canDevAutoLoginForCurrentOms = computed(() => {
-  if (!canDevAutoLogin()) return false;
-  const currentOms = (cookieHelper().get("oms") || instanceUrl.value || accxuiConfig.value?.oms || "").toString().trim().toLowerCase();
+  const currentOms = getCurrentOms().toLowerCase();
   if (!currentOms) return false;
+  // Credentials are per server, so a server with none never offers auto-login
+  // even when another server in VITE_ALIAS has them.
+  if (!hasDevCredentialsFor(currentOms)) return false;
 
   const normalizedCurrentOms = normalizeOmsUrl(currentOms);
   const resolvedCurrentOms = normalizeOmsUrl(alias[currentOms] ? alias[currentOms] : currentOms);
@@ -274,18 +270,24 @@ const isBasicLoginOption = () => {
 // a developer retype them on every reload. Automatic callers get one attempt per page load, so
 // a rejected sign-in leaves the form usable instead of retrying on each re-entry of the view;
 // an explicit server selection passes force since that is a deliberate retry.
-const attemptDevAutoLogin = async (force = false) => {
-  if(!canDevAutoLogin() || isLoggingIn.value) {
+const attemptDevAutoLogin = async (force = false, targetOms?: string) => {
+  if(isLoggingIn.value) {
     return;
   }
   if(!force && hasAttemptedDevAutoLogin.value) {
     return;
   }
 
-  const { devUsername, devPassword } = getDevCredentials();
+  // Resolved against the server being signed in to, so picking a second server
+  // uses that server's own credentials rather than the first one's.
+  const credentials = getDevCredentialsFor(targetOms ?? getCurrentOms());
+  if(!credentials) {
+    return;
+  }
+
   hasAttemptedDevAutoLogin.value = true;
-  username.value = devUsername;
-  password.value = devPassword;
+  username.value = credentials.username;
+  password.value = credentials.password;
   await login();
 };
 
@@ -385,7 +387,7 @@ const devServers = computed<DevServer[]>(() => {
     servers.push({
       label,
       oms: resolvedEnvOms,
-      hasAutoLogin: canDevAutoLogin(),
+      hasAutoLogin: hasDevCredentialsFor(resolvedEnvOms),
       isEnv: true
     });
     seenOms.add(normalizedEnvOms);
@@ -399,7 +401,7 @@ const devServers = computed<DevServer[]>(() => {
       servers.push({
         label: key,
         oms: rawUrl,
-        hasAutoLogin: canDevAutoLogin(),
+        hasAutoLogin: hasDevCredentialsFor(key),
         isEnv: true
       });
       seenOms.add(normalizedUrl);
@@ -421,7 +423,7 @@ const devServers = computed<DevServer[]>(() => {
       servers.push({
         label: server.label,
         oms: server.oms,
-        hasAutoLogin: canDevAutoLogin(),
+        hasAutoLogin: hasDevCredentialsFor(server.oms),
         signal: server.signal,
         isEnv: false
       });
@@ -446,7 +448,7 @@ const selectDevServer = async (server: DevServer) => {
   toggleOmsInput();
 
   if (server.hasAutoLogin) {
-    await attemptDevAutoLogin(true);
+    await attemptDevAutoLogin(true, server.oms);
   }
 };
 
