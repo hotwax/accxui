@@ -41,12 +41,12 @@ vi.mock("@ionic/vue", () => {
   };
 });
 
-import { type ModalFlowOptions, useModalFlow } from "../composables/useModalFlow";
+import { type DxpModalOptions, useDxpModal } from "../composables/useDxpModal";
 import { openModal } from "../utils/modal";
 import DxpModal from "./DxpModal.vue";
 
 /** A modal built on DxpModal, inside an ion-modal that dismisses the way Ionic does: only if canDismiss agrees. */
-function render(options?: ModalFlowOptions<unknown>) {
+function render(options?: DxpModalOptions<unknown>) {
   const host: any = document.createElement("ion-modal");
   host.closed = null;
   host.dismiss = async (data?: unknown, role?: string) => {
@@ -61,7 +61,7 @@ function render(options?: ModalFlowOptions<unknown>) {
 
   const wrapper = mount(defineComponent({
     setup() {
-      if(options) {useModalFlow(options);}
+      if(options) {useDxpModal(options);}
 
       return () => h(DxpModal, { title: "Add task" }, () => h("p", "fields"));
     },

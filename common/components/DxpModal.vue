@@ -27,14 +27,14 @@
 <script setup lang="ts">
 /**
  * The frame of every modal: the title, the exit path and the confirm path. The modal puts its
- * content in the default slot and its logic in useModalFlow; how the frame is drawn stays here.
+ * content in the default slot and its logic in useDxpModal; how the frame is drawn stays here.
  */
 import {
   IonButton, IonButtons, IonContent, IonFab, IonFabButton, IonHeader, IonIcon, IonSpinner, IonTitle, IonToolbar
 } from "@ionic/vue";
 import { closeOutline, saveOutline } from "ionicons/icons";
 import { onMounted, ref } from "vue";
-import { useModalFlowOrDefault } from "../composables/useModalFlow";
+import { useDxpModalOrDefault } from "../composables/useDxpModal";
 import { translate } from "../core/i18n";
 
 defineProps<{
@@ -45,7 +45,7 @@ defineProps<{
   confirmIcon?: string;
 }>();
 
-const flow = useModalFlowOrDefault();
+const flow = useDxpModalOrDefault();
 const header = ref();
 onMounted(() => flow.attach(header.value?.$el));
 </script>

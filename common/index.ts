@@ -10,7 +10,7 @@ import ShopifyLogin from "./components/ShopifyLogin.vue"
 import ShopifyAppInstall from "./components/ShopifyAppInstall.vue"
 import FastTravel from "./components/FastTravel.vue"
 import { useFastTravel } from './composables/useFastTravel'
-import { useModalFlow } from './composables/useModalFlow'
+import { useDxpModal } from './composables/useDxpModal'
 import { openModal } from './utils/modal'
 import { getFastTravelApps, getFastTravelApp, buildAppUrl } from './utils/fastTravelRegistry'
 import emitter from './core/emitter'
@@ -60,7 +60,7 @@ export {
   ShopifyAppInstall,
   FastTravel,
   useFastTravel,
-  useModalFlow,
+  useDxpModal,
   openModal,
   getFastTravelApps,
   getFastTravelApp,
@@ -76,6 +76,6 @@ export {
   useAuth
 }
 
-export type { ModalAlert, ModalFlow, ModalFlowOptions } from './composables/useModalFlow';
+export type { DxpModalAlert, DxpModalFlow, DxpModalOptions } from './composables/useDxpModal';
 
 export * from './db';

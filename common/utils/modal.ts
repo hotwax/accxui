@@ -1,5 +1,5 @@
 import { type ModalOptions, modalController } from "@ionic/vue";
-import { CONFIRM_ROLE } from "../composables/useModalFlow";
+import { CONFIRM_ROLE } from "../composables/useDxpModal";
 
 /**
  * Opens a modal and waits for it to close. Resolves with what its confirm path returned, or

@@ -5,7 +5,7 @@ import logger from "../core/logger";
 import { commonUtil } from "../utils/commonUtil";
 
 /** An alert the flow shows before it goes on: a title, a body, and the two buttons' words. */
-export type ModalAlert = {
+export type DxpModalAlert = {
   title: string;
   body: string;
   /** The button that goes on. */
@@ -14,7 +14,7 @@ export type ModalAlert = {
   cancelText?: string;
 };
 
-export type ModalFlowOptions<T> = {
+export type DxpModalOptions<T> = {
   /** The modal holds input that closing would lose; exiting asks first. */
   dirty?: MaybeRefOrGetter<boolean>;
   /** The confirm path can run: the form is valid, or something is selected. Defaults to true. */
@@ -27,9 +27,9 @@ export type ModalFlowOptions<T> = {
    */
   confirm?: () => T | Promise<T>;
   /** Replaces the default "Discard changes" alert shown when exiting a dirty modal. */
-  exitAlert?: ModalAlert;
+  exitAlert?: DxpModalAlert;
   /** Asks before the confirm path runs. */
-  confirmAlert?: ModalAlert;
+  confirmAlert?: DxpModalAlert;
   /** The error toast stays up, with a Dismiss button, instead of fading. */
   persistError?: boolean;
 };
@@ -38,7 +38,7 @@ export type ModalFlowOptions<T> = {
  * open: waiting for the operator. asking: an alert is up. saving: the confirm path is running.
  * closing: the confirm path succeeded and the modal is on its way out.
  */
-export type ModalFlowState = "open" | "asking" | "saving" | "closing";
+export type DxpModalState = "open" | "asking" | "saving" | "closing";
 
 /** The ion-modal element, as much of it as the flow uses. */
 type ModalHost = HTMLElement & {
@@ -46,8 +46,8 @@ type ModalHost = HTMLElement & {
   dismiss: (data?: unknown, role?: string) => Promise<boolean>;
 };
 
-export type ModalFlow = {
-  readonly state: ModalFlowState;
+export type DxpModalFlow = {
+  readonly state: DxpModalState;
   /** Nothing else can start: an alert is up, or the confirm path is running. */
   readonly busy: boolean;
   readonly saving: boolean;
@@ -62,7 +62,7 @@ export type ModalFlow = {
 /** The role the confirm path closes with. Every other way out resolves openModal to undefined. */
 export const CONFIRM_ROLE = "confirm";
 
-const ModalFlowKey: InjectionKey<ModalFlow> = Symbol("ModalFlow");
+const DxpModalKey: InjectionKey<DxpModalFlow> = Symbol("DxpModalFlow");
 
 function errorText(error: unknown) {
   if(typeof error === "string" && error) {return error;}
@@ -73,7 +73,7 @@ function errorText(error: unknown) {
 }
 
 /** Cancel first, then the action's verb. */
-async function ask({ title, body, confirmText, cancelText }: ModalAlert) {
+async function ask({ title, body, confirmText, cancelText }: DxpModalAlert) {
   const alert = await alertController.create({
     header: title,
     message: body,
@@ -98,11 +98,11 @@ async function showError(message: string, persistent?: boolean) {
  * work, stays open with a toast when that fails, and closes with its result when it succeeds.
  * The modal brings its content and logic; DxpModal draws the paths.
  */
-export function useModalFlow<T = true>(options: ModalFlowOptions<T> = {}): ModalFlow {
-  const state = ref<ModalFlowState>("open");
+export function useDxpModal<T = true>(options: DxpModalOptions<T> = {}): DxpModalFlow {
+  const state = ref<DxpModalState>("open");
   let host: ModalHost | null = null;
 
-  async function askFirst(alert: ModalAlert) {
+  async function askFirst(alert: DxpModalAlert) {
     state.value = "asking";
     try {
       return await ask(alert);
@@ -111,7 +111,7 @@ export function useModalFlow<T = true>(options: ModalFlowOptions<T> = {}): Modal
     }
   }
 
-  const exitAlert = (): ModalAlert => options.exitAlert ?? {
+  const exitAlert = (): DxpModalAlert => options.exitAlert ?? {
     title: translate("Discard changes"),
     body: translate("What you entered will be lost."),
     confirmText: translate("Discard"),
@@ -129,7 +129,7 @@ export function useModalFlow<T = true>(options: ModalFlowOptions<T> = {}): Modal
 
   function attach(element?: Element | null) {
     host = element?.closest<ModalHost>("ion-modal") ?? null;
-    if(host) {host.canDismiss = canDismiss;} else {logger.warn("useModalFlow: no ion-modal around this modal, so its exit path cannot ask before closing.");}
+    if(host) {host.canDismiss = canDismiss;} else {logger.warn("useDxpModal: no ion-modal around this modal, so its exit path cannot ask before closing.");}
   }
 
   const exit = async () => !!(await host?.dismiss(undefined, "cancel"));
@@ -166,14 +166,14 @@ export function useModalFlow<T = true>(options: ModalFlowOptions<T> = {}): Modal
     exit,
     confirm,
     attach,
-  }) as ModalFlow;
+  }) as DxpModalFlow;
 
-  provide(ModalFlowKey, flow);
+  provide(DxpModalKey, flow);
 
   return flow;
 }
 
-/** The flow the modal set up with useModalFlow, or a plain one with only a way out. */
-export function useModalFlowOrDefault(): ModalFlow {
-  return inject(ModalFlowKey, null) ?? useModalFlow();
+/** The flow the modal set up with useDxpModal, or a plain one with only a way out. */
+export function useDxpModalOrDefault(): DxpModalFlow {
+  return inject(DxpModalKey, null) ?? useDxpModal();
 }
