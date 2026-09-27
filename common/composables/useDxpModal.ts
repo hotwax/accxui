@@ -1,5 +1,5 @@
 import { alertController } from "@ionic/vue";
-import { type InjectionKey, type MaybeRefOrGetter, computed, inject, provide, reactive, ref, toValue } from "vue";
+import { type MaybeRefOrGetter, computed, reactive, ref, toValue } from "vue";
 import { translate } from "../core/i18n";
 import logger from "../core/logger";
 import { commonUtil } from "../utils/commonUtil";
@@ -62,8 +62,6 @@ export type DxpModalFlow = {
 /** The role the confirm path closes with. Every other way out resolves openModal to undefined. */
 export const CONFIRM_ROLE = "confirm";
 
-const DxpModalKey: InjectionKey<DxpModalFlow> = Symbol("DxpModalFlow");
-
 function errorText(error: unknown) {
   if(typeof error === "string" && error) {return error;}
   // A plain Error was raised on purpose with words for the operator; a TypeError or a request error was not.
@@ -96,7 +94,8 @@ async function showError(message: string, persistent?: boolean) {
  * A modal's two ways out. The exit path (the close button, a backdrop tap, Escape, a swipe, the
  * hardware back button) asks first when the modal is dirty. The confirm path runs the modal's own
  * work, stays open with a toast when that fails, and closes with its result when it succeeds.
- * The modal brings its content and logic; DxpModal draws the paths.
+ * The modal brings its content and logic, and hands what this returns to DxpModal as its state;
+ * DxpModal draws the paths. Each call is its own flow, so one component can hold several modals.
  */
 export function useDxpModal<T = true>(options: DxpModalOptions<T> = {}): DxpModalFlow {
   const state = ref<DxpModalState>("open");
@@ -168,12 +167,5 @@ export function useDxpModal<T = true>(options: DxpModalOptions<T> = {}): DxpModa
     attach,
   }) as DxpModalFlow;
 
-  provide(DxpModalKey, flow);
-
   return flow;
-}
-
-/** The flow the modal set up with useDxpModal, or a plain one with only a way out. */
-export function useDxpModalOrDefault(): DxpModalFlow {
-  return inject(DxpModalKey, null) ?? useDxpModal();
 }

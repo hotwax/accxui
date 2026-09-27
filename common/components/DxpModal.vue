@@ -27,25 +27,29 @@
 <script setup lang="ts">
 /**
  * The frame of every modal: the title, the exit path and the confirm path. The modal puts its
- * content in the default slot and its logic in useDxpModal; how the frame is drawn stays here.
+ * content in the default slot and its logic in useDxpModal, and passes what useDxpModal returned
+ * as state; how the frame is drawn stays here.
  */
 import {
   IonButton, IonButtons, IonContent, IonFab, IonFabButton, IonHeader, IonIcon, IonSpinner, IonTitle, IonToolbar
 } from "@ionic/vue";
 import { closeOutline, saveOutline } from "ionicons/icons";
 import { onMounted, ref } from "vue";
-import { useDxpModalOrDefault } from "../composables/useDxpModal";
+import type { DxpModalFlow } from "../composables/useDxpModal";
+import { useDxpModal } from "../composables/useDxpModal";
 import { translate } from "../core/i18n";
 
-defineProps<{
+const props = defineProps<{
   title: string;
+  /** The object useDxpModal returned. Omit it for a read-only modal: it gets a way out and no confirm button. */
+  state?: DxpModalFlow;
   /** What the confirm button does, for its label. Defaults to Save. */
   confirmLabel?: string;
   /** Defaults to the save icon. */
   confirmIcon?: string;
 }>();
 
-const flow = useDxpModalOrDefault();
+const flow = props.state ?? useDxpModal();
 const header = ref();
 onMounted(() => flow.attach(header.value?.$el));
 </script>

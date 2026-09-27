@@ -1,6 +1,6 @@
 import { flushPromises, mount } from "@vue/test-utils";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { defineComponent, h, ref } from "vue";
+import { Teleport, defineComponent, h, ref } from "vue";
 
 const mocks = vi.hoisted(() => ({
   alert: vi.fn(),
@@ -45,8 +45,8 @@ import { type DxpModalOptions, useDxpModal } from "../composables/useDxpModal";
 import { openModal } from "../utils/modal";
 import DxpModal from "./DxpModal.vue";
 
-/** A modal built on DxpModal, inside an ion-modal that dismisses the way Ionic does: only if canDismiss agrees. */
-function render(options?: DxpModalOptions<unknown>) {
+/** An ion-modal that dismisses the way Ionic does: only if canDismiss agrees. */
+function ionModal() {
   const host: any = document.createElement("ion-modal");
   host.closed = null;
   host.dismiss = async (data?: unknown, role?: string) => {
@@ -55,15 +55,22 @@ function render(options?: DxpModalOptions<unknown>) {
 
     return true;
   };
+  document.body.appendChild(host);
+
+  return host;
+}
+
+/** A modal built on DxpModal, inside an ion-modal. Without options it is read-only and passes no state. */
+function render(options?: DxpModalOptions<unknown>) {
+  const host = ionModal();
   const slot = document.createElement("div");
   host.appendChild(slot);
-  document.body.appendChild(host);
 
   const wrapper = mount(defineComponent({
     setup() {
-      if(options) {useDxpModal(options);}
+      const flow = options && useDxpModal(options);
 
-      return () => h(DxpModal, { title: "Add task" }, () => h("p", "fields"));
+      return () => h(DxpModal, flow ? { title: "Add task", state: flow } : { title: "Add task" }, () => h("p", "fields"));
     },
   }), { attachTo: slot });
   const close = () => wrapper.get("[data-stub=\"ion-button\"]");
@@ -178,6 +185,25 @@ describe("DxpModal", () => {
     await flushPromises();
     expect(work).not.toHaveBeenCalled();
     expect(asked.host.closed).toBeNull();
+  });
+
+  it("keeps two modals in one component apart: confirming one closes only that one, with its own result", async () => {
+    const [first, second] = [ionModal(), ionModal()];
+    mount({
+      setup() {
+        const one = useDxpModal({ confirm: () => "one" });
+        const two = useDxpModal({ confirm: () => "two" });
+
+        return () => [
+          h(Teleport, { to: first }, h(DxpModal, { title: "One", state: one })),
+          h(Teleport, { to: second }, h(DxpModal, { title: "Two", state: two })),
+        ];
+      },
+    });
+    first.querySelector("[data-stub=\"ion-fab-button\"]").click();
+    await flushPromises();
+    expect(first.closed).toEqual({ data: "one", role: "confirm" });
+    expect(second.closed).toBeNull();
   });
 });
 
