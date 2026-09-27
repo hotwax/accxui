@@ -27,8 +27,18 @@ const requestInterceptor = async (config: any) => {
 
   if (token) {
     config.headers["Authorization"] = "Bearer " + token;
-    config.headers['Content-Type'] = 'application/json';
+    // Don't force JSON for multipart/file uploads (FormData) — the browser must set
+    // Content-Type with the multipart boundary itself, otherwise the upload is unparseable.
+    if (!(config.data instanceof FormData)) {
+      config.headers['Content-Type'] = 'application/json';
+    }
   }
+  // Moqui/Maarg authenticates API requests via the api_key (login-key) header. The Authorization
+  // Bearer JWT above is not validated per-request by Maarg, so without this the user is treated as
+  // anonymous ("No User") and every authenticated call — including the post-login profile fetch —
+  // returns 403. Sending the stored api_key here is what actually authenticates the request.
+  const apiKey = commonUtil.getApiKey();
+  if (apiKey) config.headers["api_key"] = apiKey;
   return config;
 }
 
