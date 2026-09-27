@@ -3,7 +3,7 @@
     <ion-header>
       <ion-toolbar>
         <ion-buttons slot="start">
-          <ion-button @click="closeModal">
+          <ion-button @click="closeModal" :aria-label="translate('Close')" :title="translate('Close')">
             <ion-icon :icon="closeOutline" slot="icon-only" />
           </ion-button>
         </ion-buttons>
@@ -24,6 +24,7 @@ import { IonButton, IonButtons, IonContent, IonHeader, IonIcon, IonModal, IonPro
 import { closeOutline } from 'ionicons/icons';
 import { computed, ref } from 'vue';
 import defaultImgUrl from '../assets/images/defaultImage.png';
+import { translate } from '../core/i18n';
 import logger from '../core/logger';
 
 /**
