@@ -4,8 +4,8 @@ import { loadEnv, type Plugin } from "vite";
 
 const ACCXUI_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
-// App .env.example files ship placeholders like `VITE_ALIAS=` or `VITE_ALIAS={}`; those
-// mean "not configured", so they must not hide the root value.
+// App .env files copied from older .env.example files have placeholders like `VITE_ALIAS=` or
+// `VITE_ALIAS={}`; those mean "not configured", so they must not hide the root value.
 const isUnset = (value?: string) => value === undefined || value.trim() === "" || value.trim() === "{}";
 
 // Shares every VITE_ variable in the accxui root env (.env / .env.local next to accxui's
