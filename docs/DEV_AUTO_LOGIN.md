@@ -15,7 +15,7 @@ During local development, retyping credentials or repeatedly choosing an OMS ins
 
 ## 2. Configuration (`.env`)
 
-To enable dev auto-login for an AccxUI app (such as `company`, `order-manager`, `transfers`, etc.), add the following variables to your local `.env` file in that app:
+Configure dev auto-login once for every app: copy `.env.example` in the accxui root to `.env` (gitignored) and fill it in:
 
 ```bash
 # OMS Instance Configuration
@@ -37,6 +37,14 @@ VITE_DEV_PASSWORD="password"
 | `VITE_ALIAS` | Optional JSON string mapping short alias names to OMS URLs. Each one is offered on the dev login and receives the dev credentials. |
 | `VITE_DEV_USERNAME` | The dev username to use for auto-login (or `VITE_USERNAME`). |
 | `VITE_DEV_PASSWORD` | The dev password to use for auto-login (or `VITE_PASSWORD`). |
+
+### How the root env reaches each app
+Each app's `vite.config` adds `commonEnvPlugin` (`common/vite/commonEnvPlugin.ts`). While `vite` serves an app, it copies every `VITE_` variable from the accxui root `.env` / `.env.local` (and their `.env.[mode]` variants) into the app's env. Restart the app's dev server after editing them.
+
+- **The app's own value wins.** If the app's `.env` / `.env.local`, or your shell, sets one of them to a non-empty value, that value is used. An empty value or `{}` counts as not set, so placeholders left in an app `.env` copied from an older `.env.example` don't hide the root value.
+- **Every `VITE_` variable in the root env is shared.** Put only settings common to all apps there, such as the four above; app-specific settings stay in each app's `.env`.
+- **Dev server only.** The plugin does nothing on `vite build`, so a release build takes `VITE_ALIAS` / `VITE_DEFAULT_ALIAS` only from the app's own env, and root dev credentials never reach a bundle.
+- **Legacy names aren't shared.** `VITE_USERNAME` / `VITE_PASSWORD` still work, but only from an app's own env.
 
 ---
 
