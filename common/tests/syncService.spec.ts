@@ -23,7 +23,7 @@ vi.mock("../utils/commonUtil", () => ({
     getOMSInstanceName: () => "demo",
   },
 }));
-vi.mock("../db/sync/pollingTokenChannel", () => ({
+vi.mock("../db/sync/channels", () => ({
   createTokenPublisher: () => ({ publish: vi.fn(), close: vi.fn() }),
 }));
 
@@ -31,11 +31,11 @@ import Dexie from "dexie";
 import { createSyncService } from "../db/sync/syncService";
 
 let deletedDatabases: string[] = [];
-import { __resetDbVersionChecks } from "../db/baseDb";
+import { __resetDbVersionChecks } from "../db/storage/baseDb";
 
 /**
  * A minimal `BaseDB`-shaped stub: enough of `syncMeta.get`/`put`, `transaction`, `table` and
- * `getTableNames` for `ensureDbReady`/`clearDatabaseTables` (in `common/db/baseDb.ts`) to run
+ * `getTableNames` for `ensureDbReady`/`clearDatabaseTables` (in `common/db/storage/baseDb.ts`) to run
  * against, without a real Dexie instance.
  */
 function createDbStub(recordedVersion: number | undefined, declaredVersion = 2) {

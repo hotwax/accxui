@@ -8,11 +8,11 @@
 
 import { computed, onUnmounted, ref, shallowRef, watch, type Ref } from "vue";
 import type { Subscription } from "dexie";
-import type { BaseDB } from "./baseDb";
-import { dbClient } from "./dbClient";
-import { getAppDb } from "./appDbRegistry";
-import type { QueryOptions } from "./types";
-import { serviceState } from "./sync/syncService";
+import type { BaseDB } from "../storage/baseDb";
+import { dbClient } from "../storage/dbClient";
+import { getAppDb } from "../schema/appDbRegistry";
+import type { QueryOptions } from "../types";
+import { serviceState } from "../sync/syncService";
 
 export interface DbListResult<T = Record<string, any>> {
   records: Ref<T[]>;

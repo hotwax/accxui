@@ -30,7 +30,7 @@ vi.mock("../core/workerRemoteApi", () => ({
   },
 }));
 
-import { defineEntity } from "../db/defineEntity";
+import { defineEntity } from "../db/schema/defineEntity";
 import { registerSnapshotDomain } from "../db/sync/defineSnapshotDomain";
 import { clearSyncRegistry } from "../db/sync/syncRegistry";
 import type { SyncContext } from "../db/types";

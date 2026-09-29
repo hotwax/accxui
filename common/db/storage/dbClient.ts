@@ -11,8 +11,8 @@
 
 import { liveQuery, type Observable, type Table } from "dexie";
 import { type BaseDB, ensureDbReady } from "./baseDb";
-import type { DbKey, QueryOptions } from "./types";
-import type { Entity } from "./defineEntity";
+import type { DbKey, QueryOptions } from "../types";
+import type { Entity } from "../schema/defineEntity";
 import { diffStaleKeys, entityKeyOf, newestValue, projectRows } from "./projection";
 
 function keysOfRows(rows: Array<Record<string, unknown>>, entity: Entity): DbKey[] {

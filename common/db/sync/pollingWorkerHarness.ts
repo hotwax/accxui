@@ -12,10 +12,9 @@
  */
 
 import { expose } from "comlink";
-import { type BaseDB, ensureDbReady, hasSyncedThisLogin } from "../baseDb";
-import { DB_SYNC_CHANNEL } from "../syncChannel";
+import { type BaseDB, ensureDbReady, hasSyncedThisLogin } from "../storage/baseDb";
+import { DB_SYNC_CHANNEL, subscribeToken } from "./channels";
 import type { SyncContext, SyncDomain } from "../types";
-import { subscribeToken } from "./pollingTokenChannel";
 import {
   type ActiveDomain,
   activationKey,

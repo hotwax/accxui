@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { defineEntity } from "../db/defineEntity";
-import { defineSchema, mergeSchemas } from "../db/defineSchema";
+import { defineEntity } from "../db/schema/defineEntity";
+import { defineSchema, mergeSchemas } from "../db/schema/defineSchema";
 
 const facilities = defineEntity({
   primaryKey: "facilityId",

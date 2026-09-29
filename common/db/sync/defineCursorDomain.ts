@@ -8,12 +8,12 @@
  * Imports no `vue` and not the `@common/db` barrel — worker chunks must stay a single iife.
  */
 
-import type { BaseDB } from "../baseDb";
-import type { Entity } from "../defineEntity";
-import { keepNewerThan } from "../projection";
+import type { BaseDB } from "../storage/baseDb";
+import type { Entity } from "../schema/defineEntity";
+import { keepNewerThan } from "../storage/projection";
 import type { SyncContext, SyncDomain } from "../types";
-import { getAppDb } from "../appDbRegistry";
-import { defineCachedEntity } from "./defineSnapshotDomain";
+import { getAppDb } from "../schema/appDbRegistry";
+import { defineCachedEntity } from "./cachedEntity";
 import { registerSyncDomain } from "./syncRegistry";
 import { pageNewestFirst } from "../../core/workerRemoteApi";
 

@@ -12,7 +12,7 @@
  * `commonUtil` or the `@common/db` barrel.
  */
 
-import type { FieldKind } from "./types";
+import type { FieldKind } from "../types";
 
 export interface EntityDefinition {
   /** Comma-separated pk field(s). One field → plain keyPath; many → Dexie compound key. */

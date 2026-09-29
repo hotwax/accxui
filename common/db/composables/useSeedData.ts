@@ -6,11 +6,11 @@
  * and returns a value with raw ID fallbacks.
  */
 
-import { commonUtil } from "../utils/commonUtil";
-import type { AppDb } from "./defineAppDb";
-import { type DbClient } from "./dbClient";
-import { getAppDb } from "./appDbRegistry";
-import type { DbKey } from "./types";
+import { commonUtil } from "../../utils/commonUtil";
+import type { AppDb } from "../schema/defineAppDb";
+import { type DbClient } from "../storage/dbClient";
+import { getAppDb } from "../schema/appDbRegistry";
+import type { DbKey } from "../types";
 
 export type Row = Record<string, any>;
 export type DbTarget = AppDb | DbClient | { client(): DbClient; raw(): any };

@@ -5,7 +5,7 @@ vi.mock("dexie", async (importOriginal) => {
   return { ...actual, liveQuery: () => ({ subscribe: () => ({ unsubscribe: () => {} }) }) };
 });
 
-import { useDbStatus } from "../db/useDbStatus";
+import { useDbStatus } from "../db/composables/useDbStatus";
 
 const stubDb = () => ({
   syncMeta: { toArray: async () => [] },

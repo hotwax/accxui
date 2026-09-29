@@ -9,8 +9,8 @@
  * reach this file and the sync workers import those, so nothing here may pull in `vue`.
  */
 
-import { defineEntity } from "../defineEntity";
-import { defineSchema } from "../defineSchema";
+import { defineEntity } from "../schema/defineEntity";
+import { defineSchema } from "../schema/defineSchema";
 import type { FieldKind } from "../types";
 
 /** A description-carrying lookup table: `<id>` plus `description`, plus whatever else is passed. */

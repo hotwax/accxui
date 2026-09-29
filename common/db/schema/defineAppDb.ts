@@ -11,10 +11,10 @@
 
 import type { AppSchema } from "./defineSchema";
 import type { Entity } from "./defineEntity";
-import type { SyncDomainCatalogItem } from "./useDbStatus";
-import { commonDomainsByTable } from "./domains/commonDomains";
-import { BaseDB } from "./baseDb";
-import { type DbClient, type EntityClient, dbClient } from "./dbClient";
+import type { SyncDomainCatalogItem } from "../composables/useDbStatus";
+import { commonDomainsByTable } from "../seed/seedDomains";
+import { BaseDB } from "../storage/baseDb";
+import { type DbClient, type EntityClient, dbClient } from "../storage/dbClient";
 import { setAppDb } from "./appDbRegistry";
 
 export interface AppDbDefinition {

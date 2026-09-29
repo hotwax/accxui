@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { defineEntity, normalizePrimaryKey } from "../db/defineEntity";
+import { defineEntity, normalizePrimaryKey } from "../db/schema/defineEntity";
 
 describe("normalizePrimaryKey", () => {
   it("returns a bare string for a single field", () => {

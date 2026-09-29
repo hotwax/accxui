@@ -20,10 +20,10 @@ import { reactive } from "vue";
 import type { Remote } from "comlink";
 import { commonUtil } from "../../utils/commonUtil";
 import { WorkerFactory } from "../../core/workerFactory";
-import { createTokenPublisher } from "./pollingTokenChannel";
+import { createTokenPublisher } from "./channels";
 import type { ActiveDomain } from "./syncRegistry";
 import type { CatalogItem, SyncHarness } from "./pollingWorkerHarness";
-import { type BaseDB, ensureDbReady } from "../baseDb";
+import { type BaseDB, ensureDbReady } from "../storage/baseDb";
 
 export interface SyncServiceOptions {
   /** The Web Worker URL or instance (e.g. `new URL('./appSync.worker.ts', import.meta.url)`) */

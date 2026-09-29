@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import Dexie from "dexie";
-import { type BaseDB, __resetDbVersionChecks, ensureDbReady } from "../db/baseDb";
+import { type BaseDB, __resetDbVersionChecks, ensureDbReady } from "../db/storage/baseDb";
 
 /**
  * The database records the schema version it was built with, and a declared version that no longer

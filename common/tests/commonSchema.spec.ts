@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { commonSchema } from "../db/domains/commonSchema";
-import { COMMON_DOMAIN_NAMES, COMMON_TABLE_NAMES, commonDomainsByTable } from "../db/domains/commonDomains";
+import { commonSchema } from "../db/seed/seedSchema";
+import { COMMON_DOMAIN_NAMES, COMMON_TABLE_NAMES, commonDomainsByTable } from "../db/seed/seedDomains";
 import before from "./fixtures/seedBefore.json";
 import after from "./fixtures/seedSchemaAfter.json";
 

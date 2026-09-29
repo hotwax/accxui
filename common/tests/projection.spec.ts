@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { canonicalKey, diffStaleKeys, entityKeyOf, isUnkeyableFetch, projectRow, projectRows, toCount, toMillis, toText } from "../db/projection";
-import { defineEntity } from "../db/defineEntity";
+import { canonicalKey, diffStaleKeys, entityKeyOf, isUnkeyableFetch, projectRow, projectRows, toCount, toMillis, toText } from "../db/storage/projection";
+import { defineEntity } from "../db/schema/defineEntity";
 
 describe("projection coercion helpers", () => {
   it("coerces dates accurately to epoch millis", () => {

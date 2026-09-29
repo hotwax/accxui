@@ -4,8 +4,8 @@
  * Deliberately free of Dexie and Vue so every rule here is unit-testable without IndexedDB.
  */
 
-import type { Entity } from "./defineEntity";
-import type { DbKey, DbRow, FieldKind } from "./types";
+import type { Entity } from "../schema/defineEntity";
+import type { DbKey, DbRow, FieldKind } from "../types";
 
 /** Coerce a server date field (epoch-millis number, numeric string, or ISO string) to millis. */
 export function toMillis(value: unknown): number | undefined {

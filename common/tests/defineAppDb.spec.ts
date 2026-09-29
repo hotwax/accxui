@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { defineEntity } from "../db/defineEntity";
-import { defineSchema, mergeSchemas } from "../db/defineSchema";
-import { defineAppDb } from "../db/defineAppDb";
-import { commonSchema } from "../db/domains/commonSchema";
-import { COMMON_DOMAIN_NAMES, commonDomainsByTable } from "../db/domains/commonDomains";
+import { defineEntity } from "../db/schema/defineEntity";
+import { defineSchema, mergeSchemas } from "../db/schema/defineSchema";
+import { defineAppDb } from "../db/schema/defineAppDb";
+import { commonSchema } from "../db/seed/seedSchema";
+import { COMMON_DOMAIN_NAMES, commonDomainsByTable } from "../db/seed/seedDomains";
 import { clearSyncRegistry, getAllSyncDomains, registerDomains } from "../db/sync/syncRegistry";
-import { DEFAULT_COMMON_SYNC_CATALOG } from "../db/useDbStatus";
+import { DEFAULT_COMMON_SYNC_CATALOG } from "../db/composables/useDbStatus";
 
 const ownSchema = defineSchema({
   widgets: defineEntity({

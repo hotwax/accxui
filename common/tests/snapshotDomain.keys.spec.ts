@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { defineEntity } from "../db/defineEntity";
-import { canonicalKey, entityKeyOf, projectRow } from "../db/projection";
+import { defineEntity } from "../db/schema/defineEntity";
+import { canonicalKey, entityKeyOf, projectRow } from "../db/storage/projection";
 import { snapshotKeyOf } from "../db/sync/defineSnapshotDomain";
 
 const groupFacility = defineEntity({

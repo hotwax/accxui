@@ -1,6 +1,6 @@
 import { computed, reactive, ref, type ComputedRef, type Ref } from "vue";
-import type { AppDb } from "../defineAppDb";
-import { clearDatabaseTables } from "../baseDb";
+import type { AppDb } from "../schema/defineAppDb";
+import { clearDatabaseTables } from "../storage/baseDb";
 import {
   clearDomainErrors,
   clearScopeError,
@@ -10,8 +10,7 @@ import {
   type SyncService,
 } from "./syncService";
 import type { ActiveDomain } from "./syncRegistry";
-import { CacheReconciliationError } from "../cacheReconciliationError";
-import { cacheScopeKey } from "../cacheScopeKey";
+import { CacheReconciliationError, cacheScopeKey } from "./reconciliation";
 
 export interface AppDbSyncConfig {
   db: AppDb;

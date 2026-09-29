@@ -1,9 +1,9 @@
 import { computed, getCurrentInstance, onUnmounted, ref, watch } from "vue";
 import { liveQuery, type Subscription } from "dexie";
-import { type BaseDB, ensureDbReady } from "./baseDb";
-import { DB_SYNC_CHANNEL } from "./syncChannel";
-import { COMMON_TABLE_NAMES, commonDomainsByTable } from "./domains/commonDomains";
-import type { CatalogItem } from "./sync/pollingWorkerHarness";
+import { type BaseDB, ensureDbReady } from "../storage/baseDb";
+import { DB_SYNC_CHANNEL } from "../sync/channels";
+import { COMMON_TABLE_NAMES, commonDomainsByTable } from "../seed/seedDomains";
+import type { CatalogItem } from "../sync/pollingWorkerHarness";
 
 export interface SyncDomainCatalogItem {
   name: string;

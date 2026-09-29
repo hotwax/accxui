@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
-import { dbClient } from "../db/dbClient";
-import { defineEntity } from "../db/defineEntity";
-import type { BaseDB } from "../db/baseDb";
+import { dbClient } from "../db/storage/dbClient";
+import { defineEntity } from "../db/schema/defineEntity";
+import type { BaseDB } from "../db/storage/baseDb";
 
 function fakeDb() {
   const table = {

@@ -22,13 +22,13 @@ vi.mock("../utils/commonUtil", () => ({
     getOMSInstanceName: () => "demo",
   },
 }));
-vi.mock("../db/sync/pollingTokenChannel", () => ({
+vi.mock("../db/sync/channels", () => ({
   createTokenPublisher: () => ({ publish: vi.fn(), close: vi.fn() }),
 }));
 
 import { setupAppDbSync } from "../db/sync/setupAppDbSync";
 import { createSyncService, __resetErrorState, serviceState } from "../db/sync/syncService";
-import type { AppDb } from "../db/defineAppDb";
+import type { AppDb } from "../db/schema/defineAppDb";
 
 const fakeAppDb = () => ({
   raw: () => ({
