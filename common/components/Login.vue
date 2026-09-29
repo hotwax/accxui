@@ -246,6 +246,13 @@ const canDevAutoLoginForCurrentOms = computed(() => {
     }
   }
 
+  const matchesAlias = Object.values(alias).some(
+    (url: any) => normalizeOmsUrl(String(url)) === normalizedCurrentOms || normalizeOmsUrl(String(url)) === resolvedCurrentOms
+  );
+  if (matchesAlias) {
+    return true;
+  }
+
   return (
     normalizedCurrentOms.includes("localhost") ||
     normalizedCurrentOms.includes("127.0.0.1") ||
@@ -384,6 +391,21 @@ const devServers = computed<DevServer[]>(() => {
     seenOms.add(normalizedEnvOms);
   }
 
+  // Also include any other configured servers from VITE_ALIAS
+  for (const [key, rawUrl] of Object.entries(alias)) {
+    if (typeof rawUrl !== "string") continue;
+    const normalizedUrl = normalizeOmsUrl(rawUrl);
+    if (!seenOms.has(normalizedUrl)) {
+      servers.push({
+        label: key,
+        oms: rawUrl,
+        hasAutoLogin: canDevAutoLogin(),
+        isEnv: true
+      });
+      seenOms.add(normalizedUrl);
+    }
+  }
+
   // 2. Discovered local API servers
   for (const server of localApiServers.value) {
     const normalizedServerOms = normalizeOmsUrl(server.oms);
@@ -502,8 +524,9 @@ const initialise = async () => {
 
       // VITE_DEFAULT_ALIAS only prefills the OMS input, it never applies it. If dev auto-login
       // is configured and instanceUrl is set, advance to the credentials form so the user lands
-      // directly on the username/password screen with the one-click dev user item.
-      if(canDevAutoLogin() && instanceUrl.value && isBasicLoginOption()) {
+      // directly on the username/password screen with the one-click dev user item (unless multiple
+      // alias options are configured for selection).
+      if(canDevAutoLogin() && instanceUrl.value && isBasicLoginOption() && Object.keys(alias).length <= 1) {
         await setOms();
       }
     }

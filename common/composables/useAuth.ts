@@ -36,6 +36,8 @@ export function useAuth() {
     const duration = getDuration(newExpirationTime);
     cookieHelper().set("token", newToken, duration)
     cookieHelper().set("expirationTime", newExpirationTime, duration)
+    cookieHelper().set("oms", cookieHelper().get("oms")!, duration)
+    cookieHelper().set("maarg", cookieHelper().get("maarg")!, duration)
     token.value = newToken
     expirationTime.value = newExpirationTime
   }

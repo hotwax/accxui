@@ -91,8 +91,9 @@ describe('DxpOmsInstanceFooter', () => {
   });
 
   it('colors the timezone as danger only when the app says it is mismatched', () => {
-    const localZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-    expect(note(render({ timeZone: localZone })).attributes('data-color')).toBe('');
+    expect(
+      note(render({ timeZone: 'America/Los_Angeles', timeZoneMismatched: false })).attributes('data-color')
+    ).toBe('');
     expect(
       note(render({ timeZone: 'America/Los_Angeles', timeZoneMismatched: true })).attributes('data-color')
     ).toBe('danger');
@@ -108,6 +109,14 @@ describe('DxpOmsInstanceFooter', () => {
 
     const withClock = render({ timeZone: 'America/Los_Angeles', zoneTime: '5:47 PM' });
     expect(note(withClock).text()).toContain('5:47 PM');
+  });
+
+  it('keeps the timezone and clock in the instance metadata line', () => {
+    const wrapper = render({ instanceLabel: 'test-oms', timeZone: 'UTC', zoneTime: '12:03 AM' });
+
+    expect(wrapper.find('.overline').text()).toBe('test-oms · UTC · 12:03 AM');
+    expect(wrapper.find('.overline').find('[data-stub="ion-note"]').exists()).toBe(true);
+    expect(note(wrapper).find('p').exists()).toBe(false);
   });
 
   it('falls back to the store id when a store has no name', () => {
@@ -138,4 +147,3 @@ describe('DxpOmsInstanceFooter', () => {
     accxuiConfig.value.current = {};
   });
 });
-
