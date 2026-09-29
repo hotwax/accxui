@@ -1,4 +1,4 @@
-import { reactive } from "vue";
+import { computed, reactive, ref, type ComputedRef, type Ref } from "vue";
 import type { AppDb } from "../defineAppDb";
 import { clearDatabaseTables } from "../baseDb";
 import {
@@ -9,6 +9,7 @@ import {
   serviceState,
   type SyncService,
 } from "./syncService";
+import type { ActiveDomain } from "./syncRegistry";
 import { CacheReconciliationError } from "../cacheReconciliationError";
 import { cacheScopeKey } from "../cacheScopeKey";
 
@@ -27,6 +28,12 @@ export interface AppDbSync {
   resyncDomain: (domain: string) => Promise<void>;
   resyncReferenceData: () => Promise<void>;
   bootstrapState: typeof bootstrapState;
+  activateSyncDomains: (domains: ActiveDomain[], owner: string) => Promise<void>;
+  deactivateSyncDomains: (owner?: string) => Promise<void>;
+  createSyncDomainOwner: (label: string) => string;
+  syncDomainsReady: Ref<boolean>;
+  syncDomainsError: ComputedRef<string>;
+  syncNow: () => Promise<void>;
 }
 
 export const bootstrapState = reactive<{
@@ -48,6 +55,117 @@ export function setupAppDbSync(config: AppDbSyncConfig): AppDbSync {
   let service: SyncService | null = null;
   let starting: Promise<void> | null = null;
   let startGeneration = 0;
+
+  function syncService(): SyncService | null {
+    return service;
+  }
+
+  /**
+   * The domain set the open view activated.
+   *
+   * Module-scoped, not per-caller: there is ONE worker, so there is one active set. Deliberately
+   * not exported — nothing outside needs to read it, and three views already define their own local
+   * `activeSyncDomains()` builders that an export of this name would shadow.
+   */
+  const activeSyncDomains = ref<ActiveDomain[]>([]);
+  const syncDomainsReady = ref(false);
+  /** The screen that currently holds the worker. Task 3 uses this to reject a late teardown. */
+  let activeOwner: string | null = null;
+  /**
+   * Bumped on every `activateSyncDomains` call and every accepted `deactivateSyncDomains`.
+   * `setDomains` is an RPC to the worker with no ordering guarantee, so an activation's
+   * post-await continuation checks this before flipping readiness back on — otherwise a
+   * teardown that lands while an activation is still in flight gets resurrected by that
+   * stale continuation. Same pattern as `startGeneration` above.
+   */
+  let activationGeneration = 0;
+  /** Counter backing `createSyncDomainOwner` — see that function for why owners must be per instance. */
+  let ownerSequence = 0;
+
+  /**
+   * A distinct owner id for one screen INSTANCE.
+   *
+   * Per instance, not per component: three routes share the ShopifyInventorySync component and
+   * navigate to each other, and both order-sync sessions share one feature id. Two live instances
+   * holding the same owner string would defeat the teardown guard entirely — the departing one's
+   * `didLeave` would match, and wipe the arriving one's domains.
+   */
+  function createSyncDomainOwner(label: string): string {
+    return `${label}:${++ownerSequence}`;
+  }
+
+  /** Scope the worker to the domains the open view needs. Safe to call again to re-scope. */
+  async function activateSyncDomains(domains: ActiveDomain[], owner: string): Promise<void> {
+    const generation = ++activationGeneration;
+    activeOwner = owner;
+    activeSyncDomains.value = domains;
+    // A newly activated domain has not been tried by THIS screen yet, so a failure recorded while
+    // another screen held it is stale evidence. Clearing here means the first pass either succeeds
+    // (stays clear) or fails and records fresh — rather than a just-opened screen inheriting a
+    // banner, or `manualRefresh` throwing on someone else's failure.
+    for (const domain of domains) clearDomainErrors(domain.name);
+    const current = syncService();
+    if (!current) {
+      // No worker (a failed start, or a test double that never spawned one). The view is still
+      // "ready" in the only sense it can act on: nothing further is pending on its behalf.
+      syncDomainsReady.value = true;
+      return;
+    }
+    await current.setDomains(domains);
+    if (generation !== activationGeneration) return;
+    syncDomainsReady.value = true;
+  }
+
+  /**
+   * Retire the open screen's domains.
+   *
+   * `owner` is the id the caller activated under. Ionic fires `didLeave` on the OUTGOING view
+   * after `willEnter` on the incoming one, so a view's teardown routinely runs when the screen
+   * that replaced it already owns the worker; clearing there leaves the new screen polling
+   * nothing until some unrelated watcher happens to re-activate it.
+   *
+   * Keyed on the owner rather than on the domain set because a screen's set legitimately changes
+   * while it is open — ShopifyProductSync re-activates as job names resolve — so a set comparison
+   * would reject that screen's own teardown and leak the polling it was meant to stop. A caller
+   * with no owner (a hard reset, a test) keeps the unconditional clear.
+   */
+  async function deactivateSyncDomains(owner?: string): Promise<void> {
+    if (owner && activeOwner !== owner) return;
+    if (activeSyncDomains.value.length === 0) return;
+    activeOwner = null;
+    activeSyncDomains.value = [];
+    syncDomainsReady.value = false;
+    activationGeneration += 1;
+    await syncService()?.setDomains([]);
+  }
+
+  /**
+   * The last erroring domain in the open view's activated set, in that array's own order, or ""
+   * when none of them are in error. `serviceState.errors` carries no timestamps, so this is not
+   * "the newest failure" — it is whichever activated domain sorts last among the failing ones as
+   * the caller listed them. A screen that activates several domains (the connection-sync session
+   * activates around eight) should not read this as freshness.
+   *
+   * Scoped rather than global so a background domain's failure cannot light a banner on an
+   * unrelated screen. `serviceState.errors` is the single source — `syncService` owns those maps
+   * and every failure path, including a failed start and a failed post-mutation refetch, reports
+   * through `recordSyncError` into them.
+   */
+  const syncDomainsError = computed(() =>
+    activeSyncDomains.value
+      .map((domain) => serviceState.errors[domain.name])
+      .filter(Boolean)
+      .pop() ?? "");
+
+  /**
+   * Force a pass over whatever is currently active.
+   *
+   * Distinct from `resyncReferenceData`, which first deletes the sync markers so every domain
+   * re-seeds from scratch. This is the cheap "refresh what is on screen" the views want.
+   */
+  async function syncNow(): Promise<void> {
+    await syncService()?.syncNow();
+  }
 
   async function clearSyncMarkers(): Promise<void> {
     try {
@@ -193,12 +311,18 @@ export function setupAppDbSync(config: AppDbSyncConfig): AppDbSync {
   }
 
   return {
-    syncService: () => service,
+    syncService,
     startAppDbSync,
     stopAppDbSync,
     refreshAfterMutation,
     resyncDomain,
     resyncReferenceData,
     bootstrapState,
+    activateSyncDomains,
+    deactivateSyncDomains,
+    createSyncDomainOwner,
+    syncDomainsReady,
+    syncDomainsError,
+    syncNow,
   };
 }

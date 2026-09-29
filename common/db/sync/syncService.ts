@@ -76,6 +76,12 @@ export interface SyncService {
 export const serviceState = reactive({
   running: false,
   lastSyncAt: 0,
+  /**
+   * Last completed pass per domain, epoch ms, taken from the `at` the worker stamps at the end of
+   * the pass. Distinct from `lastSyncAt`, which is global: a screen asking "has MY domain been
+   * fetched for this shop yet" cannot tell that from a timestamp some other domain moved.
+   */
+  syncedAt: {} as Record<string, number>,
   written: {} as Record<string, number>,
   errors: {} as Record<string, string>,
 });
@@ -204,11 +210,13 @@ export function createSyncService(opts: SyncServiceOptions): SyncService {
     }
     if (data.type === "sync-end" && data.domain) {
       serviceState.written[String(data.domain)] = data.written ?? 0;
+      serviceState.syncedAt[String(data.domain)] = data.at ?? Date.now();
       serviceState.lastSyncAt = Date.now();
       // A successful full snapshot verifies the whole domain and therefore every scoped row.
       clearDomainErrors(String(data.domain));
     } else if (data.type === "refetch-end" && data.domain) {
       serviceState.written[String(data.domain)] = data.written ?? 0;
+      serviceState.syncedAt[String(data.domain)] = data.at ?? Date.now();
       // A targeted read verifies only its own PK scope. A legacy message without scope cannot
       // safely prove that some other failed scope recovered, so it clears nothing.
       if (typeof data.scope === "string" && data.scope) {
