@@ -1,397 +1,290 @@
 /**
- * Framework seed reference data lookups, read straight from the local database.
+ * Framework seed reference data lookups over the local database.
  *
- * `useSeedData()` takes no arguments: it automatically resolves the active app database via `getAppDb().client()`.
- * Every getter opens IndexedDB, reads what it needs, applies whatever filtering or joining the answer requires,
- * and returns a value with raw ID fallbacks.
+ * Each seed table gets one live query per signed-in database, opened the first time any getter
+ * needs it and kept for the session, so every caller shares one read. The query re-emits whenever
+ * the table changes: the login sync filling it, a `refreshAfterMutation`, or a resync. There is no
+ * init step: a table nobody asks for is never read.
+ *
+ * Two kinds of getter, told apart by name:
+ *
+ * - Reactive getters (no prefix: `statusDescription`, `enumsByType`, ...) are synchronous. They
+ *   read the table's ref, so a template or `computed` calling them re-renders whenever the table
+ *   changes. On a cold table they answer with the raw id or an empty list for that first render.
+ * - Async getters (`get` prefix: `getFacilities`, ...) wait for the table's first read and return
+ *   its current rows. They are kept for stores and for code that must act on the real rows, such
+ *   as building a request from them.
  */
 
-import { commonUtil } from "../../utils/commonUtil";
-import type { AppDb } from "../schema/defineAppDb";
-import { type DbClient } from "../storage/dbClient";
+import { shallowRef, type ShallowRef } from "vue";
+import type { Subscription } from "dexie";
 import { getAppDb } from "../schema/appDbRegistry";
-import type { DbKey } from "../types";
 
 export type Row = Record<string, any>;
-export type DbTarget = AppDb | DbClient | { client(): DbClient; raw(): any };
+
+/** Seed ids on records are often optional; a missing id reads as no match. */
+type Id = string | null | undefined;
+
+interface SeedTable {
+  rows: ShallowRef<Row[]>;
+  /** Settles on the first emission, so async getters can wait for a cold table. */
+  loaded: Promise<void>;
+  /** Kept only so logout can close it. */
+  subscription: Subscription;
+}
 
 /**
- * The seed lookup API.
- *
- * Used as `const seed = useSeedData()` then `seed.getStatusDescription(id)`.
- * If `targetDb` is omitted, it defaults to `getAppDb()`.
+ * Live tables, keyed by database name and table. At most one entry per seed table: an entry is
+ * created on first use and lives until logout, so a long session never adds subscriptions.
  */
-export function useSeedData(targetDb?: DbTarget) {
-  const getClient = (): DbClient => {
-    const db = targetDb ?? getAppDb();
-    if ("client" in db && typeof db.client === "function") {
-      return db.client();
-    }
-    return db as DbClient;
-  };
+const tables = new Map<string, SeedTable>();
 
-  /** Read a whole table, degrading to an empty list. */
-  async function rows(table: string): Promise<Row[]> {
-    try {
-      return await getClient().entity(table).all();
-    } catch (error) {
-      console.warn(`[seed] Could not read ${table} from the local database:`, error);
-      return [];
-    }
+/** Close every live table. Called when sync stops on logout, which wipes the database. */
+export function clearSeedTables(): void {
+  tables.forEach((entry) => entry.subscription.unsubscribe());
+  tables.clear();
+}
+
+/** Test-only: how many tables are live. */
+export function __seedTableCount(): number {
+  return tables.size;
+}
+
+/** The table's live entry, opening its query on first use. Undefined when no database is signed in. */
+function seedTable(table: string): SeedTable | undefined {
+  let key: string;
+  try {
+    key = `${getAppDb().raw().name}/${table}`;
+  } catch {
+    return undefined;
   }
 
-  /** Read one row by primary key, degrading to undefined. */
-  async function row(table: string, key: DbKey): Promise<Row | undefined> {
-    const missing = !key || (Array.isArray(key) && key.length === 0);
-    if (missing) return undefined;
+  let entry = tables.get(key);
+  if (!entry) {
+    const rows = shallowRef<Row[]>([]);
+    let settle!: () => void;
+    const loaded = new Promise<void>((resolve) => { settle = resolve; });
 
-    try {
-      return await getClient().entity(table).get(key);
-    } catch (error) {
-      console.warn(`[seed] Could not read ${table}/${key} from the local database:`, error);
-      return undefined;
-    }
+    const subscription = getAppDb().client().entity(table).live({}).subscribe({
+      next: (all) => {
+        rows.value = all;
+        settle();
+      },
+      error: (error) => {
+        console.warn(`[seed] Live read of ${table} failed:`, error);
+        // A failed query has closed itself; the next use opens a fresh one.
+        tables.delete(key);
+        settle();
+      },
+    });
+
+    entry = { rows, loaded, subscription };
+    tables.set(key, entry);
   }
+  return entry;
+}
 
-  const DEFAULT_LABEL_FIELDS = ["description", "enumName", "name", "groupName", "facilityName", "storeName"];
+/** Reactive: the table's rows, empty until its first read lands. */
+function rowsOf(table: string): Row[] {
+  return seedTable(table)?.rows.value ?? [];
+}
 
-  /** First non-empty value among `fields`, else the raw id. */
-  function labelOf(record: Row | undefined, id: string, fields = DEFAULT_LABEL_FIELDS): string {
-    return (fields.map((field) => record?.[field]).find(Boolean) as string) || id;
+/** Async: the table's current rows, once its first read has landed. */
+async function loadRows(table: string): Promise<Row[]> {
+  const entry = seedTable(table);
+  if (!entry) return [];
+  await entry.loaded;
+  return entry.rows.value;
+}
+
+/** Rows by primary key, built once per loaded array. */
+const indexes = new WeakMap<Row[], Map<string, Row>>();
+
+function byKey(rows: Row[], keyField: string): Map<string, Row> {
+  let index = indexes.get(rows);
+  if (!index) {
+    index = new Map(rows.map((record) => [record[keyField], record]));
+    indexes.set(rows, index);
   }
+  return index;
+}
 
-  /** One label by primary key. */
-  async function label(table: string, keyField: string, id: string, fields?: string[]): Promise<string> {
-    if (!id) return "";
-    const found = await row(table, id);
-    return labelOf(found, id, fields);
-  }
+const DEFAULT_LABEL_FIELDS = ["description", "enumName", "name", "groupName", "facilityName", "storeName"];
 
-  /**
-   * Labels for many ids in one table read. The workhorse behind every plural getter: a list
-   * screen resolves all its labels with a single pass over the table.
-   */
-  async function labels(
-    table: string,
-    keyField: string,
-    ids: readonly string[],
-    fields?: string[],
-  ): Promise<Record<string, string>> {
-    const wanted = [...new Set(ids.filter(Boolean))];
-    if (!wanted.length) return {};
+/** First non-empty value among `fields`, else the raw id. */
+function labelOf(record: Row | undefined, id: string, fields = DEFAULT_LABEL_FIELDS): string {
+  return (fields.map((field) => record?.[field]).find(Boolean) as string) || id;
+}
 
-    const all = await rows(table);
-    const byKey = new Map(all.map((record) => [record[keyField], record]));
+/** Reactive: one label by primary key. */
+function label(table: string, keyField: string, id: Id, fields?: string[]): string {
+  if (!id) return "";
+  return labelOf(byKey(rowsOf(table), keyField).get(id), id, fields);
+}
 
-    return Object.fromEntries(wanted.map((id) => [id, labelOf(byKey.get(id), id, fields)]));
-  }
+const byGeoName = (left: Row, right: Row) => (left.geoName || "").localeCompare(right.geoName || "");
 
-  // ── Statuses ──────────────────────────────────────────────────────────────────────────
+/** A country's states and provinces: its `GAT_REGIONS` links only, not group memberships like DBIC. */
+function statesIn(geos: Row[], geoAssocs: Row[], countryGeoId: Id): Row[] {
+  if (!countryGeoId) return [];
+  const stateIds = new Set(geoAssocs
+    .filter((assoc) => assoc.geoId === countryGeoId && assoc.geoAssocTypeEnumId === "GAT_REGIONS")
+    .map((assoc) => assoc.toGeoId));
+  return geos.filter((geo) => stateIds.has(geo.geoId)).sort(byGeoName);
+}
 
-  const getStatus = (statusId: string) => row("statuses", statusId);
-  const getStatusDescription = (statusId: string) => label("statuses", "statusId", statusId);
-  const getStatusDescriptions = (statusIds: readonly string[]) => labels("statuses", "statusId", statusIds);
+const carrierLabel = (carrier: Row) =>
+  [carrier.firstName, carrier.lastName].filter(Boolean).join(" ") || carrier.groupName || carrier.partyId;
 
-  async function getStatusAge(statusId: string): Promise<number> {
-    return Number((await getStatus(statusId))?.statusAge ?? 0);
-  }
+const SHIPMENT_METHOD_LABEL_FIELDS = ["description", "shipmentMethodTypeId"];
+const FACILITY_LABEL_FIELDS = ["facilityName", "facilityId"];
 
-  async function getStatusAges(statusIds: readonly string[]): Promise<Record<string, number>> {
-    const wanted = [...new Set(statusIds.filter(Boolean))];
-    if (!wanted.length) return {};
+/**
+ * The seed lookup API: `const seed = useSeedData()`, then `seed.statusDescription(id)` in a
+ * template or computed, or `await seed.getFacilities()` where the rows must be in hand.
+ */
+export function useSeedData() {
+  // ── Reactive getters ──────────────────────────────────────────────────────────────────
 
-    const all = await rows("statuses");
-    const byKey = new Map(all.map((record) => [record.statusId, record]));
+  // Whole tables, for pickers and for callers that build their own maps.
+  const statuses = () => rowsOf("statuses");
+  const enums = () => rowsOf("enums");
+  const enumTypes = () => rowsOf("enumTypes");
+  const geos = () => rowsOf("geos");
+  const shipmentMethodTypes = () => rowsOf("shipmentMethodTypes");
+  const paymentMethodTypes = () => rowsOf("paymentMethodTypes");
+  const roleTypes = () => rowsOf("roleTypes");
 
-    return Object.fromEntries(wanted.map((id) => [id, Number(byKey.get(id)?.statusAge ?? 0)]));
-  }
+  const statusDescription = (statusId: Id) => label("statuses", "statusId", statusId);
+  const statusItemsByType = (statusTypeId: string) =>
+    rowsOf("statuses").filter((record) => record.statusTypeId === statusTypeId);
 
-  async function getStatusItemsByType(statusTypeId: string): Promise<Row[]> {
-    return (await rows("statuses")).filter((record) => record.statusTypeId === statusTypeId);
-  }
+  const enumDescription = (enumId: Id) => label("enums", "enumId", enumId);
+  const enumsByType = (enumTypeId: string) => rowsOf("enums").filter((record) => record.enumTypeId === enumTypeId);
 
-  // ── Enums ─────────────────────────────────────────────────────────────────────────────
-
-  const getEnumDescription = (enumId: string) => label("enums", "enumId", enumId);
-  const getEnumDescriptions = (enumIds: readonly string[]) => labels("enums", "enumId", enumIds);
-
-  async function getEnumsByType(enumTypeId: string): Promise<Row[]> {
-    return (await rows("enums")).filter((record) => record.enumTypeId === enumTypeId);
-  }
-
-  async function getEnumsByParentType(parentTypeId: string): Promise<Row[]> {
-    const [enums, enumTypes] = await Promise.all([rows("enums"), rows("enumTypes")]);
+  function enumsByParentType(parentTypeId: string): Row[] {
     const childTypeIds = new Set(
-      enumTypes.filter((type) => type.parentTypeId === parentTypeId).map((type) => type.enumTypeId),
+      rowsOf("enumTypes").filter((type) => type.parentTypeId === parentTypeId).map((type) => type.enumTypeId),
     );
-
-    return enums.filter((record) => childTypeIds.has(record.enumTypeId));
+    return rowsOf("enums").filter((record) => childTypeIds.has(record.enumTypeId));
   }
 
-  const getOrderIdentificationTypeDescription = (enumId: string) => getEnumDescription(enumId);
+  const orderIdentificationTypeOptions = () =>
+    enumsByType("ORDER_IDENTITY").map((record) => ({ enumId: record.enumId, description: labelOf(record, record.enumId) }));
 
-  async function getOrderIdentificationTypeOptions(): Promise<Array<{ enumId: string; description: string }>> {
-    return (await getEnumsByType("ORDER_IDENTITY")).map((record) => ({
-      enumId: record.enumId,
-      description: labelOf(record, record.enumId),
-    }));
-  }
+  const facilityName = (facilityId: Id) => label("facilities", "facilityId", facilityId, FACILITY_LABEL_FIELDS);
 
-  // ── Product stores ────────────────────────────────────────────────────────────────────
+  const productStoreFacilities = (productStoreId: Id) =>
+    productStoreId ? rowsOf("productStoreFacilities").filter((record) => record.productStoreId === productStoreId) : [];
 
-  const getProductStores = () => rows("productStores");
-  const getProductStore = (productStoreId: string) => row("productStores", productStoreId);
-  const getProductStoreName = (productStoreId: string) =>
-    label("productStores", "productStoreId", productStoreId, ["storeName", "companyName"]);
-  const getProductStoreNames = (productStoreIds: readonly string[]) =>
-    labels("productStores", "productStoreId", productStoreIds, ["storeName", "companyName"]);
-
-  async function getProductStoreFacilities(productStoreId: string): Promise<Row[]> {
-    if (!productStoreId) return [];
-    return (await rows("productStoreFacilities")).filter((record) => record.productStoreId === productStoreId);
-  }
-
-  // ── Facilities ────────────────────────────────────────────────────────────────────────
-
-  const getFacilities = () => rows("facilities");
-  const getFacility = (facilityId: string) => row("facilities", facilityId);
-  const getFacilityName = (facilityId: string) =>
-    label("facilities", "facilityId", facilityId, ["facilityName", "facilityId"]);
-  const getFacilityNames = (facilityIds: readonly string[]) =>
-    labels("facilities", "facilityId", facilityIds, ["facilityName", "facilityId"]);
-  const getFacilityType = (facilityTypeId: string) => row("facilityTypes", facilityTypeId);
-
-  async function getFacilityParentTypeId(facilityTypeId: string): Promise<string> {
-    return (await getFacilityType(facilityTypeId))?.parentTypeId ?? "";
-  }
-
-  async function getFacilityParentTypeIds(facilityTypeIds: readonly string[]): Promise<Record<string, string>> {
-    const wanted = [...new Set(facilityTypeIds.filter(Boolean))];
-    if (!wanted.length) return {};
-
-    const all = await rows("facilityTypes");
-    const byKey = new Map(all.map((record) => [record.facilityTypeId, record]));
-
-    return Object.fromEntries(wanted.map((id) => [id, byKey.get(id)?.parentTypeId ?? ""]));
-  }
-
-  // ── Carriers and shipment methods ─────────────────────────────────────────────────────
-
-  const carrierLabel = (carrier: Row) =>
-    [carrier.firstName, carrier.lastName].filter(Boolean).join(" ") || carrier.groupName || carrier.partyId;
-
-  const getCarriers = () => rows("carriers");
-  const getCarrier = (partyId: string) => row("carriers", partyId);
-
-  async function getCarrierName(partyId: string): Promise<string> {
-    const found = await getCarrier(partyId);
+  const carriers = () => rowsOf("carriers");
+  function carrierName(partyId: Id): string {
+    if (!partyId) return "";
+    const found = byKey(rowsOf("carriers"), "partyId").get(partyId);
     return found ? carrierLabel(found) : partyId;
   }
 
-  const getShipmentMethodTypes = () => rows("shipmentMethodTypes");
-  const getShipmentMethod = (shipmentMethodTypeId: string) => row("shipmentMethodTypes", shipmentMethodTypeId);
-
-  const SHIPMENT_METHOD_LABEL_FIELDS = ["description", "shipmentMethodTypeId"];
-
-  const getShipmentMethodDescription = (shipmentMethodTypeId: string) =>
+  const shipmentMethodDescription = (shipmentMethodTypeId: Id) =>
     label("shipmentMethodTypes", "shipmentMethodTypeId", shipmentMethodTypeId, SHIPMENT_METHOD_LABEL_FIELDS);
+  const shipmentMethodOptions = () => rowsOf("shipmentMethodTypes").map((record) => ({
+    id: record.shipmentMethodTypeId as string,
+    label: labelOf(record, record.shipmentMethodTypeId, SHIPMENT_METHOD_LABEL_FIELDS),
+  }));
 
-  const getShipmentMethodDescriptions = (shipmentMethodTypeIds: readonly string[]) =>
-    labels("shipmentMethodTypes", "shipmentMethodTypeId", shipmentMethodTypeIds, SHIPMENT_METHOD_LABEL_FIELDS);
-
-  async function getShipmentMethodOptions(): Promise<Array<{ id: string; label: string }>> {
-    return (await getShipmentMethodTypes()).map((record) => ({
-      id: record.shipmentMethodTypeId,
-      label: labelOf(record, record.shipmentMethodTypeId, SHIPMENT_METHOD_LABEL_FIELDS),
-    }));
-  }
-
-  async function getShippingMethodsByCarrier(carrierPartyId: string): Promise<Row[]> {
-    if (!carrierPartyId) return [];
-    return (await rows("carrierShipmentMethods")).filter((record) => record.partyId === carrierPartyId);
-  }
-
-  // ── Simple type lookups ───────────────────────────────────────────────────────────────
-
-  const getPaymentMethodDescription = (id: string) => label("paymentMethodTypes", "paymentMethodTypeId", id);
-  const getPaymentMethodDescriptions = (ids: readonly string[]) =>
-    labels("paymentMethodTypes", "paymentMethodTypeId", ids);
-
-  const getReturnReasonDescription = (id: string) => label("returnReasons", "returnReasonId", id);
-  const getReturnReasonDescriptions = (ids: readonly string[]) =>
-    labels("returnReasons", "returnReasonId", ids);
-
-  const getReturnTypeDescription = (id: string) => label("returnTypes", "returnTypeId", id);
-  const getReturnTypeDescriptions = (ids: readonly string[]) => labels("returnTypes", "returnTypeId", ids);
-
-  const getReturnItemTypeDescription = (id: string) => label("returnItemTypes", "returnItemTypeId", id);
-  const getReturnItemTypeDescriptions = (ids: readonly string[]) =>
-    labels("returnItemTypes", "returnItemTypeId", ids);
-
-  const getRoleTypeDescription = (id: string) => label("roleTypes", "roleTypeId", id);
-
-  const getOrderAdjustmentTypeDescription = (id: string) => label("orderAdjustmentTypes", "orderAdjustmentTypeId", id);
-  const getOrderAdjustmentTypeDescriptions = (ids: readonly string[]) =>
-    labels("orderAdjustmentTypes", "orderAdjustmentTypeId", ids);
-
-  const getContactPurposeDescription = (id: string) =>
-    label("contactMechPurposeTypes", "contactMechPurposeTypeId", id);
-  const getContactPurposeDescriptions = (ids: readonly string[]) =>
-    labels("contactMechPurposeTypes", "contactMechPurposeTypeId", ids);
-
-  const getCommunicationEventTypeDescription = (id: string) =>
+  const paymentMethodDescription = (id: Id) => label("paymentMethodTypes", "paymentMethodTypeId", id);
+  const returnReasonDescription = (id: Id) => label("returnReasons", "returnReasonId", id);
+  const returnTypeDescription = (id: Id) => label("returnTypes", "returnTypeId", id);
+  const returnItemTypeDescription = (id: Id) => label("returnItemTypes", "returnItemTypeId", id);
+  const contactPurposeDescription = (id: Id) => label("contactMechPurposeTypes", "contactMechPurposeTypeId", id);
+  const communicationEventTypeDescription = (id: Id) =>
     label("communicationEventTypes", "communicationEventTypeId", id);
-  const getCommunicationEventTypeDescriptions = (ids: readonly string[]) =>
-    labels("communicationEventTypes", "communicationEventTypeId", ids);
+  const partyRelationshipDescription = (id: Id) =>
+    label("partyRelationshipTypes", "partyRelationshipTypeId", id, ["description", "partyRelationshipName"]);
 
-  const RELATIONSHIP_LABEL_FIELDS = ["description", "partyRelationshipName"];
+  const shopifyShopLocations = () => rowsOf("shopifyShopLocations");
 
-  const getPartyRelationshipDescription = (id: string) =>
-    label("partyRelationshipTypes", "partyRelationshipTypeId", id, RELATIONSHIP_LABEL_FIELDS);
-  const getPartyRelationshipDescriptions = (ids: readonly string[]) =>
-    labels("partyRelationshipTypes", "partyRelationshipTypeId", ids, RELATIONSHIP_LABEL_FIELDS);
+  const countries = () => rowsOf("geos").filter((geo) => geo.geoTypeEnumId === "GEOT_COUNTRY").sort(byGeoName);
+  const states = () => rowsOf("geos")
+    .filter((geo) => geo.geoTypeEnumId === "GEOT_STATE" || geo.geoTypeEnumId === "GEOT_PROVINCE")
+    .sort(byGeoName);
+  const statesForCountry = (countryGeoId: Id) => statesIn(rowsOf("geos"), rowsOf("geoAssocs"), countryGeoId);
 
-  const getPartyRelationshipTypes = () => rows("partyRelationshipTypes");
-  const getRoleTypes = () => rows("roleTypes");
-
-  // ── Shopify ───────────────────────────────────────────────────────────────────────────
-
-  const getShopifyShops = () => rows("shopifyShops");
-  const getShopifyShop = (shopId: string) => row("shopifyShops", shopId);
-  const getShopifyShopLocations = () => rows("shopifyShopLocations");
-
-  // ── Geography ─────────────────────────────────────────────────────────────────────────
-
-  const byGeoName = (left: Row, right: Row) => (left.geoName || "").localeCompare(right.geoName || "");
-
-  const getGeos = () => rows("geos");
-  const getGeoName = (geoId: string) => label("geos", "geoId", geoId, ["geoName"]);
-  const getGeoNames = (geoIds: readonly string[]) => labels("geos", "geoId", geoIds, ["geoName"]);
-
-  async function getGeoIdByCode(code: string): Promise<string> {
-    if (!code) return "";
-    const all = await rows("geos");
-    return all.find((geo) => geo.geoCodeAlpha2 === code || geo.geoCode === code)?.geoId ?? "";
+  /** Countries in the DBIC association group. */
+  function dbicCountries(): Row[] {
+    const geoById = byKey(rowsOf("geos"), "geoId");
+    return rowsOf("geoAssocs")
+      .filter((assoc) => assoc.toGeoId === "DBIC")
+      .map((assoc) => geoById.get(assoc.geoId) ?? { geoId: assoc.geoId });
   }
 
-  async function getGeoIdsByCode(codes: readonly string[]): Promise<Record<string, string>> {
-    const wanted = [...new Set(codes.filter(Boolean))];
-    if (!wanted.length) return {};
-    const all = await rows("geos");
-    return Object.fromEntries(
-      wanted.map((code) => [
-        code,
-        all.find((geo) => geo.geoCodeAlpha2 === code || geo.geoCode === code)?.geoId ?? "",
-      ]),
-    );
+  // ── Async getters ─────────────────────────────────────────────────────────────────────
+
+  const getProductStores = () => loadRows("productStores");
+  const getFacilities = () => loadRows("facilities");
+  const getGeos = () => loadRows("geos");
+  const getPaymentMethodTypes = () => loadRows("paymentMethodTypes");
+
+  async function getEnumsByType(enumTypeId: string): Promise<Row[]> {
+    return (await loadRows("enums")).filter((record) => record.enumTypeId === enumTypeId);
   }
 
-  async function getCountries(): Promise<Row[]> {
-    return (await rows("geos")).filter((geo) => geo.geoTypeEnumId === "GEOT_COUNTRY").sort(byGeoName);
+  async function getProductStoreFacilities(productStoreId: string): Promise<Row[]> {
+    if (!productStoreId) return [];
+    return (await loadRows("productStoreFacilities")).filter((record) => record.productStoreId === productStoreId);
   }
 
-  async function getStates(): Promise<Row[]> {
-    return (await rows("geos"))
-      .filter((geo) => geo.geoTypeEnumId === "GEOT_STATE" || geo.geoTypeEnumId === "GEOT_PROVINCE")
-      .sort(byGeoName);
+  async function getFacilityParentTypeIds(facilityTypeIds: readonly string[]): Promise<Record<string, string>> {
+    const index = byKey(await loadRows("facilityTypes"), "facilityTypeId");
+    const wanted = [...new Set(facilityTypeIds.filter(Boolean))];
+    return Object.fromEntries(wanted.map((id) => [id, index.get(id)?.parentTypeId ?? ""]));
   }
 
   async function getStatesForCountry(countryGeoId: string): Promise<Row[]> {
     if (!countryGeoId) return [];
-    const [geos, geoAssocs] = await Promise.all([rows("geos"), rows("geoAssocs")]);
-    const stateIds = new Set(geoAssocs.filter((assoc) => assoc.geoId === countryGeoId).map((assoc) => assoc.toGeoId));
-    return geos.filter((geo) => stateIds.has(geo.geoId)).sort(byGeoName);
-  }
-
-  // ── Status flow ───────────────────────────────────────────────────────────────────────
-
-  async function getAllowedTransitions(statusId: string): Promise<Array<Row & { toStatusDescription: string; toStatusColor: string }>> {
-    if (!statusId) return [];
-    const [transitions, statuses] = await Promise.all([rows("statusFlowTransitions"), rows("statuses")]);
-    const statusByKey = new Map(statuses.map((record) => [record.statusId, record]));
-
-    return transitions
-      .filter((transition) => transition.statusId === statusId)
-      .map((transition) => {
-        const toStatusDescription = labelOf(statusByKey.get(transition.toStatusId), transition.toStatusId);
-        return {
-          ...transition,
-          toStatusDescription,
-          toStatusColor: commonUtil.getStatusColor(toStatusDescription),
-        };
-      })
-      .sort((left, right) => {
-        const leftSequence = left.transitionSequence ?? Number.MAX_SAFE_INTEGER;
-        const rightSequence = right.transitionSequence ?? Number.MAX_SAFE_INTEGER;
-        if (leftSequence !== rightSequence) return leftSequence - rightSequence;
-        return (left.toStatusId || "").localeCompare(right.toStatusId || "");
-      });
+    const [geos, geoAssocs] = await Promise.all([loadRows("geos"), loadRows("geoAssocs")]);
+    return statesIn(geos, geoAssocs, countryGeoId);
   }
 
   return {
-    getAllowedTransitions,
-    getCarrier,
-    getCarrierName,
-    getCarriers,
-    getCommunicationEventTypeDescription,
-    getCommunicationEventTypeDescriptions,
-    getContactPurposeDescription,
-    getContactPurposeDescriptions,
-    getCountries,
-    getEnumDescription,
-    getEnumDescriptions,
-    getEnumsByParentType,
-    getEnumsByType,
+    carrierName,
+    carriers,
+    communicationEventTypeDescription,
+    contactPurposeDescription,
+    countries,
+    dbicCountries,
+    enumDescription,
+    enumTypes,
+    enums,
+    enumsByParentType,
+    enumsByType,
+    facilityName,
+    geos,
+    orderIdentificationTypeOptions,
+    partyRelationshipDescription,
+    paymentMethodDescription,
+    paymentMethodTypes,
+    productStoreFacilities,
+    returnItemTypeDescription,
+    returnReasonDescription,
+    returnTypeDescription,
+    roleTypes,
+    shipmentMethodDescription,
+    shipmentMethodOptions,
+    shipmentMethodTypes,
+    shopifyShopLocations,
+    states,
+    statesForCountry,
+    statusDescription,
+    statusItemsByType,
+    statuses,
+
     getFacilities,
-    getFacility,
-    getFacilityName,
-    getFacilityNames,
-    getFacilityParentTypeId,
+    getEnumsByType,
     getFacilityParentTypeIds,
-    getFacilityType,
-    getGeoIdByCode,
-    getGeoIdsByCode,
-    getGeoName,
-    getGeoNames,
     getGeos,
-    getOrderAdjustmentTypeDescription,
-    getOrderAdjustmentTypeDescriptions,
-    getOrderIdentificationTypeDescription,
-    getOrderIdentificationTypeOptions,
-    getPartyRelationshipDescription,
-    getPartyRelationshipDescriptions,
-    getPartyRelationshipTypes,
-    getPaymentMethodDescription,
-    getPaymentMethodDescriptions,
-    getProductStore,
-    getProductStores,
+    getPaymentMethodTypes,
     getProductStoreFacilities,
-    getProductStoreName,
-    getProductStoreNames,
-    getReturnItemTypeDescription,
-    getReturnItemTypeDescriptions,
-    getReturnReasonDescription,
-    getReturnReasonDescriptions,
-    getReturnTypeDescription,
-    getReturnTypeDescriptions,
-    getRoleTypeDescription,
-    getRoleTypes,
-    getShipmentMethod,
-    getShipmentMethodDescription,
-    getShipmentMethodDescriptions,
-    getShipmentMethodOptions,
-    getShipmentMethodTypes,
-    getShippingMethodsByCarrier,
-    getShopifyShop,
-    getShopifyShopLocations,
-    getShopifyShops,
-    getStates,
+    getProductStores,
     getStatesForCountry,
-    getStatus,
-    getStatusAge,
-    getStatusAges,
-    getStatusDescription,
-    getStatusDescriptions,
-    getStatusItemsByType,
   };
 }

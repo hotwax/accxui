@@ -1,6 +1,7 @@
 import { computed, reactive, ref, type ComputedRef, type Ref } from "vue";
 import type { AppDb } from "../schema/defineAppDb";
 import { clearDatabaseTables } from "../storage/baseDb";
+import { clearSeedTables } from "../composables/useSeedData";
 import {
   clearDomainErrors,
   clearScopeError,
@@ -251,6 +252,7 @@ export function setupAppDbSync(config: AppDbSyncConfig): AppDbSync {
     }
     starting = null;
     bootstrapState.running = false;
+    clearSeedTables();
     await clearDatabaseTables(config.db.raw()).catch(() => {});
   }
 
