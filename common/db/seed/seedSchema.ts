@@ -235,6 +235,8 @@ export const commonSchema = defineSchema({
       toStatusId: "text",
       statusFlowId: "text",
       transitionSequence: "count",
+      transitionName: "text",
+      conditionExpression: "text",
     },
     indexes: ["statusId", "toStatusId", "statusFlowId"],
   }),
