@@ -1,8 +1,8 @@
 # AccxUI Local Database & Sync — Design
 
 **Status:** Approved
-**Version:** 1.1
-**Date:** 2026-09-29
+**Version:** 1.2
+**Date:** 2026-09-30
 **Scope:** `common/db/**`, `common/core/workerRemoteApi.ts`, `common/core/workerFactory.ts`,
 `apps/company/src/**`, `apps/order-manager/src/**`
 **Companion:** [APP_DB_SYNC_FLOWS.md](APP_DB_SYNC_FLOWS.md) — every flow diagram referenced below.
@@ -612,7 +612,7 @@ owns the one service handle, so it also owns the domain set that handle is polli
 |---|---|
 | `syncService()` | The live `SyncService`, or `null` before start / after a failed start |
 | `startAppDbSync(onSynced?)` | Idempotent (own `starting` promise plus `startGeneration`); creates the service, starts it, records `__start` failures |
-| `stopAppDbSync()` | Stops the service and **clears every data table** (`setupAppDbSync.ts`) |
+| `stopAppDbSync()` | Stops the service, closes the `useSeedData` live tables (`clearSeedTables`), and **clears every data table** (`setupAppDbSync.ts`) |
 | `refreshAfterMutation(domain, pk)` | `whenReady()` then `service.refetchOne`; any failure is wrapped in `CacheReconciliationError` |
 | `resyncDomain(domain)` | Deletes `loginSync:{domain}` then `syncDomainNow` |
 | `resyncReferenceData()` | Deletes every `domain:` / `loginSync:` marker, then `syncNow` |
@@ -667,12 +667,18 @@ association write: the server change *did* land, only the local reconciliation f
 | Composable | Shape | Notes |
 |---|---|---|
 | `useDb(table, options?)` | `{ records, first, count, hydrated, error }` | One entry point, always a list; `first` is a computed, because reading one row through `equals` on the PK is the same index lookup `get()` does. Re-subscribes on any options change (`deep: true`), unsubscribes on unmount. |
-| `useSeedData(target?)` | ~60 typed getters | No arguments needed — resolves `getAppDb().client()` per call. Every getter opens IndexedDB **per call**, joins in memory, and falls back to the raw id. Not a Pinia store. |
+| `useSeedData()` | reactive getters (no prefix) plus a few async `get*` getters | One Dexie `liveQuery` per seed table, keyed by database name and table, opened on first use and kept until logout. All callers share it, and it re-emits on any write to the table. Reactive getters (`statusDescription`, `enumsByType`, `countries`, …) are synchronous reads of the table's `shallowRef`, for templates and computeds. Async `get*` getters await the first emission and return the current rows, for stores and code that must act on the rows. Joins happen in memory, and labels fall back to the raw id. Not a Pinia store, and not page-scoped. |
 | `useDbStatus(db, catalogSource, actions)` | `{ domains, loaded, refreshing, totalRows, oldestSyncedAt, lastSyncedAt, refreshDomain, refreshAll }` | Drives the Settings card off a `liveQuery` over `syncMeta` plus per-table counts, plus a `DB_SYNC_CHANNEL` listener. |
 
 `hydrated` (`useDb.ts`) is `emitted && (records.length > 0 || !serviceState.running)` — that is
 what lets a view distinguish "the seed sync has not finished yet" from "this table is genuinely
 empty", and it is the only reason `serviceState` is reactive.
+
+`useSeedData` has no such flag: a table's first render answers with the raw id or `[]` until its
+first read lands. Company's `useSeed.ts` wrappers rebuild `hydrated` on top of it with the same
+formula (the async getter has resolved, and there are rows or `serviceState.running` is false).
+`clearSeedTables()` unsubscribes every live table; `stopAppDbSync` calls it on logout. The OMS
+instance cannot change without logout, so there is no per-instance eviction.
 
 `useDbStatus` accepts **either** a static `SyncDomainCatalogItem[]` or a function returning the
 worker's registry-derived catalog over Comlink, resolving the async form once and re-subscribing when
@@ -694,7 +700,7 @@ it goes from empty to populated (`useDbStatus.ts`). The per-domain `status` is
 | App-owned sync policy | `src/config/appSyncConfig.ts` |
 | Main-thread facade, including view-scoped activation | `src/services/appDbSync.ts` |
 | Per-view class-A activation call sites | `views/NetSuite.vue`, `ShopifyProductSync.vue`, `ShopifyInventorySync.vue`, `ShopifyFulfillmentSync.vue`; `composables/useShopify.ts`, `useProductStoreOnboardingInitialLoad.ts` |
-| Read composables | `src/composables/useSeed.ts`, `useSystemMessage.ts`, `useAppVersion.ts` |
+| Read composables | `src/composables/useSeed.ts` (seed lookups are thin wrappers over `useSeedData`; its own tables stay on `useDb`), `useSystemMessage.ts`, `useAppVersion.ts` |
 
 ```ts
 // src/db/companyDb.ts
@@ -752,8 +758,9 @@ export const orderManagerDb = defineAppDb({
   pre-`defineAppDb` call sites unchanged (`orderManagerDb.ts`).
 - The Settings card uses the **static** `orderManagerDb.statusCatalog`; Company uses the async worker
   catalog.
-- Reads go almost entirely through `useSeedData()` — around 30 files across components, views and
-  services.
+- Reads go almost entirely through `useSeedData()` — around 30 files across components and views
+  call its reactive getters straight from templates and computeds, with no watchers. The few places
+  that build requests or brokering decisions from seed rows await its `get*` getters.
 - `services/appDbSync.ts` re-exports only the lifecycle half of `setupAppDbSync`; with no class-A
   domains it has no use for the activation members.
 
@@ -773,7 +780,7 @@ No `src/db`, no sync worker. Not a consumer of this framework.
 | View-scoped activation | `activateSyncDomains` / `deactivateSyncDomains` with owners | none |
 | Worker registers OMS resolver | yes | no (not needed) |
 | Status catalog source | async, worker registry | static, `statusCatalog` |
-| Main read surface | `useDb` plus app composables | `useSeedData` |
+| Main read surface | `useDb`, plus `useSeedData` behind `useSeed.ts` | `useSeedData` |
 
 ---
 
@@ -828,7 +835,8 @@ teardown — are in [APP_DB_SYNC_FLOWS.md](APP_DB_SYNC_FLOWS.md).
 - Databases are **per OMS instance**, so a tenant switch cannot read the previous tenant's rows; the
   previous Dexie handle is closed so a live subscription cannot keep serving it
   (`defineAppDb.ts`).
-- Logout clears every data table (`setupAppDbSync.ts`, via `clearDatabaseTables`).
+- Logout clears every data table (`setupAppDbSync.ts`, via `clearDatabaseTables`) and closes the
+  in-memory seed tables (`clearSeedTables`), so the next user reads fresh.
 - `CacheReconciliationError` carries the domain and PK as diagnostics only — never credentials or
   response bodies (`sync/reconciliation.ts`).
 - A parsed error body is rethrown as-is rather than wrapped, because callers classify auth failures
@@ -881,7 +889,7 @@ The framework layer is verified by the following specs under `common/tests/`:
 | `common/db/seed/seedDomains.ts` | 299 | `commonDomains`: 29 seed class-B domains, `commonDomainsByTable`, `COMMON_TABLE_NAMES` |
 | **`common/db/composables/`** | | **Vue read surface (main thread only)** |
 | `common/db/composables/useDb.ts` | 92 | reactive list read |
-| `common/db/composables/useSeedData.ts` | 397 | seed lookups |
+| `common/db/composables/useSeedData.ts` | 290 | live seed lookups |
 | `common/db/composables/useDbStatus.ts` | 218 | status card |
 | **`common/db/sync/`** | | **domains, worker runtime and main-thread lifecycle** |
 | `common/db/sync/defineSyncDomain.ts` | 23 | hand-written domain constructor |

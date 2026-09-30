@@ -3,7 +3,7 @@
 **Audience:** app developers working in `apps/*`.
 **Design of record:** [APP_DB_ARCHITECTURE.md](APP_DB_ARCHITECTURE.md) · diagrams in
 [APP_DB_SYNC_FLOWS.md](APP_DB_SYNC_FLOWS.md).
-**Last updated:** 2026-09-29 — `common/db` split into `schema/`, `storage/`, `seed/`, `composables/`, `sync/` (deep-import paths in §6–§7); view-scoped activation moved onto `setupAppDbSync`; `useDbSync` removed.
+**Last updated:** 2026-09-30 — `useSeedData` rewritten around one live query per seed table, with synchronous reactive getters and async `get*` getters (§1a); Company's `useSeed.ts` lookups now wrap it. 2026-09-29 — `common/db` split into `schema/`, `storage/`, `seed/`, `composables/`, `sync/` (deep-import paths in §6–§7); view-scoped activation moved onto `setupAppDbSync`; `useDbSync` removed.
 
 This is the how-to. It answers "I need X on screen — what do I write?", using what Company and Order
 Manager actually do. Read the design doc when you need to know *why*; read this to get work done.
@@ -33,43 +33,73 @@ Three ways in. Pick by what the screen needs.
 
 | You need | Use | Shape |
 |---|---|---|
-| A label or a joined lookup for seed data | `useSeedData()` | `await seed.getFacilityName(id)` |
+| A label, option list or joined lookup for seed data | `useSeedData()` | `seed.facilityName(id)` in a template or `computed` |
 | A live list or row that re-renders on change | `useDb(table, options?)` | `{ records, first, count, hydrated, error }` |
 | Row counts + last-sync per domain (Settings) | `useDbStatus(db, catalog, actions)` | `{ domains, totalRows, refreshAll, … }` |
 
-### 1a. `useSeedData()` — imperative lookups
+### 1a. `useSeedData()` — seed lookups
 
-~60 typed getters over the seed tables. Takes no arguments; it resolves the active database itself.
-This is Order Manager's main read path.
+Typed getters over the framework seed tables: labels, option lists and in-memory joins. It takes no
+arguments and resolves the active database itself. This is Order Manager's main read path, and
+Company's `useSeed.ts` lookups wrap it.
+
+Each seed table is one Dexie `liveQuery`, opened the first time any getter needs it and kept until
+logout. Every caller shares that one read, so a table is read once per session, and the query
+re-emits whenever the table changes: the login sync filling it, a `refreshAfterMutation`, or a
+resync from Settings. A table nobody asks for is never read. There is no init step.
+
+Getters come in two kinds, told apart by name:
+
+| Kind | Names | Returns | Use it for |
+|---|---|---|---|
+| Reactive | no prefix: `statusDescription`, `facilityName`, `enumsByType`, `countries`, `shipmentMethodOptions`, … | a value, synchronously | templates and `computed`s |
+| Async | `get` prefix: `getFacilities`, `getGeos`, `getProductStores`, `getEnumsByType`, … | a Promise of the table's current rows | stores, and code that must act on the rows, such as building a request or a decision from them |
 
 ```ts
 import { useSeedData } from "@common/db";
 
 const seed = useSeedData();
 
-// Every getter is async — it opens IndexedDB per call.
-const name = await seed.getFacilityName(facilityId);
-const labels = await seed.getStatusDescriptions(statusIds);   // one table read for many ids
-const states = await seed.getStatesForCountry("USA");         // joins geos ⋈ geoAssocs for you
+// Reactive: call it where the value is shown. It re-renders when the table loads or changes.
+const channels = computed(() => seed.enumsByType("ORDER_SALES_CHANNEL"));
+const states = computed(() => seed.statesForCountry(form.countryGeoId));  // geos ⋈ geoAssocs
 ```
 
-**In a component, resolve into a ref — not a computed.** These are async, so a `computed` would hand
-the template a Promise. The established pattern (`CustomSwapModal.vue`, `SwapTaskCard.vue`):
+```vue
+<ion-label>{{ seed.statusDescription(item.statusId) }}</ion-label>
+<ion-note>{{ seed.facilityName(item.facilityId) }}</ion-note>
+```
 
 ```ts
-const facilityLabel = ref("");
-watch(() => props.facilityId, async (facilityId) => {
-  facilityLabel.value = await seed.getFacilityName(facilityId ?? "");
-}, { immediate: true });
+// Async: only when the rows must be in hand before continuing.
+const facilityRows = await seed.getFacilities();
+const facilityIds = facilityRows.filter(isPhysicalFacility).map((facility) => facility.facilityId);
 ```
 
-Prefer the **plural** getters for lists — `getStatusDescriptions(ids)` reads the table once, where
-calling `getStatusDescription(id)` in a loop reads it once per row.
+**Don't resolve seed data into a ref.** There's no need for `watch` + `await` + a label-map `ref`:
+the reactive getter already re-renders on its own, and a watcher only adds a raw-id flash and a race
+between out-of-order reads.
+
+**A cold table answers with the raw id or `[]`.** The first render after a table's first use shows
+the id (or an empty list) until the read lands, a few milliseconds later, then re-renders. There is
+no loaded flag. If a screen must tell "not loaded yet" from "genuinely empty", or must not act on a
+half-read table, use an async `get*` getter or `useDb`'s `hydrated`. Code that stamps a looked-up
+value permanently (for example `buildAddressState` in Order Manager's `BadAddressTaskCard.vue`)
+awaits `getGeos()` for that reason.
+
+Getters accept a missing id (`undefined` or `null`) and answer `""`. Countries come from
+`geoTypeEnumId === "GEOT_COUNTRY"`; a country's states follow its `GAT_REGIONS` associations only,
+so group memberships such as DBIC never appear as states.
 
 ### 1b. `useDb()` — reactive reads
 
-One entry point, always a list, backed by a Dexie `liveQuery`. Company's read composables are all
-built on it.
+One entry point, always a list, backed by a Dexie `liveQuery`. Most of Company's read composables
+are built on it; its seed lookups in `useSeed.ts` wrap `useSeedData` instead.
+
+Pick `useSeedData` for read-only seed lookups: labels, dropdown options, names by id. Pick `useDb`
+when the screen queries a table (`equals`, `scope`, `filter`, a date range), needs `hydrated` for
+its loading and empty states, or reads one of the app's own tables. Each `useDb` call is its own
+subscription, closed on unmount; `useSeedData`'s are shared and live for the session.
 
 ```ts
 import { useDb } from "@common/db";
@@ -463,4 +493,4 @@ domain last finished, and `resyncReferenceData()` clears every sync marker and r
 | Sync policy | `src/config/appSyncConfig.ts` | none — harness default |
 | Main-thread facade | `src/services/appDbSync.ts` | `src/services/appDbSync.ts` |
 | Per-view activation | `activateSyncDomains` / `deactivateSyncDomains` from `src/services/appDbSync.ts` | none |
-| Read examples | `src/composables/useSeed.ts` | `useSeedData()` throughout |
+| Read examples | `src/composables/useSeed.ts` (seed lookups wrap `useSeedData`) | `useSeedData()` reactive getters throughout |

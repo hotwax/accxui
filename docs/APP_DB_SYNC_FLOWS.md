@@ -1,8 +1,8 @@
 # AccxUI Local Database & Sync — Flow Diagrams
 
 **Status:** Approved
-**Version:** 1.1
-**Date:** 2026-09-29
+**Version:** 1.2
+**Date:** 2026-09-30
 **Companion:** [APP_DB_ARCHITECTURE.md](APP_DB_ARCHITECTURE.md) — the prose design; this document is
 the diagram set it references.
 **How-to:** [APP_DB_DEVELOPER_GUIDE.md](APP_DB_DEVELOPER_GUIDE.md) — recipes for app developers.
@@ -805,12 +805,18 @@ flowchart TD
       A3 --> A8["onUnmounted: unsubscribe"]
     end
 
-    subgraph b["useSeedData() — imperative lookups"]
-      B1["getClient() = (targetDb ?? getAppDb()).client()"]
-      B1 --> B2["rows(table) = client.entity(table).all()<br/>degrades to [] and warns"]
-      B2 --> B3["label / labels: first non-empty of<br/>description, enumName, name, groupName,<br/>facilityName, storeName — else the raw id"]
-      B3 --> B4["joins done in memory:<br/>getEnumsByParentType, getStatesForCountry,<br/>getAllowedTransitions, ..."]
-      B4 --> B5["NO cache layer — each call opens IndexedDB"]
+    subgraph b["useSeedData() — shared live seed tables"]
+      B1["getter needs a table: seedTable(table)"]
+      B1 --> B2{"entry for dbName/table<br/>in the module map?"}
+      B2 -- "no (first use)" --> B3["rows = shallowRef([])<br/>entity(table).live({}).subscribe()<br/>store entry { rows, loaded, subscription }"]
+      B2 -- yes --> B4["reuse it: no new read"]
+      B3 --> B5["next: rows.value = all; loaded settles<br/>re-emits on any write to the table:<br/>login sync, refreshAfterMutation, resync"]
+      B3 --> B6["error: warn, drop the entry<br/>(the next use opens a fresh one)"]
+      B4 --> B7["reactive getter: reads rows.value<br/>(tracked by the calling template / computed)<br/>raw id or [] until the first emission"]
+      B5 --> B7
+      B4 --> B8["async get*: await loaded,<br/>then return the current rows.value"]
+      B5 --> B8
+      B7 --> B9["labels: first non-empty of description, enumName,<br/>name, groupName, facilityName, storeName — else the raw id<br/>joins in memory: statesForCountry (GAT_REGIONS), enumsByParentType, ..."]
     end
 
     subgraph c["useDbStatus(db, catalogSource, actions) — status card"]
@@ -829,6 +835,12 @@ flowchart TD
       C8 --> C11["refreshDomain -> actions.resyncDomain; refreshAll -> actions.resyncAll"]
     end
 ```
+
+The two live reads differ in lifetime. A `useDb` subscription belongs to the component that opened
+it and closes on unmount. A `useSeedData` table is opened by whichever caller needs it first, is
+shared by every later caller, and stays open until logout (`clearSeedTables` in F-TEAR). That is at
+most one subscription per seed table, and it re-runs only when that table is written
+(`useSeedData.ts`).
 
 Catalog source per app:
 
@@ -939,7 +951,8 @@ flowchart TD
       L4 --> L5["publisher.close()"]
       L5 --> L6["terminate() — kills the worker AND its timer"]
       L6 --> L7["serviceState.running = false"]
-      L7 --> L9["clearDatabaseTables(db.raw())<br/>rw txn over every table, never blocks logout"]
+      L7 --> L8["clearSeedTables()<br/>unsubscribe every useSeedData live table, empty the map"]
+      L8 --> L9["clearDatabaseTables(db.raw())<br/>rw txn over every table, never blocks logout"]
     end
 
     subgraph sw["OMS instance switch"]
