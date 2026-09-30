@@ -1,0 +1,169 @@
+/**
+ * Pure projection + diff helpers for the local database.
+ *
+ * Deliberately free of Dexie and Vue so every rule here is unit-testable without IndexedDB.
+ */
+
+import type { Entity } from "../schema/defineEntity";
+import type { DbKey, DbRow, FieldKind } from "../types";
+
+/** Coerce a server date field (epoch-millis number, numeric string, or ISO string) to millis. */
+export function toMillis(value: unknown): number | undefined {
+  if (value === null || value === undefined || value === "") return undefined;
+  if (typeof value === "number") return Number.isFinite(value) ? value : undefined;
+  const numeric = Number(value);
+  if (Number.isFinite(numeric)) return numeric;
+  const parsed = Date.parse(String(value));
+  return Number.isNaN(parsed) ? undefined : parsed;
+}
+
+/** Coerce a server count field to a number, or undefined when absent/unparseable. */
+export function toCount(value: unknown): number | undefined {
+  if (value === null || value === undefined || value === "") return undefined;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : undefined;
+}
+
+/** Coerce to a trimmed string, or undefined when absent. */
+export function toText(value: unknown): string | undefined {
+  if (value === null || value === undefined) return undefined;
+  const text = String(value).trim();
+  return text === "" ? undefined : text;
+}
+
+const COERCE: Record<FieldKind, (value: unknown) => unknown> = {
+  text: toText,
+  count: toCount,
+  date: toMillis,
+  structured: (value) => (Array.isArray(value) && value.length === 0 ? undefined : value ?? undefined),
+};
+
+/**
+ * Project one raw server record into a stored row.
+ *
+ * The stored row is the DECLARED fields plus `syncedAt` — nothing else. The untouched server
+ * payload is deliberately not kept alongside it: storing both doubles every row, and a field a
+ * screen needs belongs in `fields` where the schema can index and coerce it.
+ *
+ * Returns null when the record cannot be keyed — for a compound key that means ANY member failed to
+ * project. There is no synthetic key to build: the key members are ordinary declared fields, so
+ * they are coerced by their declared kind like everything else.
+ */
+export function projectRow(
+  raw: Record<string, unknown>,
+  entity: Entity,
+  now: number,
+): DbRow | null {
+  const row: Record<string, unknown> = {};
+
+  for (const [field, kind] of Object.entries(entity.fields)) {
+    const source = raw?.[field] !== undefined ? field : entity.rename?.[field] ?? field;
+    const value = COERCE[kind](raw?.[source]);
+    if (value !== undefined) row[field] = value;
+  }
+
+  for (const field of entity.primaryKeyFields) {
+    if (row[field] === undefined) return null;
+  }
+
+  return { ...row, syncedAt: now } as DbRow;
+}
+
+/** Project many records, dropping any without a usable key. */
+export function projectRows(
+  rawRows: Array<Record<string, unknown>>,
+  entity: Entity,
+  now: number,
+): DbRow[] {
+  const rows: DbRow[] = [];
+  for (const raw of rawRows) {
+    const row = projectRow(raw, entity, now);
+    if (row) rows.push(row);
+  }
+  return rows;
+}
+
+/**
+ * True when a fetch returned records but the projection can key NONE of them.
+ */
+export function isUnkeyableFetch(
+  rawRows: Array<Record<string, unknown>>,
+  entity: Entity,
+): boolean {
+  return rawRows.length > 0 && projectRows(rawRows, entity, 0).length === 0;
+}
+
+/**
+ * `|` occurs in real OFBiz ids, so joining on it would make `["A","B"]` and the single id `"A|B"`
+ * indistinguishable. NUL cannot occur in one.
+ */
+const KEY_SEPARATOR = "\u0000";
+
+/** A compound key flattened to a value-comparable string, for Set and Map membership. */
+export function canonicalKey(key: DbKey): string {
+  return Array.isArray(key) ? key.join(KEY_SEPARATOR) : String(key);
+}
+
+/**
+ * The primary key of a stored row: a scalar for a single-field key, an array in declared order for
+ * a compound one. Undefined when any member is absent, which means the row cannot be stored.
+ */
+export function entityKeyOf(row: Record<string, unknown>, entity: Entity): DbKey | undefined {
+  const values: Array<string | number> = [];
+
+  for (const field of entity.primaryKeyFields) {
+    const value = row?.[field];
+    if (value === undefined || value === null || value === "") return undefined;
+    values.push(typeof value === "number" ? value : String(value));
+  }
+
+  return values.length === 1 ? values[0] : values;
+}
+
+/**
+ * Keys to delete after a snapshot sync: everything stored that the fresh full set no longer
+ * contains. Compares through `canonicalKey` because a Set compares arrays by identity, but returns
+ * the ORIGINAL key form so the result can be handed straight to `bulkDelete`.
+ */
+export function diffStaleKeys(existingKeys: readonly DbKey[], freshKeys: readonly DbKey[]): DbKey[] {
+  const fresh = new Set(freshKeys.map(canonicalKey));
+  return existingKeys.filter((key) => !fresh.has(canonicalKey(key)));
+}
+
+/**
+ * The newest value of `dateField` across the given rows.
+ */
+export function newestValue(rows: ReadonlyArray<Record<string, unknown>>, dateField: string): number | undefined {
+  let newest: number | undefined;
+  for (const row of rows) {
+    const value = row?.[dateField];
+    if (typeof value === "number" && (newest === undefined || value > newest)) newest = value;
+  }
+  return newest;
+}
+
+/**
+ * Keep only records strictly newer than the cursor.
+ */
+export function keepNewerThan(
+  rawRows: Array<Record<string, unknown>>,
+  dateField: string,
+  cursor: number,
+): Array<Record<string, unknown>> {
+  return rawRows.filter((raw) => (toMillis(raw?.[dateField]) ?? 0) > cursor);
+}
+
+/**
+ * Is this date-effective row in force at `now`?
+ *
+ * Moqui models association lifetimes as `fromDate`/`thruDate` rather than deleting rows.
+ * Treat a `thruDate` strictly less than or equal to `now` as expired.
+ */
+export function isEffectiveNow(row: Record<string, unknown> | undefined, now: number): boolean {
+  const from = toMillis(row?.fromDate);
+  const thru = toMillis(row?.thruDate);
+  if (from !== undefined && from > now) return false;
+  if (thru !== undefined && thru <= now) return false;
+  return true;
+}
+
