@@ -83,7 +83,7 @@ export interface DbClient {
 }
 
 /** Build a Dexie Collection for the given options. */
-function buildQuery(tableRef: Table<any, string>, options: QueryOptions = {}) {
+function buildQuery(tableRef: Table<any, DbKey>, options: QueryOptions = {}) {
   let collection: any;
 
   if (options.scope) {
@@ -317,17 +317,17 @@ export function dbClient(
       return instance as EntityClient<T>;
     },
 
-    get: (table, key) => client.entity(table).get(key),
-    getMany: (table, keys) => client.entity(table).getMany(keys),
-    all: (table) => client.entity(table).all(),
-    query: (table, options) => client.entity(table).query(options),
-    first: (table, options) => client.entity(table).first(options),
-    count: (table, options) => client.entity(table).count(options),
-    put: (table, record) => client.entity(table).put(record),
-    bulkPut: (table, records) => client.entity(table).bulkPut(records),
-    remove: (table, key) => client.entity(table).remove(key),
-    bulkRemove: (table, keys) => client.entity(table).bulkRemove(keys),
-    clear: (table) => client.entity(table).clear(),
+    get: (table, key) => client.entity<any>(table).get(key),
+    getMany: (table, keys) => client.entity<any>(table).getMany(keys),
+    all: (table) => client.entity<any>(table).all(),
+    query: (table, options) => client.entity<any>(table).query(options),
+    first: (table, options) => client.entity<any>(table).first(options),
+    count: (table, options) => client.entity<any>(table).count(options),
+    put: (table, record) => client.entity<any>(table).put(record),
+    bulkPut: (table, records) => client.entity<any>(table).bulkPut(records),
+    remove: (table, key) => client.entity<any>(table).remove(key),
+    bulkRemove: (table, keys) => client.entity<any>(table).bulkRemove(keys),
+    clear: (table) => client.entity<any>(table).clear(),
 
     transaction(mode, tables, fn) {
       return resolveDb().transaction(mode, tables, fn) as Promise<any>;
