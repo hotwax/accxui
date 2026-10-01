@@ -1,5 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import Dexie from "dexie";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import Dexie, { liveQuery } from "dexie";
 import { type BaseDB, __resetDbVersionChecks, ensureDbReady } from "../db/storage/baseDb";
 
 /**
@@ -121,5 +121,103 @@ describe("ensureDbReady", () => {
     db.syncMeta.get = vi.fn(async () => { throw new Error("syncMeta unavailable"); }) as any;
 
     await expect(ensureDbReady(db)).resolves.toBeUndefined();
+  });
+});
+
+/**
+ * A live query runs its querier in a Dexie zone that refuses writes, and the version check writes
+ * when it rebuilds. Live queries call `ensureDbReady` inside their querier (`dbClient.live`,
+ * `useSeedData`, `useDbStatus`), so the database's first use is often inside one.
+ */
+describe("ensureDbReady and live queries", () => {
+  const dependencies = Dexie.dependencies as { indexedDB?: unknown };
+  let realIndexedDB: unknown;
+  const inLiveQuery = () => Boolean((Dexie.Promise as any).PSD?.subscr);
+
+  beforeEach(() => {
+    __resetDbVersionChecks();
+    vi.spyOn(Dexie, "delete").mockImplementation(() => Dexie.Promise.resolve() as any);
+    vi.spyOn(console, "info").mockImplementation(() => {});
+    // Without IndexedDB a live query never runs its querier. The database below is a fake, so
+    // nothing reads IndexedDB; the live query's zone is Dexie's own.
+    realIndexedDB = dependencies.indexedDB;
+    dependencies.indexedDB = {};
+  });
+
+  afterEach(() => {
+    dependencies.indexedDB = realIndexedDB;
+    vi.restoreAllMocks();
+  });
+
+  /**
+   * Nothing recorded, so the check rebuilds. Like Dexie: closed at first, one open shared by every
+   * caller, requests answered on a later task, and a write refused inside a live query.
+   */
+  function unverifiedDb() {
+    let recorded: number | undefined;
+    let isOpen = false;
+    let opening: Promise<void> | null = null;
+    const later = <T>(value: () => T) => new Dexie.Promise<T>((resolve) => { setTimeout(() => resolve(value()), 1); });
+    const db = {
+      name: "demo-LiveQueryTestDB",
+      declaredVersion: 1,
+      isOpen: () => isOpen,
+      open: vi.fn(() => (opening ??= later(() => { isOpen = true; }).then(() => { opening = null; }))),
+      close: vi.fn(() => { isOpen = false; }),
+      syncMeta: {
+        get: vi.fn(() => later(() => (recorded === undefined ? undefined : { key: "schemaVersion", version: recorded }))),
+        put: vi.fn((record: any) => {
+          if(inLiveQuery()) {
+            return Dexie.Promise.reject(Object.assign(new Error("Readwrite transaction in liveQuery context"), { name: "ReadOnlyError" }));
+          }
+
+          return later(() => { recorded = record.version; });
+        }),
+      },
+      recorded: () => recorded,
+    };
+
+    return db as unknown as BaseDB & typeof db;
+  }
+
+  /** The first value a live query emits. */
+  function firstValue<T>(querier: () => Promise<T>): Promise<T> {
+    return new Promise((resolve, reject) => {
+      const subscription = liveQuery(querier).subscribe({
+        next: (value) => { subscription.unsubscribe(); resolve(value); },
+        error: reject,
+      });
+    });
+  }
+
+  it("records the version when a live query is the database's first use", async () => {
+    const db = unverifiedDb();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    await firstValue(async () => {
+      await ensureDbReady(db);
+
+      return true;
+    });
+
+    expect(db.recorded()).toBe(1);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it("resumes a querier inside its live query when the check it awaits was started by another caller", async () => {
+    // A querier that resumed outside its live query would not have its reads tracked, and the
+    // query would never re-run when the table changed.
+    const db = unverifiedDb();
+
+    const caller = ensureDbReady(db);
+    const resumedInside = await firstValue(async () => {
+      await ensureDbReady(db);
+
+      return inLiveQuery();
+    });
+    await caller;
+
+    expect(resumedInside).toBe(true);
+    expect(db.recorded()).toBe(1);
   });
 });

@@ -310,6 +310,15 @@ are none. The version check is memoised per database name, so it costs one resol
 first call; the *open* is deliberately not memoised, so a connection closed later (an OMS switch, or
 another tab's `versionchange`) is reopened rather than answered "ready".
 
+**Inside a live query.** `dbClient.live`, `useSeedData` and `useDbStatus` reach the gate from inside
+their `liveQuery` querier. Dexie refuses writes there (`ReadOnlyError`), and it echoes a live query's
+zone into native continuations for a few microtasks, so a check written with native awaits failed
+when a live query was the first use, and could drag a caller that awaited it into that zone, where
+its own later writes were refused too. So the open and the check run in Dexie's global zone, as a
+chain of Dexie promises, and `ensureDbReady` returns a Dexie promise made in its caller's zone: a
+querier resumes inside its live query, so its reads stay tracked, and any other caller resumes
+outside it.
+
 **The knob is unguarded, by choice.** Nothing detects a FORGOTTEN bump: the schema changes, the
 version does not, and rows keep the previous build's shape with no error anywhere. Bumping `version`
 is therefore part of changing the schema, not a separate step to remember afterwards — the review
@@ -861,7 +870,7 @@ The framework layer is verified by the following specs under `common/tests/`:
 | `cursorDomain.spec.ts` | shallow-window deepening, cursor params |
 | `syncRegistry.spec.ts` | `activationKey`, `dueDomains` |
 | `syncHarness.spec.ts`, `syncHarness.ordering.spec.ts` | tick, queues, exclusive/shared ordering |
-| `ensureDbReady.spec.ts` | open, version-gate rebuild, memoised check |
+| `ensureDbReady.spec.ts` | open, version-gate rebuild, memoised check, first use inside a live query |
 | `syncService.spec.ts` | idempotent start, generation guard, error routing, `syncedAt` |
 | `setupAppDbSync.spec.ts` | activation / owner-guarded deactivation, generation guard, scoped `syncDomainsError` |
 | `useDbStatus.spec.ts` | catalog resolution, counts, status derivation |
@@ -881,7 +890,7 @@ The framework layer is verified by the following specs under `common/tests/`:
 | `common/db/schema/defineAppDb.ts` | 144 | per-app database facade |
 | `common/db/schema/appDbRegistry.ts` | 14 | active-app-db singleton |
 | **`common/db/storage/`** | | **Dexie access and row projection** |
-| `common/db/storage/baseDb.ts` | 167 | `BaseDB`, `ensureDbReady` (open + version gate), login markers |
+| `common/db/storage/baseDb.ts` | 203 | `BaseDB`, `ensureDbReady` (open + version gate), login markers |
 | `common/db/storage/dbClient.ts` | 345 | `DbClient` / `EntityClient` |
 | `common/db/storage/projection.ts` | 169 | coercion, keying, diffing |
 | **`common/db/seed/`** | | **framework seed tables and their domains** |

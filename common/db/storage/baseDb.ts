@@ -109,6 +109,24 @@ async function openDb(db: BaseDB): Promise<void> {
 }
 
 /**
+ * Dexie runs a live query's querier in a zone that refuses writes (`ReadOnlyError`), and carries a
+ * zone across native awaits by echoing it over the next microtasks. So the version check, which
+ * writes when it rebuilds, fails when a live query is the database's first use, and an unrelated
+ * native continuation that runs in an echo, such as a caller of the check, can land in that zone and
+ * have every later write refused. A Dexie promise is not affected: it runs each callback in the zone
+ * it was registered in. `Dexie.Promise.PSD` and `usePSD` are how Dexie itself reads and enters zones.
+ */
+const ZonedPromise = Dexie.Promise as any;
+
+/** Run `fn` in Dexie's global zone, outside any live query or transaction. */
+function inGlobalZone<T>(fn: () => T): T {
+  let zone = ZonedPromise.PSD;
+  while(zone && !zone.global) {zone = zone.parent;}
+
+  return zone && typeof ZonedPromise.usePSD === "function" ? ZonedPromise.usePSD(zone, fn) : fn();
+}
+
+/**
  * Drop and rebuild when the database was built by a different declared version.
  *
  * An absent marker counts as a mismatch, so installs predating the marker land on a known state,
@@ -116,23 +134,45 @@ async function openDb(db: BaseDB): Promise<void> {
  *
  * Reads `syncMeta` through raw Dexie rather than `dbClient`: every `dbClient` operation calls
  * `ensureDbReady`, so routing this through it would re-enter the gate that is awaiting this.
+ *
+ * A chain of Dexie promises rather than native awaits, so that once started in the global zone
+ * every step, the rebuild's write included, stays there.
  */
-async function verifyDeclaredVersion(db: BaseDB): Promise<void> {
-  const recorded = (await db.syncMeta.get(SCHEMA_VERSION_KEY))?.version;
-  if (Number(recorded) === db.declaredVersion) return;
+function verifyDeclaredVersion(db: BaseDB): Promise<void> {
+  return Dexie.Promise.resolve()
+    .then(() => db.syncMeta.get(SCHEMA_VERSION_KEY))
+    .then((record) => {
+      const recorded = record?.version;
+      if(Number(recorded) === db.declaredVersion) {return;}
 
-  console.info(
-    `[db] ${db.name} was built by version ${recorded ?? "an unrecorded build"}, ` +
-    `this build declares ${db.declaredVersion} — rebuilding.`,
-  );
-  db.close();
-  await Dexie.delete(db.name);
-  await db.open();
-  await db.syncMeta.put({
-    key: SCHEMA_VERSION_KEY,
-    version: db.declaredVersion,
-    timestamp: Date.now(),
-  });
+      console.info(`[db] ${db.name} was built by version ${recorded ?? "an unrecorded build"}, ` +
+        `this build declares ${db.declaredVersion} — rebuilding.`);
+      db.close();
+
+      return Dexie.Promise.resolve(Dexie.delete(db.name))
+        .then(() => db.open())
+        .then(() => db.syncMeta.put({
+          key: SCHEMA_VERSION_KEY,
+          version: db.declaredVersion,
+          timestamp: Date.now(),
+        }))
+        .then(() => undefined);
+    });
+}
+
+/** The memoised version check for `db`, started in the global zone on its first use in this realm. */
+function versionCheckOf(db: BaseDB): Promise<void> {
+  let checked = versionChecked.get(db.name);
+  if(!checked) {
+    // Swallowed, never rethrown, and not retried: a failed check must not block boot, and
+    // re-attempting a destructive rebuild on every read would be worse than serving what is there.
+    checked = inGlobalZone(() => verifyDeclaredVersion(db).catch((error) => {
+      console.warn(`[db] Version check failed for ${db.name}:`, error);
+    }));
+    versionChecked.set(db.name, checked);
+  }
+
+  return checked;
 }
 
 /**
@@ -142,20 +182,16 @@ async function verifyDeclaredVersion(db: BaseDB): Promise<void> {
  * harness on start, and the status card — so no query can run, and no `liveQuery` can subscribe,
  * against a database that has not been verified. That ordering is what makes the rebuild safe:
  * `Dexie.delete` blocks on open connections, and by construction there are none yet.
+ *
+ * Live queries call this inside their querier (`dbClient.live`, `useSeedData`, `useDbStatus`), so
+ * the open and the check run in the global zone, and the promise returned here is a Dexie promise
+ * made in the caller's zone. A querier resumes inside its live query, so the reads that follow are
+ * tracked, and any other caller resumes outside it, so its writes are not refused.
  */
-export async function ensureDbReady(db: BaseDB): Promise<void> {
-  await openDb(db);
-
-  let checked = versionChecked.get(db.name);
-  if (!checked) {
-    // Swallowed, never rethrown, and not retried: a failed check must not block boot, and
-    // re-attempting a destructive rebuild on every read would be worse than serving what is there.
-    checked = verifyDeclaredVersion(db).catch((error) => {
-      console.warn(`[db] Version check failed for ${db.name}:`, error);
-    });
-    versionChecked.set(db.name, checked);
-  }
-  await checked;
+export function ensureDbReady(db: BaseDB): Promise<void> {
+  return Dexie.Promise.resolve()
+    .then(() => inGlobalZone(() => openDb(db)))
+    .then(() => versionCheckOf(db));
 }
 
 /** Drop the superseded fixed-name cache databases, if present. */
