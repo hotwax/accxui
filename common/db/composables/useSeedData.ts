@@ -209,6 +209,9 @@ const SHIPMENT_METHOD_LABEL_FIELDS = ["description", "shipmentMethodTypeId"];
 const FACILITY_LABEL_FIELDS = ["facilityName", "facilityId"];
 const PRODUCT_STORE_LABEL_FIELDS = ["storeName", "companyName"];
 
+/** The status flow OMS validates an order against when the order names none. */
+const DEFAULT_STATUS_FLOW_ID = "Default";
+
 /** Authored sequence first, unsequenced transitions last, then by target status. */
 const byTransitionSequence = (left: Row, right: Row) => {
   const leftSequence = left.transitionSequence ?? Number.MAX_SAFE_INTEGER;
@@ -294,13 +297,19 @@ export function useSeedData() {
     label("partyRelationshipTypes", "partyRelationshipTypeId", id, ["description", "partyRelationshipName"]);
   const orderAdjustmentTypeDescription = (id: Id) => label("orderAdjustmentTypes", "orderAdjustmentTypeId", id);
 
-  /** The status flow's transitions out of `statusId`, in their authored sequence. */
-  const allowedTransitions = listGetter(["statusFlowTransitions", "statuses"], (statusId: Id) => statusId
-    ? rowsOf("statusFlowTransitions")
-      .filter((transition) => transition.statusId === statusId)
+  /**
+   * The transitions out of `statusId` in one status flow, in their authored sequence. Flows reuse
+   * status ids (a transfer order's flow also leaves ITEM_CREATED), so only one flow is read: the
+   * `Default` flow unless `statusFlowId` names another, as OMS validates an order without one.
+   */
+  const allowedTransitions = listGetter(["statusFlowTransitions", "statuses"], (statusId: Id, statusFlowId?: Id) => {
+    const flowId = statusFlowId || DEFAULT_STATUS_FLOW_ID;
+    if (!statusId) return [];
+    return rowsOf("statusFlowTransitions")
+      .filter((transition) => transition.statusFlowId === flowId && transition.statusId === statusId)
       .map((transition) => ({ ...transition, toStatusDescription: statusDescription(transition.toStatusId) }))
-      .sort(byTransitionSequence)
-    : []);
+      .sort(byTransitionSequence);
+  });
 
   const shopifyShops = listGetter(["shopifyShops"], () => rowsOf("shopifyShops"));
 

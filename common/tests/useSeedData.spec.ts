@@ -46,10 +46,13 @@ beforeEach(async () => {
     orderAdjustmentTypes: [{ orderAdjustmentTypeId: "SALES_TAX", description: "Sales Tax" }],
     shopifyShops: [{ shopId: "SHOP", productStoreId: "STORE" }],
     statusFlowTransitions: [
-      { statusId: "ORDER_CREATED", toStatusId: "ORDER_COMPLETED", transitionSequence: 2 },
-      { statusId: "ORDER_CREATED", toStatusId: "ORDER_APPROVED", transitionSequence: 1 },
-      { statusId: "ORDER_CREATED", toStatusId: "ORDER_HELD" },
-      { statusId: "ORDER_APPROVED", toStatusId: "ORDER_COMPLETED" },
+      { statusFlowId: "Default", statusId: "ORDER_CREATED", toStatusId: "ORDER_COMPLETED", transitionSequence: 2 },
+      { statusFlowId: "Default", statusId: "ORDER_CREATED", toStatusId: "ORDER_APPROVED", transitionSequence: 1 },
+      { statusFlowId: "Default", statusId: "ORDER_CREATED", toStatusId: "ORDER_HELD" },
+      { statusFlowId: "Default", statusId: "ORDER_APPROVED", toStatusId: "ORDER_COMPLETED" },
+      // Another flow leaving the same status, as transfer orders' flows do.
+      { statusFlowId: "TO_Fulfill_Only", statusId: "ORDER_CREATED", toStatusId: "ORDER_APPROVED" },
+      { statusFlowId: "TO_Fulfill_Only", statusId: "ORDER_CREATED", toStatusId: "ORDER_PENDING_FULFILL" },
     ],
   };
   // Open every table the specs read, then let the reads land.
@@ -87,6 +90,15 @@ describe("useSeedData order lookups", () => {
       .toEqual([["ORDER_APPROVED", "Approved"], ["ORDER_COMPLETED", "Completed"], ["ORDER_HELD", "ORDER_HELD"]]);
     expect(seedData.allowedTransitions("NONE")).toEqual([]);
     expect(seedData.allowedTransitions("")).toEqual([]);
+  });
+
+  it("reads the Default flow unless another is named, keeping flows that reuse a status apart", () => {
+    const targets = (statusFlowId?: string) =>
+      seedData.allowedTransitions("ORDER_CREATED", statusFlowId).map((transition) => transition.toStatusId);
+    expect(targets()).toEqual(["ORDER_APPROVED", "ORDER_COMPLETED", "ORDER_HELD"]);
+    expect(targets("Default")).toEqual(targets());
+    expect(targets("")).toEqual(targets());
+    expect(targets("TO_Fulfill_Only")).toEqual(["ORDER_APPROVED", "ORDER_PENDING_FULFILL"]);
   });
 
   it("filters shipment methods by carrier and lists shops", () => {
