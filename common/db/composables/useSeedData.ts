@@ -154,6 +154,7 @@ export function useSeedData() {
   const shipmentMethodTypes = () => rowsOf("shipmentMethodTypes");
   const paymentMethodTypes = () => rowsOf("paymentMethodTypes");
   const roleTypes = () => rowsOf("roleTypes");
+  const partyRelationshipTypes = () => rowsOf("partyRelationshipTypes");
 
   const statusDescription = (statusId: Id) => label("statuses", "statusId", statusId);
   const statusItemsByType = (statusTypeId: string) =>
@@ -261,6 +262,7 @@ export function useSeedData() {
     geos,
     orderIdentificationTypeOptions,
     partyRelationshipDescription,
+    partyRelationshipTypes,
     paymentMethodDescription,
     paymentMethodTypes,
     productStoreFacilities,

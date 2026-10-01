@@ -34,6 +34,11 @@ export const commonDomains: Record<string, SyncDomain> = {
     listUrl: "admin/enums",
     collectionKey: null,
     batchSize: 500,
+    // Refetch the mutated enum's whole type; `admin/enums` filters by `enumTypeId`.
+    refetchScope: (pk) => ({
+      params: { enumTypeId: pk.enumTypeId },
+      scope: { field: "enumTypeId", value: pk.enumTypeId },
+    }),
   }),
 
   enumType: defineSnapshotDomain({
