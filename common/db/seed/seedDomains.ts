@@ -34,6 +34,12 @@ export const commonDomains: Record<string, SyncDomain> = {
     listUrl: "admin/enums",
     collectionKey: null,
     batchSize: 500,
+    // Refetch the one mutated enum by its primary key. `admin/enums` is the EnumerationAndType
+    // view, which filters by any Enumeration field; a deleted enum comes back empty and is removed.
+    refetchScope: (pk) => ({
+      params: { enumId: pk.enumId },
+      scope: { field: "enumId", value: pk.enumId },
+    }),
   }),
 
   enumType: defineSnapshotDomain({
