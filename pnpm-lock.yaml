@@ -860,7 +860,7 @@ importers:
         specifier: 'catalog:'
         version: 2.1.10(typescript@6.0.2)
 
-  apps/inventory-count:
+  apps/cycle-count:
     dependencies:
       '@capacitor/android':
         specifier: 'catalog:'
