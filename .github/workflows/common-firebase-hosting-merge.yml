@@ -22,6 +22,8 @@ on:
         required: false
       VITE_FIREBASE_VAPID_KEY:
         required: false
+      SHOPIFY_SHOP_CONFIG:
+        required: false
 
 jobs:
   build_and_deploy:
@@ -69,6 +71,15 @@ jobs:
         env:
           VITE_FIREBASE_CONFIG: ${{ secrets.VITE_FIREBASE_CONFIG }}
           VITE_FIREBASE_VAPID_KEY: ${{ secrets.VITE_FIREBASE_VAPID_KEY }}
+        working-directory: apps/${{ inputs.appDir }}
+
+      - name: Set Shopify Shop Config
+        run: |
+          if [[ -n "$SHOPIFY_SHOP_CONFIG" ]]; then
+            sed -i "s|^VITE_SHOPIFY_SHOP_CONFIG=.*|VITE_SHOPIFY_SHOP_CONFIG=$SHOPIFY_SHOP_CONFIG|g" .env
+          fi
+        env:
+          SHOPIFY_SHOP_CONFIG: ${{ secrets.SHOPIFY_SHOP_CONFIG }}
         working-directory: apps/${{ inputs.appDir }}
 
       - name: Build
