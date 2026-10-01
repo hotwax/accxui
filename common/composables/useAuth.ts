@@ -24,6 +24,7 @@ export const omsRef = ref("")
 const isMoquiOmsRef = ref(commonUtil.isMoqui())
 const token = ref(cookieHelper().get("token") || "")
 const expirationTime = ref(cookieHelper().get("expirationTime") || "")
+const authenticatedUserId = ref(cookieHelper().get("userId") || "")
 
 export function useAuth() {
   const getDuration = (expirationTime?: any) => {
@@ -49,6 +50,7 @@ export function useAuth() {
 
   const updateUserId = (userId: any) => {
     cookieHelper().set("userId", userId, getDuration())
+    authenticatedUserId.value = userId
   }
 
   const clearAuth = () => {
@@ -74,7 +76,9 @@ export function useAuth() {
     }
 
     const oms = cookieHelper().get("oms")
-    const userId = cookieHelper().get("userId")
+    // The profile arrives after the token during login. Cookie writes alone do not
+    // invalidate an existing computed, leaving mounted apps signed out until reload.
+    const userId = authenticatedUserId.value
 
     if(oms && accxuiConfig.value.oms === oms) {
       isOmsVerified = true
