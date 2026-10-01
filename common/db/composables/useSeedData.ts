@@ -98,7 +98,10 @@ function seedTable(table: string): SeedTable | undefined {
     let settle!: () => void;
     const loaded = new Promise<void>((resolve) => { settle = resolve; });
 
-    const subscription = liveQuery(() => readSeedTable(table)).subscribe({
+    // The querier must itself be `async`: Dexie only carries its read tracking across the awaits in
+    // `readSeedTable` for an async querier. A plain arrow returning the promise loses it at the
+    // first await, records no tables, and so never re-runs when the table changes.
+    const subscription = liveQuery(async () => await readSeedTable(table)).subscribe({
       next: (read) => {
         rows.value = read.rows;
         synced.value = read.synced;
