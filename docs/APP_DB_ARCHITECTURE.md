@@ -869,6 +869,7 @@ The framework layer is verified by the following specs under `common/tests/`:
 | `ensureDbReady.spec.ts` | open, version-gate rebuild, memoised check |
 | `syncService.spec.ts` | idempotent start, generation guard, error routing, `syncedAt` |
 | `setupAppDbSync.spec.ts` | activation / owner-guarded deactivation, generation guard, scoped `syncDomainsError` |
+| `clearDatabaseTables.spec.ts` | the logout clear keeps the schema version |
 | `useDbStatus.spec.ts` | catalog resolution, counts, status derivation |
 | `workerRemoteApi.spec.ts`, `workerFetch.spec.ts` | query serialization, paging, empty-body 200 |
 
