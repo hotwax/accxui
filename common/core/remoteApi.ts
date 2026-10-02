@@ -1,6 +1,5 @@
 import axios from 'axios';
 import { StatusCodes } from 'http-status-codes';
-import { setupCache } from 'axios-cache-adapter'
 import qs from "qs"
 import { commonUtil } from '../utils/commonUtil';
 import { useAuth } from '../composables/useAuth';
@@ -91,9 +90,10 @@ axios.interceptors.response.use(responseSuccessInterceptor, responseErrorInterce
 const maxAge = import.meta.env.VITE_CACHE_MAX_AGE
   ? parseInt(import.meta.env.VITE_CACHE_MAX_AGE)
   : 0;
-const axiosCache = setupCache({
-  maxAge: maxAge * 1000
-})
+let cacheAdapter: Promise<any> | undefined;
+const getCacheAdapter = () => cacheAdapter ??= import('axios-cache-adapter')
+  .then(({ setupCache }) => setupCache({ maxAge: maxAge * 1000 }).adapter)
+  .catch(error => { cacheAdapter = undefined; throw error; });
 
 /**
  * Generic method to call APIs
@@ -127,7 +127,7 @@ const api = async (customConfig: any) => {
 
   config.baseURL = customConfig.baseURL ? customConfig.baseURL : commonUtil.getMaargURL();
 
-  if (customConfig.cache) config.adapter = axiosCache.adapter;
+  if (customConfig.cache) config.adapter = await getCacheAdapter();
 
   return axios(config);
 }
