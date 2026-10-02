@@ -21,7 +21,9 @@
 <script setup lang="ts">
 import { IonContent, IonIcon, IonItem, IonPage, onIonViewDidEnter, onIonViewDidLeave } from "@ionic/vue";
 import { ref } from "vue";
-import { emitter, useShopify, translate } from "../index";
+import emitter from '../core/emitter';
+import { translate } from '../core/i18n';
+import { useShopify } from '../composables/useShopify';
 import Logo from "./Logo.vue";
 import { accxuiConfig } from "../core/configRegistry";
 import { warningOutline } from "ionicons/icons";
