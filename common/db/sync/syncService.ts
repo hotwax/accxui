@@ -1,3 +1,4 @@
+import { getMaargURL as utilGetMaargURL, getOMSInstanceName as utilGetOMSInstanceName, getToken as utilGetToken } from '../../utils/core';
 /**
  * Main-thread sync service (unified).
  *
@@ -18,7 +19,7 @@
 
 import { reactive } from "vue";
 import type { Remote } from "comlink";
-import { commonUtil } from "../../utils/commonUtil";
+
 import { WorkerFactory } from "../../core/workerFactory";
 import { createTokenPublisher } from "./channels";
 import type { ActiveDomain } from "./syncRegistry";
@@ -190,7 +191,7 @@ export function createSyncService(opts: SyncServiceOptions): SyncService {
   let startGeneration = 0;
 
   function pushTokenIfChanged() {
-    const current = commonUtil.getToken() || "";
+    const current = utilGetToken() || "";
     if (current && current !== lastToken) {
       lastToken = current;
       publisher?.publish(current);
@@ -249,12 +250,12 @@ export function createSyncService(opts: SyncServiceOptions): SyncService {
       worker.onmessage = (event: MessageEvent) => handleMessage(generation, event);
 
       publisher = createTokenPublisher();
-      lastToken = commonUtil.getToken() || "";
+      lastToken = utilGetToken() || "";
 
       await api.start({
-        maargUrl: commonUtil.getMaargURL(),
+        maargUrl: utilGetMaargURL(),
         token: lastToken,
-        omsInstance: commonUtil.getOMSInstanceName(),
+        omsInstance: utilGetOMSInstanceName(),
         baseTickMs: opts.baseTickMs,
         domains: opts.domains,
       });

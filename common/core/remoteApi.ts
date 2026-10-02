@@ -1,11 +1,12 @@
+import { getMaargURL as utilGetMaargURL, getToken as utilGetToken } from '../utils/core';
 import axios from 'axios';
 import { StatusCodes } from 'http-status-codes';
 import qs from "qs"
-import { commonUtil } from '../utils/commonUtil';
+
 import { useAuth } from '../composables/useAuth';
 
 const requestInterceptor = async (config: any) => {
-  const token = commonUtil.getToken();
+  const token = utilGetToken();
 
   // The following are the endpoints needs to bypass the auth check and when this calls are made we will assume
   // that we are always relogin with the new credentials present in cookies.
@@ -125,7 +126,7 @@ const api = async (customConfig: any) => {
   // if passing responseType in payload then only adding it as responseType
   if (customConfig.responseType) config['responseType'] = customConfig.responseType
 
-  config.baseURL = customConfig.baseURL ? customConfig.baseURL : commonUtil.getMaargURL();
+  config.baseURL = customConfig.baseURL ? customConfig.baseURL : utilGetMaargURL();
 
   if (customConfig.cache) config.adapter = await getCacheAdapter();
 

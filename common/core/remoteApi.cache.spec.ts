@@ -5,7 +5,7 @@ vi.mock('axios', () => ({ default: Object.assign(state.request, {
   interceptors: { request: { use: vi.fn() }, response: { use: vi.fn() } }, create: vi.fn(),
 }) }));
 vi.mock('axios-cache-adapter', () => ({ setupCache: state.setup }));
-vi.mock('../utils/commonUtil', () => ({ commonUtil: { getMaargURL: () => 'https://example.invalid' } }));
+vi.mock('../utils/core', () => ({ getMaargURL: () => 'https://example.invalid' }));
 vi.mock('../composables/useAuth', () => ({ useAuth: vi.fn() }));
 beforeEach(() => {
   vi.resetModules(); vi.clearAllMocks();
