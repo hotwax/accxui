@@ -583,7 +583,7 @@ const hasWebcamAccess = async () => {
 }
 
 /**
- * Returns true if the query object contains any active filters, excluding specified fields; 
+ * Returns true if the query object contains any active filters, excluding specified fields;
  * add future fields to `excludedFields` to ignore them in the check.
  */
 const hasActiveFilters = (query: any): boolean => {
