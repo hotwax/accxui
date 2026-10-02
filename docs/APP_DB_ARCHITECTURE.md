@@ -323,6 +323,11 @@ checklist for any change under `defineEntity`/`defineSchema` is "did the version
 | `loginSync:{domain}` | `markSyncedThisLogin` (`baseDb.ts`) | the once-per-login guard; the status card |
 | `domain:{domain}` | an app writing its own per-domain stamp | the status card, in preference to `loginSync:` (`useDbStatus.ts`) |
 
+Logout's `clearDatabaseTables` deletes every row except `schemaVersion`. The version check is
+memoised per realm and the sync worker is a realm of its own, so the worker the next login starts
+would take a database emptied of its marker for an unrecorded build, and rebuild it under whatever
+the main thread had already written.
+
 ### 4.5 The app-db registry — `appDbRegistry.ts`
 
 A 14-line module-scope singleton: `setAppDb(db)` / `getAppDb()`, the latter throwing if nothing is
