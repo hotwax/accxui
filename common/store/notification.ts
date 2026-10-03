@@ -1,7 +1,8 @@
+import { hasError as utilHasError, showToast as utilShowToast } from '../utils/core';
 import { defineStore } from "pinia";
 import api from "../core/remoteApi";
 import logger from "../core/logger";
-import { commonUtil } from "../utils/commonUtil";
+
 import { translate } from "../core/i18n";
 
 /**
@@ -62,7 +63,7 @@ export const useNotificationStore = defineStore("notification", {
       this.notifications = [payload, ...this.notifications];
       this.hasUnreadNotifications = true;
       if (payload.isForeground) {
-        commonUtil.showToast(translate("New notification received."));
+        utilShowToast(translate("New notification received."));
       }
     },
     /**
@@ -170,7 +171,7 @@ export const useNotificationStore = defineStore("notification", {
           method: "post",
           data: { topicName, applicationId, ...(forDevice ? { deviceId: forDevice } : {}) }
         });
-        if (commonUtil.hasError(resp)) throw resp;
+        if (utilHasError(resp)) throw resp;
         return true;
       } catch (error) {
         // The end state asked for already holds, so this is not a failure the UI has to explain.
@@ -187,7 +188,7 @@ export const useNotificationStore = defineStore("notification", {
           method: "delete",
           data: { topicName, applicationId, ...(forDevice ? { deviceId: forDevice } : {}) }
         });
-        if (commonUtil.hasError(resp)) throw resp;
+        if (utilHasError(resp)) throw resp;
         return true;
       } catch (error) {
         logger.error("Failed to unsubscribe the topic", error);

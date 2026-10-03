@@ -6,10 +6,7 @@ const api = vi.hoisted(() => vi.fn());
 vi.mock("../core/remoteApi", () => ({ default: (...args: any[]) => api(...args) }));
 vi.mock("../core/logger", () => ({ default: { error: vi.fn(), warn: vi.fn() } }));
 vi.mock("../core/i18n", () => ({ translate: (key: string) => key }));
-vi.mock("../utils/commonUtil", () => ({
-  // Mirrors the real helper: an error BODY on a resolved response counts as failure.
-  commonUtil: { hasError: (resp: any) => !!(resp?.data?._ERROR_MESSAGE_), showToast: vi.fn() }
-}));
+vi.mock('../utils/core', () => ({ hasError: (resp: any) => !!(resp?.data?._ERROR_MESSAGE_), showToast: vi.fn() }));
 
 const { useNotificationStore } = await import("../store/notification");
 
