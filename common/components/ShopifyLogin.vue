@@ -19,9 +19,8 @@
 </template>
 
 <script setup lang="ts">
-import { IonContent, IonIcon, IonItem, IonPage, onIonViewDidEnter, onIonViewDidLeave } from "@ionic/vue";
+import { IonContent, IonIcon, IonItem, IonPage, onIonViewWillEnter } from "@ionic/vue";
 import { ref } from "vue";
-import emitter from '../core/emitter';
 import { translate } from '../core/i18n';
 import { useShopify } from '../composables/useShopify';
 import { useEmbeddedAppStore } from '../store/embeddedApp';
@@ -35,12 +34,11 @@ const embeddedAppStore = useEmbeddedAppStore();
 const errorMessage = ref('');
 let router: any = ref();
 let route = null as any
-onIonViewDidEnter(async () => {
+onIonViewWillEnter(async () => {
   try {
     router.value = accxuiConfig.value.router
     route = router.value.currentRoute;
     errorMessage.value = '';
-    emitter.emit("presentLoader");
 
     let { shop, host } = route.query;
 
@@ -57,11 +55,6 @@ onIonViewDidEnter(async () => {
     errorMessage.value = "Something went wrong, please contact administrator";
     embeddedAppStore.$reset();
   }
-  emitter.emit("dismissLoader");
-});
-
-onIonViewDidLeave(() => {
-  emitter.emit("dismissLoader");
 });
 </script>
 

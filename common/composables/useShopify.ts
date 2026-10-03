@@ -108,10 +108,10 @@ const openPosScanner = (): Promise<any> => {
       // 1. Create Bridge
       const app = await createShopifyAppBridge(shop, host);
       
-      // 2. Get Session Token
-      const token = await getSessionTokenFromShopify(app);
-
-      const appState: any = await app.getState();
+      // Both read the bridge; neither depends on the other's response.
+      const [token, appState] = await Promise.all([
+        getSessionTokenFromShopify(app), app.getState()
+      ]);
 
       if (!appState) {
         throw new Error("Couldn't get Shopify App Bridge state, cannot proceed further.");
