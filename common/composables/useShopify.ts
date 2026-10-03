@@ -109,7 +109,8 @@ const openPosScanner = (): Promise<any> => {
       const app = await createShopifyAppBridge(shop, host);
       
       // Both read the bridge; neither depends on the other's response.
-      const [token, appState] = await Promise.all([
+      // The SDK's AppBridgeState omits the native POS state supplied at runtime.
+      const [token, appState]: [string, any] = await Promise.all([
         getSessionTokenFromShopify(app), app.getState()
       ]);
 
