@@ -1,6 +1,7 @@
 import imagePreview from './directives/imagePreview'
 import DxpShopifyImg from "./components/DxpShopifyImg.vue"
 import DxpOmsInstanceFooter from "./components/DxpOmsInstanceFooter.vue"
+import DxpModal from "./components/DxpModal.vue"
 import RadioFacetGroup from "./components/RadioFacetGroup.vue"
 import StatCard from "./components/StatCard.vue"
 import Sparkline from "./components/Sparkline.vue"
@@ -9,6 +10,8 @@ import ShopifyLogin from "./components/ShopifyLogin.vue"
 import ShopifyAppInstall from "./components/ShopifyAppInstall.vue"
 import FastTravel from "./components/FastTravel.vue"
 import { useFastTravel } from './composables/useFastTravel'
+import { useDxpModal } from './composables/useDxpModal'
+import { openModal } from './utils/modal'
 import { getFastTravelApps, getFastTravelApp, buildAppUrl } from './utils/fastTravelRegistry'
 import emitter from './core/emitter'
 import { commonUtil } from './utils/commonUtil'
@@ -21,7 +24,7 @@ import { moduleFederationUtil } from './utils/moduleFederationUtil'
 
 import api, { client, axios } from './core/remoteApi'
 
-import { createDxpI18n, i18n, translate } from './core/i18n'
+import { createDxpI18n, currentLocale, i18n, setLocale, translate } from './core/i18n'
 
 import { firebaseMessaging } from './core/firebaseMessaging'
 import { useNotificationStore } from './store/notification'
@@ -37,10 +40,12 @@ export {
   commonUtil,
   cookieHelper,
   createDxpI18n,
+  DxpModal,
   DxpOmsInstanceFooter,
   DxpShopifyImg,
   emitter,
   firebaseMessaging,
+  currentLocale,
   i18n,
   imagePreview,
   initialiseConfig,
@@ -55,6 +60,8 @@ export {
   ShopifyAppInstall,
   FastTravel,
   useFastTravel,
+  useDxpModal,
+  openModal,
   getFastTravelApps,
   getFastTravelApp,
   buildAppUrl,
@@ -62,10 +69,13 @@ export {
   useSolrSearch,
   useProducts,
   useShopify,
+  setLocale,
   translate,
   useNotificationStore,
   useEmbeddedAppStore,
   useAuth
 }
+
+export type { DxpModalAlert, DxpModalFlow, DxpModalOptions } from './composables/useDxpModal';
 
 export * from './db';
