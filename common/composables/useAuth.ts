@@ -170,7 +170,8 @@ export function useAuth() {
         }
 
         let resp = await api(payload) as any;
-        resp = JSON.parse(resp.data.startsWith("//") ? resp.data.replace("//", "") : resp.data);
+        // OFBiz prefixes its JSON with "//", so axios leaves it as text; Maarg's arrives parsed.
+        resp = typeof resp.data === "string" ? JSON.parse(resp.data.startsWith("//") ? resp.data.replace("//", "") : resp.data) : resp.data;
 
         if(resp?.logoutAuthType == "SAML2SSO") {
           redirectionUrl = resp.logoutUrl;
