@@ -180,10 +180,15 @@ function labelOf(record: Row | undefined, id: string, fields = DEFAULT_LABEL_FIE
   return (fields.map((field) => record?.[field]).find(Boolean) as string) || id;
 }
 
+/** Reactive: one row by primary key. */
+function row(table: string, keyField: string, id: Id): Row | undefined {
+  return id ? byKey(rowsOf(table), keyField).get(id) : undefined;
+}
+
 /** Reactive: one label by primary key. */
 function label(table: string, keyField: string, id: Id, fields?: string[]): string {
   if (!id) return "";
-  return labelOf(byKey(rowsOf(table), keyField).get(id), id, fields);
+  return labelOf(row(table, keyField, id), id, fields);
 }
 
 const byGeoName = (left: Row, right: Row) => (left.geoName || "").localeCompare(right.geoName || "");
@@ -202,6 +207,18 @@ const carrierLabel = (carrier: Row) =>
 
 const SHIPMENT_METHOD_LABEL_FIELDS = ["description", "shipmentMethodTypeId"];
 const FACILITY_LABEL_FIELDS = ["facilityName", "facilityId"];
+const PRODUCT_STORE_LABEL_FIELDS = ["storeName", "companyName"];
+
+/** The status flow OMS validates an order against when the order names none. */
+const DEFAULT_STATUS_FLOW_ID = "Default";
+
+/** Authored sequence first, unsequenced transitions last, then by target status. */
+const byTransitionSequence = (left: Row, right: Row) => {
+  const leftSequence = left.transitionSequence ?? Number.MAX_SAFE_INTEGER;
+  const rightSequence = right.transitionSequence ?? Number.MAX_SAFE_INTEGER;
+  if (leftSequence !== rightSequence) return leftSequence - rightSequence;
+  return (left.toStatusId || "").localeCompare(right.toStatusId || "");
+};
 
 /**
  * The seed lookup API: `const seed = useSeedData()`, then `seed.statusDescription(id)` in a
@@ -241,7 +258,14 @@ export function useSeedData() {
   const orderIdentificationTypeOptions = listGetter(["enums"], () =>
     enumsByType("ORDER_IDENTITY").map((record) => ({ enumId: record.enumId, description: labelOf(record, record.enumId) })));
 
+  const facilities = listGetter(["facilities"], () => rowsOf("facilities"));
+  const facilityTypes = listGetter(["facilityTypes"], () => rowsOf("facilityTypes"));
+  const facility = (facilityId: Id) => row("facilities", "facilityId", facilityId);
+  const facilityType = (facilityTypeId: Id) => row("facilityTypes", "facilityTypeId", facilityTypeId);
   const facilityName = (facilityId: Id) => label("facilities", "facilityId", facilityId, FACILITY_LABEL_FIELDS);
+
+  const productStoreName = (productStoreId: Id) =>
+    label("productStores", "productStoreId", productStoreId, PRODUCT_STORE_LABEL_FIELDS);
 
   const productStoreFacilities = listGetter(["productStoreFacilities"], (productStoreId: Id) =>
     productStoreId ? rowsOf("productStoreFacilities").filter((record) => record.productStoreId === productStoreId) : []);
@@ -255,6 +279,8 @@ export function useSeedData() {
 
   const shipmentMethodDescription = (shipmentMethodTypeId: Id) =>
     label("shipmentMethodTypes", "shipmentMethodTypeId", shipmentMethodTypeId, SHIPMENT_METHOD_LABEL_FIELDS);
+  const shipmentMethodsByCarrier = listGetter(["carrierShipmentMethods"], (carrierPartyId: Id) =>
+    carrierPartyId ? rowsOf("carrierShipmentMethods").filter((method) => method.partyId === carrierPartyId) : []);
   const shipmentMethodOptions = listGetter(["shipmentMethodTypes"], () => rowsOf("shipmentMethodTypes").map((record) => ({
     id: record.shipmentMethodTypeId as string,
     label: labelOf(record, record.shipmentMethodTypeId, SHIPMENT_METHOD_LABEL_FIELDS),
@@ -269,9 +295,27 @@ export function useSeedData() {
     label("communicationEventTypes", "communicationEventTypeId", id);
   const partyRelationshipDescription = (id: Id) =>
     label("partyRelationshipTypes", "partyRelationshipTypeId", id, ["description", "partyRelationshipName"]);
+  const orderAdjustmentTypeDescription = (id: Id) => label("orderAdjustmentTypes", "orderAdjustmentTypeId", id);
+
+  /**
+   * The transitions out of `statusId` in one status flow, in their authored sequence. Flows reuse
+   * status ids (a transfer order's flow also leaves ITEM_CREATED), so only one flow is read: the
+   * `Default` flow unless `statusFlowId` names another, as OMS validates an order without one.
+   */
+  const allowedTransitions = listGetter(["statusFlowTransitions", "statuses"], (statusId: Id, statusFlowId?: Id) => {
+    const flowId = statusFlowId || DEFAULT_STATUS_FLOW_ID;
+    if (!statusId) return [];
+    return rowsOf("statusFlowTransitions")
+      .filter((transition) => transition.statusFlowId === flowId && transition.statusId === statusId)
+      .map((transition) => ({ ...transition, toStatusDescription: statusDescription(transition.toStatusId) }))
+      .sort(byTransitionSequence);
+  });
+
+  const shopifyShops = listGetter(["shopifyShops"], () => rowsOf("shopifyShops"));
 
   const shopifyShopLocations = listGetter(["shopifyShopLocations"], () => rowsOf("shopifyShopLocations"));
 
+  const geoName = (geoId: Id) => label("geos", "geoId", geoId, ["geoName"]);
   const countries = listGetter(["geos"], () =>
     rowsOf("geos").filter((geo) => geo.geoTypeEnumId === "GEOT_COUNTRY").sort(byGeoName));
   const states = listGetter(["geos"], () => rowsOf("geos")
@@ -292,6 +336,7 @@ export function useSeedData() {
 
   const getProductStores = () => loadRows("productStores");
   const getFacilities = () => loadRows("facilities");
+  const getFacilityTypes = () => loadRows("facilityTypes");
   const getGeos = () => loadRows("geos");
   const getPaymentMethodTypes = () => loadRows("paymentMethodTypes");
 
@@ -317,6 +362,7 @@ export function useSeedData() {
   }
 
   return {
+    allowedTransitions,
     carrierName,
     carriers,
     communicationEventTypeDescription,
@@ -328,22 +374,31 @@ export function useSeedData() {
     enums,
     enumsByParentType,
     enumsByType,
+    facilities,
+    facility,
     facilityName,
+    facilityType,
+    facilityTypes,
+    geoName,
     geos,
+    orderAdjustmentTypeDescription,
     orderIdentificationTypeOptions,
     partyRelationshipDescription,
     partyRelationshipTypes,
     paymentMethodDescription,
     paymentMethodTypes,
     productStoreFacilities,
+    productStoreName,
     returnItemTypeDescription,
     returnReasonDescription,
     returnTypeDescription,
     roleTypes,
     shipmentMethodDescription,
     shipmentMethodOptions,
+    shipmentMethodsByCarrier,
     shipmentMethodTypes,
     shopifyShopLocations,
+    shopifyShops,
     states,
     statesForCountry,
     statusDescription,
@@ -353,6 +408,7 @@ export function useSeedData() {
     getFacilities,
     getEnumsByType,
     getFacilityParentTypeIds,
+    getFacilityTypes,
     getGeos,
     getPaymentMethodTypes,
     getProductStoreFacilities,
@@ -360,3 +416,12 @@ export function useSeedData() {
     getStatesForCountry,
   };
 }
+
+export type SeedData = ReturnType<typeof useSeedData>;
+
+/**
+ * The seed lookups as a plain object, for stores, services and utils, which do not call
+ * composables. Every getter reads the shared module-level tables, so this and `useSeedData()`
+ * answer the same.
+ */
+export const seedData: SeedData = useSeedData();
