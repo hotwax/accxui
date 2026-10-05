@@ -82,7 +82,14 @@ export function createSyncHarness(getDb: (omsInstance: string) => BaseDB): SyncH
   let timer: ReturnType<typeof setInterval> | null = null;
   let activeTick: Promise<void> | null = null;
   let activeTickForced = false;
+  let activeTickScope: "view" | "all" = "view";
+  /** `viewGeneration` at the moment the running tick chose its domains. */
+  let activeTickGeneration = 0;
   let queuedForcedTick: Promise<void> | null = null;
+  /** Read when the queued pass starts, so a later "all" request can widen a queued "view" pass. */
+  let queuedForcedScope: "view" | "all" = "view";
+  /** Bumped by `setDomains`, so a forced pass knows whether a running one still covers its set. */
+  let viewGeneration = 0;
 
   /** Every active domain, base first, one entry per activation. */
   function activeDomains(): ActiveDomain[] {
@@ -199,6 +206,7 @@ export function createSyncHarness(getDb: (omsInstance: string) => BaseDB): SyncH
 
   async function executeTick(force: boolean, scope: "view" | "all", propagateErrors: boolean): Promise<void> {
     const now = Date.now();
+    activeTickGeneration = viewGeneration;
     const due = force
       ? (scope === "all" ? activeDomains() : viewDomains)
       : dueDomains(activeDomains(), lastRunAt, now, (entry) => effectiveInterval(entry, getSyncDomain(entry.name)));
@@ -228,6 +236,8 @@ export function createSyncHarness(getDb: (omsInstance: string) => BaseDB): SyncH
 
   function beginTick(force: boolean, scope: "view" | "all", propagateErrors: boolean): Promise<void> {
     activeTickForced = force;
+    activeTickScope = scope;
+    activeTickGeneration = viewGeneration;
     // Deferred one microtask so `tracked` is assigned before its cleanup can run, even for a tick
     // with nothing due that completes at once.
     const operation = Promise.resolve().then(() => executeTick(force, scope, propagateErrors));
@@ -245,18 +255,28 @@ export function createSyncHarness(getDb: (omsInstance: string) => BaseDB): SyncH
   /**
    * A scheduled tick shares whatever tick is running. A FORCED pass never does unless the running
    * one is forced too: it queues behind it, so a manual refresh issued mid-tick still gets a pass
-   * over the domains it asked for instead of resolving against a pass that skipped them.
+   * over the domains it asked for instead of resolving against a pass that skipped them. It shares
+   * a running forced pass only when that pass covers its scope and chose its domains after the last
+   * `setDomains`. One queued pass serves every later forced request; an "all" request widens it.
    */
   function tick(force = false, propagateErrors = false, scope: "view" | "all" = "view"): Promise<void> {
     if (!ctx.token) return Promise.resolve(); // wait until start() supplies a token
     if (!activeTick) return beginTick(force, scope, propagateErrors);
-    if (!force || (activeTickForced && scope === "view")) return activeTick;
-    if (queuedForcedTick) return queuedForcedTick;
+    if (!force) return activeTick;
+    const runningCovers = activeTickForced
+      && (activeTickScope === "all" || scope === "view")
+      && activeTickGeneration === viewGeneration;
+    if (runningCovers) return activeTick;
+    if (queuedForcedTick) {
+      if (scope === "all") queuedForcedScope = "all";
+      return queuedForcedTick;
+    }
 
     const predecessor = activeTick;
+    queuedForcedScope = scope;
     const queued = predecessor
       .catch(() => undefined)
-      .then(() => beginTick(true, scope, propagateErrors))
+      .then(() => beginTick(true, queuedForcedScope, propagateErrors))
       .finally(() => {
         if (queuedForcedTick === queued) queuedForcedTick = null;
       });
@@ -293,6 +313,7 @@ export function createSyncHarness(getDb: (omsInstance: string) => BaseDB): SyncH
 
   function setDomains(domains: ActiveDomain[]): void {
     viewDomains = domains ?? [];
+    viewGeneration += 1;
     // Drop run history only for activations no longer active, so a re-activation bootstraps again
     // while the start set keeps its once-per-login clock.
     const keys = new Set(activeDomains().map(activationKey));

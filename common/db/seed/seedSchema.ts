@@ -113,6 +113,8 @@ export const commonSchema = defineSchema({
       geoCode: "text",
       geoCodeAlpha2: "text",
       geoCodeAlpha3: "text",
+      // State pickers label a state "Name (abbrev)" from this.
+      wellKnownText: "text",
     },
     indexes: ["geoTypeEnumId", "geoCode"],
   }),

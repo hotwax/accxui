@@ -142,6 +142,61 @@ describe("createSyncHarness lifecycle", () => {
     harness.stop();
   });
 
+  it("widens a queued forced view pass when Refresh all lands behind it", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    let calls = 0;
+    const seed = domain({ name: "seed" });
+    const live = domain({
+      name: "live",
+      syncClass: "A",
+      intervalMs: 60_000,
+      sync: vi.fn(async () => { calls += 1; if (calls === 1) await gate; return 1; }),
+    });
+    registerSyncDomain(seed); registerSyncDomain(live);
+    const harness = createSyncHarness(stubDb);
+    harness.setDomains([{ name: "live" }]);
+
+    const starting = harness.start({ ...START });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const viewPass = harness.syncNow(); // queues a view pass behind the start tick
+    const allPass = harness.syncAll(); // must not resolve against that view-only pass
+    release();
+    await starting;
+    await Promise.all([viewPass, allPass]);
+
+    expect(seed.sync).toHaveBeenCalledTimes(2);
+    expect(live.sync).toHaveBeenCalledTimes(2);
+    harness.stop();
+  });
+
+  it("does not let a forced pass share a running one that picked its domains before setDomains", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    let calls = 0;
+    const first = domain({
+      name: "first",
+      syncClass: "A",
+      intervalMs: 60_000,
+      sync: vi.fn(async () => { calls += 1; if (calls === 1) await gate; return 1; }),
+    });
+    const second = domain({ name: "second", syncClass: "A", intervalMs: 60_000 });
+    registerSyncDomain(first); registerSyncDomain(second);
+    const harness = createSyncHarness(stubDb);
+
+    await harness.start({ ...START, domains: [] });
+    harness.setDomains([{ name: "first" }]);
+    const running = harness.syncNow(); // forced pass over [first], held inside `sync`
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    harness.setDomains([{ name: "second" }]);
+    const later = harness.syncNow();
+    release();
+    await Promise.all([running, later]);
+
+    expect(second.sync).toHaveBeenCalledTimes(1);
+    harness.stop();
+  });
+
   /**
    * Write-through-only domains are registered and listed but must never be ticked. "Activate
    * everything" therefore has to mean "everything of class A or B", or a class-C domain would be
