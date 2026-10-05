@@ -34,23 +34,32 @@ export class BaseDB extends Dexie {
   }
 }
 
+/** The key under which a database records the schema version it was built with. */
+const SCHEMA_VERSION_KEY = "schemaVersion";
+
 /**
  * Wipe all data tables in the given Dexie instance on logout.
+ *
+ * Keeps the schema version record, which still describes the emptied database. Without it the next
+ * realm to open the database — the sync worker the next login starts — takes it for an unrecorded
+ * build and rebuilds it, dropping whatever the main thread wrote first.
  */
 export async function clearDatabaseTables(db: BaseDB): Promise<void> {
   try {
     await db.transaction("rw", db.getTableNames(), async () => {
       for (const tableName of db.getTableNames()) {
-        await db.table(tableName).clear();
+        if (tableName === "syncMeta") {
+          const keys = await db.syncMeta.toCollection().primaryKeys();
+          await db.syncMeta.bulkDelete(keys.filter((key) => key !== SCHEMA_VERSION_KEY));
+        } else {
+          await db.table(tableName).clear();
+        }
       }
     });
   } catch (error) {
     console.error(`[db] Failed to clear tables for ${db.name}:`, error);
   }
 }
-
-/** The key under which a database records the schema version it was built with. */
-const SCHEMA_VERSION_KEY = "schemaVersion";
 
 /**
  * Databases whose declared version has already been verified in this realm, keyed by database name.

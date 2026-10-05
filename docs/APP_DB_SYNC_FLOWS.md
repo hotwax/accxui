@@ -952,7 +952,7 @@ flowchart TD
       L5 --> L6["terminate() — kills the worker AND its timer"]
       L6 --> L7["serviceState.running = false"]
       L7 --> L8["clearSeedTables()<br/>unsubscribe every useSeedData live table, empty the map"]
-      L8 --> L9["clearDatabaseTables(db.raw())<br/>rw txn over every table, never blocks logout"]
+      L8 --> L9["clearDatabaseTables(db.raw())<br/>rw txn over every table, keeps syncMeta['schemaVersion'],<br/>never blocks logout"]
     end
 
     subgraph sw["OMS instance switch"]
