@@ -4,6 +4,7 @@ const harnessStub = vi.hoisted(() => ({
   start: vi.fn(async () => {}),
   setDomains: vi.fn(async () => {}),
   syncNow: vi.fn(async () => {}),
+  syncAll: vi.fn(async () => {}),
   syncDomainNow: vi.fn(async () => 3),
   refetchOne: vi.fn(async () => 1),
   domains: vi.fn(async () => []),
@@ -420,5 +421,36 @@ describe("syncDomainsError", () => {
     await sync.syncNow();
 
     expect(harnessStub.syncNow).toHaveBeenCalled();
+  });
+});
+
+describe("activation and refresh routing", () => {
+  beforeEach(() => {
+    __resetErrorState();
+    harnessStub.setDomains.mockClear();
+    harnessStub.syncAll.mockClear();
+    harnessStub.syncNow.mockClear();
+  });
+
+  it("hands the worker a screen's activation made before the sync started", async () => {
+    const sync = setupAppDbSync({ db: fakeAppDb(), createSyncService });
+    await sync.activateSyncDomains([{ name: "inventoryEvent", args: { shopId: "S" } }], "deepLink:1");
+    expect(harnessStub.setDomains).not.toHaveBeenCalled();
+
+    await sync.startAppDbSync();
+
+    expect(harnessStub.setDomains).toHaveBeenCalledWith([{ name: "inventoryEvent", args: { shopId: "S" } }]);
+    await sync.stopAppDbSync();
+  });
+
+  it("routes Refresh all to every active domain, not just the screen's", async () => {
+    const sync = setupAppDbSync({ db: fakeAppDb(), createSyncService });
+    await sync.startAppDbSync();
+
+    await sync.resyncReferenceData();
+
+    expect(harnessStub.syncAll).toHaveBeenCalledTimes(1);
+    expect(harnessStub.syncNow).not.toHaveBeenCalled();
+    await sync.stopAppDbSync();
   });
 });

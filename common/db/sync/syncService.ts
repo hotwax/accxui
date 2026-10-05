@@ -52,8 +52,10 @@ export interface SyncService {
   start: () => Promise<void>;
   /** Change the activated domain set without respawning the worker. */
   setDomains: (domains: ActiveDomain[]) => Promise<void>;
-  /** Force every activated domain to run now. */
+  /** Force the screen-activated domains to run now. */
   syncNow: () => Promise<void>;
+  /** Force every active domain — the login seed set and the screen's — to run now. */
+  syncAll: () => Promise<void>;
   /** Force one domain to re-sync now. */
   syncDomainNow: (domain: string) => Promise<number>;
   /** After a successful mutation: refetch that record by PK and upsert it into the cache. */
@@ -185,6 +187,12 @@ export function createSyncService(opts: SyncServiceOptions): SyncService {
   let tokenWatch: ReturnType<typeof setInterval> | null = null;
   let lastToken = "";
   let starting: Promise<void> | null = null;
+  /**
+   * The screen's domain set, held until the worker exists. A view that activates during boot (a
+   * deep link) runs before the Comlink handle does; dropping its set there left that screen
+   * polling nothing for the whole visit.
+   */
+  let viewDomains: ActiveDomain[] | null = null;
   // Bumped on every start()/stop() so a terminated attempt's late worker message (queued before
   // teardown, delivered after) is ignored rather than mutating state past that teardown.
   let startGeneration = 0;
@@ -251,6 +259,9 @@ export function createSyncService(opts: SyncServiceOptions): SyncService {
       publisher = createTokenPublisher();
       lastToken = commonUtil.getToken() || "";
 
+      // Before start(): the worker handles calls in order, so its first pass already covers them.
+      if (viewDomains) await api.setDomains(viewDomains);
+
       await api.start({
         maargUrl: commonUtil.getMaargURL(),
         token: lastToken,
@@ -282,13 +293,25 @@ export function createSyncService(opts: SyncServiceOptions): SyncService {
     if (publisher) { publisher.close(); publisher = null; }
     if (terminate) { terminate(); terminate = null; } // kills the worker + its timer
     harness = null;
+    viewDomains = null;
     serviceState.running = false;
   }
 
   return {
     start,
-    setDomains: async (domains) => { if (harness) await harness.setDomains(domains); },
-    syncNow: async () => { if (harness) await harness.syncNow(); },
+    setDomains: async (domains) => {
+      viewDomains = domains;
+      if (harness) await harness.setDomains(domains);
+    },
+    syncNow: async () => {
+      // Wait out a start in flight: its handle is not usable yet, and the refresh must not vanish.
+      if (!harness && starting) await starting.catch(() => undefined);
+      if (harness) await harness.syncNow();
+    },
+    syncAll: async () => {
+      if (!harness && starting) await starting.catch(() => undefined);
+      if (harness) await harness.syncAll();
+    },
     syncDomainNow: async (domain) => (harness ? harness.syncDomainNow(domain) : 0),
     refetchOne: async (domain, pk) => (harness ? harness.refetchOne({ domain, pk }) : 0),
     catalog: async () => (harness ? harness.catalog() : []),

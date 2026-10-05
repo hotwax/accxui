@@ -184,3 +184,35 @@ describe("diffStaleKeys with compound keys", () => {
     expect(diffStaleKeys([["AB", "C"]], [["A", "BC"]])).toEqual([["AB", "C"]]);
   });
 });
+
+describe("structured fields and key stand-ins", () => {
+  it("keeps an empty structured list as [] rather than dropping it", () => {
+    const entity = defineEntity({
+      primaryKey: "id",
+      fields: { id: "text", items: "structured" },
+    });
+    expect(projectRow({ id: "1", items: [] }, entity, 0)?.items).toEqual([]);
+    expect(projectRow({ id: "1" }, entity, 0)).not.toHaveProperty("items");
+  });
+
+  it("stores a declared stand-in for an absent compound-key member", () => {
+    const entity = defineEntity({
+      primaryKey: "dataDocumentId,dataFeedId",
+      fields: { dataDocumentId: "text", dataFeedId: "text" },
+      keyDefaults: { dataFeedId: "" },
+    });
+    const row = projectRow({ dataDocumentId: "DOC" }, entity, 0);
+    expect(row?.dataFeedId).toBe("");
+    expect(entityKeyOf(row!, entity)).toEqual(["DOC", ""]);
+    // A member with no stand-in is still required.
+    expect(projectRow({ dataFeedId: "F" }, entity, 0)).toBeNull();
+  });
+
+  it("rejects a stand-in for a field outside the primary key", () => {
+    expect(() => defineEntity({
+      primaryKey: "id",
+      fields: { id: "text", other: "text" },
+      keyDefaults: { other: "" },
+    })).toThrow(/not a primary-key field/);
+  });
+});

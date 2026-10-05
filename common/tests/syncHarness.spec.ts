@@ -66,10 +66,79 @@ describe("createSyncHarness lifecycle", () => {
     const harness = createSyncHarness(stubDb);
 
     await harness.start({ ...START, domains: [{ name: "a" }] });
-    await harness.syncNow();
+    await harness.syncAll();
 
-    // syncNow forces, so it runs again — the point is the CLOCK was set, checked below.
+    // syncAll forces, so it runs again — the point is the CLOCK was set, checked below.
     expect(a.sync).toHaveBeenCalledTimes(2);
+    harness.stop();
+  });
+
+  it("forces only the screen's domains on syncNow, and every active domain on syncAll", async () => {
+    const seed = domain({ name: "seed" });
+    const live = domain({ name: "live", syncClass: "A", intervalMs: 60_000 });
+    registerSyncDomain(seed); registerSyncDomain(live);
+    const harness = createSyncHarness(stubDb);
+
+    await harness.start({ ...START });
+    harness.setDomains([{ name: "live" }]);
+    await harness.syncNow();
+    expect(seed.sync).toHaveBeenCalledTimes(1);
+    expect(live.sync).toHaveBeenCalledTimes(1);
+
+    await harness.syncAll();
+    expect(seed.sync).toHaveBeenCalledTimes(2);
+    expect(live.sync).toHaveBeenCalledTimes(2);
+    harness.stop();
+  });
+
+  it("keeps the start set active when a screen replaces its domains", async () => {
+    const seed = domain({ name: "seed" });
+    registerSyncDomain(seed);
+    const harness = createSyncHarness(stubDb);
+
+    await harness.start({ ...START });
+    harness.setDomains([]);
+    await harness.syncAll();
+
+    expect(seed.sync).toHaveBeenCalledTimes(2);
+    harness.stop();
+  });
+
+  it("holds a screen's domains set before start and runs them on the first tick", async () => {
+    const live = domain({ name: "live", syncClass: "A", intervalMs: 60_000 });
+    registerSyncDomain(live);
+    const harness = createSyncHarness(stubDb);
+
+    harness.setDomains([{ name: "live" }]);
+    await harness.start({ ...START, domains: [] });
+
+    expect(live.sync).toHaveBeenCalledTimes(1);
+    harness.stop();
+  });
+
+  it("queues a forced pass behind a running scheduled tick instead of dropping it", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    let calls = 0;
+    const live = domain({
+      name: "live",
+      syncClass: "A",
+      intervalMs: 60_000,
+      sync: vi.fn(async () => { calls += 1; if (calls === 1) await gate; return 1; }),
+    });
+    registerSyncDomain(live);
+    const harness = createSyncHarness(stubDb);
+    harness.setDomains([{ name: "live" }]);
+
+    const starting = harness.start({ ...START, domains: [] });
+    await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const forced = harness.syncNow(); // lands while the first tick is still inside `sync`
+    release();
+    await starting;
+    await forced;
+
+    expect(live.sync).toHaveBeenCalledTimes(2);
     harness.stop();
   });
 

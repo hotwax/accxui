@@ -71,6 +71,7 @@ function build(entities: Record<string, Entity>, seedTables: ReadonlySet<string>
           fields: entity.fields,
           indexes: [...entity.indexes, ...added],
           ...(entity.rename ? { rename: entity.rename } : {}),
+          ...(entity.keyDefaults ? { keyDefaults: entity.keyDefaults } : {}),
         });
       }
 

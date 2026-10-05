@@ -17,21 +17,21 @@ export type DbKey = string | number | Array<string | number>;
 export type FieldKind = "text" | "count" | "date" | "structured";
 
 export interface QueryOptions {
-  /** Filter by an indexed field via where(scope.field).equals(scope.value). */
+  /** The primary partition. Combined with `equals`: every equality holds on the result. */
   scope?: { field: string; value: unknown };
-  /** Multiple equalities resolved through an indexed field. */
+  /** Further equalities. Resolved through a compound index when one is declared, else in memory. */
   equals?: Record<string, unknown>;
   /** Restrict to rows on or after this timestamp millis. */
   since?: number;
   /** Restrict to rows on or before this timestamp millis. */
   until?: number;
-  /** Date field to apply since/until bounds to. */
+  /** Date field the result is ordered by (newest first by default) and since/until bound. */
   dateField?: string;
   /** In-memory predicate applied to the matched set. */
   filter?: (row: DbRow) => boolean;
   /** Maximum number of records to return. */
   limit?: number;
-  /** Sort order for indexed queries ('asc' | 'desc'). Default: 'desc' when dateField is specified. */
+  /** Sort order. Default: 'desc' (newest first) when `dateField` is given, otherwise storage order. */
   order?: "asc" | "desc";
 }
 

@@ -218,6 +218,9 @@ export function setupAppDbSync(config: AppDbSyncConfig): AppDbSync {
       },
     }) as SyncService;
     service = attemptService;
+    // A screen that activated before the service existed (a deep link lands before App.vue starts
+    // the sync) must not lose its set; the service holds it until its worker is up.
+    if (activeSyncDomains.value.length) void attemptService.setDomains(activeSyncDomains.value);
 
     let succeeded = false;
     const readiness = attemptService
@@ -302,13 +305,14 @@ export function setupAppDbSync(config: AppDbSyncConfig): AppDbSync {
     await service.syncDomainNow(domain);
   }
 
+  /** "Refresh all": every active domain, including the login seed set, not just the screen's. */
   async function resyncReferenceData(): Promise<void> {
     await clearSyncMarkers();
     await whenReady();
     if (!service) {
       throw new Error(bootstrapState.errors.__start ?? "The reference-cache service is unavailable.");
     }
-    await service.syncNow();
+    await service.syncAll();
   }
 
   return {

@@ -214,7 +214,9 @@ export async function pageAll(options: {
 
     let newKeysCount = 0;
     for (const row of rows) {
-      const key = keyOf ? keyOf(row) : undefined;
+      // With no `keyOf` the record's own JSON is its identity. Rows a caller's `keyOf` cannot key are
+      // kept and still count as progress — otherwise a walk over such rows stops after one page.
+      const key = keyOf ? keyOf(row) : JSON.stringify(row);
       if (key) {
         if (!seenKeys.has(key)) {
           seenKeys.add(key);
@@ -223,6 +225,7 @@ export async function pageAll(options: {
         }
       } else {
         all.push(row);
+        newKeysCount++;
       }
     }
 
