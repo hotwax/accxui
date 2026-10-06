@@ -609,6 +609,17 @@ screen activates. It bumps a `viewGeneration` counter and drops `lastRunAt` only
 longer active: a re-activated domain bootstraps again, while the start set keeps its once-per-login
 clock. It is safe to call before `start()` — the set is simply held until the first tick.
 
+After `start()`, `setDomains` also runs the screen's newly due activations **at once**
+(`runNewActivations`), instead of leaving them for the next tick or queued behind a running pass —
+after login that pass is the whole seed set. They run one after another, alongside any running
+pass; `runDomain` still serialises work on any one domain. While one is in flight, a scheduled tick
+skips it and a forced pass waits on it instead of fetching again, so the refresh a screen issues
+right after activating costs one fetch, not two. An activation the screen drops before its turn is
+skipped.
+
+`setDomains` posts `activations-reset` naming each domain whose activation it dropped, unless an
+activation of that domain that was already active survives (the start set, say).
+
 `start(payload)` builds `ctx`, sets the start set, runs `ensureDbReady` (posting a `__start`
 `sync-error` if that throws), clears `lastRunAt`, runs one tick immediately, then
 `setInterval(tick, baseTickMs)`. A tick does nothing until a token is held.
@@ -645,7 +656,14 @@ refetch can target one domain at once:
 **`lastRunAt` stamping is deliberate, not incidental** (`pollingWorkerHarness.ts`): a run is
 stamped when it was forced, when the activation has a cadence, or when the domain actually recorded
 `loginSync:`. Otherwise the clock is left unset and the tick reports `retryPending: true`, so a
-class-B domain that returned nothing is retried on the next tick rather than marked done.
+class-B domain that returned nothing is retried rather than marked done.
+
+A domain with no cadence that fails, or returns without finishing, gets a `retryAt` of
+`RETRY_WITHOUT_INTERVAL_MS` (30 s) instead. It stays due until one pass completes, but scheduled
+ticks skip it until then, so an endpoint that keeps failing (a 403, a gateway page) is not hit on
+every 5 s tick. A domain with a cadence already waits its interval after a failure. Forced passes
+("Refresh", "Refresh all") ignore the wait, and a success, `start()` or the activation being
+dropped clears it.
 
 Messages the worker emits — `postMessage` for status, `BroadcastChannel(DB_SYNC_CHANNEL)` for
 "rows changed":
@@ -699,12 +717,16 @@ ignored rather than mutating state past that teardown.
 |---|---|---|
 | `running` | `start()` / `stop()` | a start attempt is in flight |
 | `lastSyncAt` | `sync-end`, successful `start()` | global; moves when *any* domain finishes |
-| `syncedAt[domain]` | `sync-end`, `refetch-end` | per domain: the `at` the worker stamped on its last completed pass |
+| `syncedAt[domain]` | `sync-end` (current only); removed on `activations-reset` and `stop()` | per domain: the `at` the worker stamped on the last completed pass of its **current** activation |
 | `written[domain]` | `sync-end`, `refetch-end` | rows written by that pass |
 | `errors[domain]` | `recordSyncError` / `clear*Error` | the visible message per domain (see below) |
 
 `syncedAt` exists because a screen asking "has *my* domain been fetched for this shop yet?" cannot
-answer that from `lastSyncAt`, which any other domain can move. `serviceState` is a Vue `reactive`,
+answer that from `lastSyncAt`, which any other domain can move. It only ever describes whatever
+holds the domain now. A `sync-end` with `current: false` is ignored (the pass was for a screen that
+has since left or re-scoped). An `activations-reset` removes the entry, so opening shop B after shop A
+waits for B's own pass. A `refetch-end` does not count, since one re-read record says nothing about
+the screen's set. `stop()` clears everything, so a new login starts unfetched. `serviceState` is a Vue `reactive`,
 so a `computed` reading `syncedAt[name]` before the key exists still tracks it and re-runs when the
 worker first writes it.
 
@@ -745,7 +767,7 @@ owns the one service handle, so it also owns the domain set that handle is polli
 | Export | Behavior |
 |---|---|
 | `createSyncDomainOwner(label)` | Returns a distinct owner id, `` `${label}:${n}` ``, for one screen **instance** |
-| `activateSyncDomains(domains, owner)` | Records `owner` as the holder, stores the set, clears stale errors for those domains, then `service.setDomains(domains)`. Idempotent — call again to re-scope |
+| `activateSyncDomains(domains, owner)` | Records `owner` as the holder, stores the set, clears stale errors for the domains it newly activates (one already active with the same args keeps its failure, since the worker does not re-run it), then `service.setDomains(domains)`. Idempotent — call again to re-scope |
 | `deactivateSyncDomains(owner?)` | Clears the set and calls `setDomains([])` — but **only if `owner` still holds the worker**. No owner means an unconditional clear |
 | `syncDomainsReady` | `Ref<boolean>`: true once the latest activation's `setDomains` resolved (or immediately when there is no service) |
 | `syncDomainsError` | `ComputedRef<string>`: the error of an *activated* domain, or `""` |

@@ -425,6 +425,10 @@ A forced pass never resolves against a pass that skipped its domains. A manual r
 mid-tick, or after `setDomains` changed the screen set, waits and gets its own pass. `setDomains`
 bumps `viewGeneration`, which is how a running forced pass is known to be stale.
 
+`setDomains` also starts the screen's newly due activations straight away, alongside any running
+pass, rather than on the next tick. A forced pass that reaches one of them while it is still in
+flight waits on it instead of running it again; a scheduled tick skips it.
+
 ### One pass
 
 ```mermaid
@@ -448,13 +452,13 @@ flowchart TD
     OK -- no --> COMP["completed = force<br/>|| effectiveInterval !== undefined<br/>|| hasSyncedThisLogin(db, name)"]
     COMP --> STAMP{"completed?"}
     STAMP -- yes --> S1["lastRunAt[activationKey] = now"]
-    STAMP -- no --> S2["leave clock unset — retried next tick"]
+    STAMP -- no --> S2["leave clock unset; retryAt = now + 30s"]
     S1 --> POST2["post sync-end { written, at, retryPending }"]
     S2 --> POST2
     POST2 --> BC["BroadcastChannel domain-synced"]
     OK -- yes --> ERRS{"has cadence?"}
     ERRS -- yes --> S3["stamp lastRunAt anyway — do not hot-loop a failing class-A domain"]
-    ERRS -- no --> S4["leave unset — class B retries next tick"]
+    ERRS -- no --> S4["leave unset; retryAt = now + 30s (class B retries then)"]
     S3 --> CLS["classifyError: 401 / unauthorized → post auth-error<br/>else post sync-error"]
     S4 --> CLS
     CLS --> LOOP
@@ -513,7 +517,7 @@ flowchart TD
     EMPT -- no --> REPL["defineCachedEntity(db, table, projection)<br/>.snapshotReplace(records, config.scopeOnSync)"]
     REPL --> MARK{"records.length === 0 || written > 0?"}
     MARK -- yes --> M1["markSyncedThisLogin(db, name)"]
-    MARK -- no --> M2["leave unmarked — the harness retries next tick"]
+    MARK -- no --> M2["leave unmarked — the harness retries after 30s"]
     M1 --> R["return written"]
     M2 --> R
 ```
@@ -1040,7 +1044,7 @@ Catalog source per app:
 
 | App | Source | Line |
 |---|---|---|
-| Company | `async () => (await syncService()?.catalog()) ?? []` — the worker registry | `views/Settings.vue` |
+| Company | `async () => catalogFrom(appSyncDomains)` — the list the worker registers, read without the worker (`workers/appSyncDomains.ts`) | `views/Settings.vue` |
 | Order Manager | `orderManagerDb.statusCatalog` — derived at `defineAppDb` time | `views/Settings.vue` |
 
 Actions are **injected, not imported**, because a status card must refresh through the same
@@ -1058,8 +1062,9 @@ flowchart TD
     GEN -- yes --> TY{"data.type"}
 
     TY -- auth-error --> AE["pushTokenIfChanged() immediately<br/>recordSyncError(domain, message, scope?)<br/>then opts.onAuthError(message)"]
-    TY -- sync-end --> SE["serviceState.written[domain] = written<br/>serviceState.syncedAt[domain] = at<br/>lastSyncAt = now<br/>clearDomainErrors(domain)"]
-    TY -- refetch-end --> RW["serviceState.written[domain] = written<br/>serviceState.syncedAt[domain] = at ?? now"]
+    TY -- sync-end --> SE["serviceState.written[domain] = written<br/>serviceState.syncedAt[domain] = at, unless current === false<br/>lastSyncAt = now<br/>clearDomainErrors(domain)"]
+    TY -- activations-reset --> AR["delete serviceState.syncedAt[domain]<br/>for each reset domain"]
+    TY -- refetch-end --> RW["serviceState.written[domain] = written<br/>(syncedAt untouched: one record is not a pass)"]
     RW --> RE{"scope present?"}
     RE -- yes --> RE1["clearScopeError(domain, scope)"]
     RE -- no --> RE2["clear nothing — a scopeless message<br/>cannot prove another scope recovered"]

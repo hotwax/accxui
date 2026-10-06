@@ -148,8 +148,12 @@ const { first: shop, hydrated } = useDb<any>("shopifyShops", () => ({ equals: { 
 const { records } = useDb<any>("productStoreFacilities", { scope: { field: "productStoreId", value: id } });
 ```
 
-Pass a **function** when the options depend on reactive state — it re-subscribes when they change.
-Pass a plain object when they're static.
+Pass a **function** when the options depend on reactive state — it re-subscribes when they change,
+and until the new query's first emit `records` is empty and `hydrated` is false, so shop A's rows
+never render under shop B. Pass a plain object when they're static.
+
+For a single-row read whose id may not be known yet, return `{ filter: () => false }` rather than
+`{}` while it is missing: `{}` reads the whole table, and `first` would be some other row.
 
 `useDb(table, options?)` reads the signed-in app database; `useDb(db, table, options?)` takes an
 explicit Dexie handle.
@@ -175,7 +179,7 @@ explicit Dexie handle.
 ```ts
 const { domains, totalRows, lastSyncedAt, refreshDomain, refreshAll } = useDbStatus(
   orderManagerDb.raw(),
-  orderManagerDb.statusCatalog,              // or: async () => (await syncService()?.catalog()) ?? []
+  orderManagerDb.statusCatalog,              // or: async () => catalogFrom(yourRegisteredDomains)
   { resyncDomain, resyncAll: resyncReferenceData },
 );
 ```
@@ -262,8 +266,10 @@ Two ways to fill a seed table differently from the framework:
   **name** and your endpoint, leaving the seed one out of `registerDomains`. Company does this for
   `statuses`: it picks the seed table, but registers `{ name: "status", listUrl: "oms/statuses" }`
   from `referenceDomains.ts` instead of the seed `admin/status` one, and filters it out through
-  `OVERRIDDEN_SEED_TABLES` in its worker entry. Company's status card uses the worker catalog
-  (`syncService()?.catalog()`), so it shows the domain that actually runs.
+  `OVERRIDDEN_SEED_TABLES` in `workers/appSyncDomains.ts`. Company's status card is built from that
+  same list (`catalogFrom(appSyncDomains)`), so it shows the domain that actually runs. Don't ask the
+  worker for it (`syncService()?.catalog()`): before the worker is up, or after it failed to start,
+  that is empty, and the card loses the per-domain Refresh exactly when it is the way back.
 - **Your own table under a seed name.** Declare it in your own schema and don't `pick` the seed one.
   The framework tracks provenance, so `appDb.statusCatalog` leaves it out instead of pointing it at
   the seed endpoint.
@@ -415,7 +421,7 @@ ignore the call, instead of wiping the domains the new view just switched on. Fo
 | `syncDomainsReady` | `Ref<boolean>` — the worker has accepted this activation |
 | `syncDomainsError` | `ComputedRef<string>` — an error from one of the *activated* domains, else `""`. Drive the screen's warning banner from this |
 | `syncNow()` | Force a pass over **this screen's** activated domains (a "refresh" button). Not the login seed set, and it clears no markers. Called mid-pass, it queues a fresh pass instead of resolving against the running one |
-| `serviceState.syncedAt[domain]` (from `@common/db`) | When that domain last finished a pass. Use it to tell "nothing for this shop" from "not fetched yet" |
+| `serviceState.syncedAt[domain]` (from `@common/db`) | When that domain last finished a pass **for its current activation**. Use it to tell "nothing for this shop" from "not fetched yet". It is removed when the screen leaves or re-scopes the domain, and cleared on logout |
 
 **One screen, one set.** There is one worker and one active set. If two features on one screen
 both need polling, build one combined list and activate it once, the way `useShopify` composes its
