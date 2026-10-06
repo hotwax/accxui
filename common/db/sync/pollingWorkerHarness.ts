@@ -19,6 +19,8 @@ import type { SyncContext, SyncDomain } from "../types";
 import {
   type ActiveDomain,
   activationKey,
+  type CatalogItem,
+  catalogFrom,
   dueDomains,
   effectiveInterval,
   getAllSyncDomains,
@@ -37,12 +39,7 @@ export interface HarnessStartPayload {
   domains?: ActiveDomain[];
 }
 
-export interface CatalogItem {
-  name: string;
-  table?: string;
-  label: string;
-  syncClass: "A" | "B" | "C";
-}
+export type { CatalogItem };
 
 export interface SyncHarness {
   start: (payload: HarnessStartPayload) => Promise<void>;
@@ -459,12 +456,7 @@ export function createSyncHarness(getDb: (omsInstance: string) => BaseDB): SyncH
   }
 
   function catalog(): CatalogItem[] {
-    return getAllSyncDomains().map((d) => ({
-      name: d.name,
-      ...(d.table ? { table: d.table } : {}),
-      label: d.label,
-      syncClass: d.syncClass,
-    }));
+    return catalogFrom(getAllSyncDomains());
   }
 
   return {
