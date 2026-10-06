@@ -167,13 +167,46 @@ describe("serviceState.syncedAt", () => {
     expect(serviceState.syncedAt.shopifyTransferSync).toBe(2_000);
   });
 
-  it("advances the timestamp on a targeted refetch", async () => {
+  // A screen waiting on syncedAt asks whether ITS set was fetched; one re-read record says nothing.
+  it("does not count a targeted refetch as a pass", async () => {
     const sync = setupAppDbSync({ db: fakeAppDb(), createSyncService });
     await sync.startAppDbSync();
 
     post({ type: "refetch-end", domain: "serviceJob", written: 1, scope: "jobName=x", at: 5_000 });
 
-    expect(serviceState.syncedAt.serviceJob).toBe(5_000);
+    expect(serviceState.syncedAt.serviceJob).toBeUndefined();
+  });
+
+  // Shop A's pass finishing after the screen moved to shop B must not mark B as fetched.
+  it("ignores a pass for an activation that is no longer current", async () => {
+    const sync = setupAppDbSync({ db: fakeAppDb(), createSyncService });
+    await sync.startAppDbSync();
+
+    post({ type: "sync-end", domain: "syncRun", written: 1, at: 1_000, current: false });
+
+    expect(serviceState.syncedAt.syncRun).toBeUndefined();
+  });
+
+  it("forgets a domain the worker reset when its screen left or re-scoped", async () => {
+    const sync = setupAppDbSync({ db: fakeAppDb(), createSyncService });
+    await sync.startAppDbSync();
+    post({ type: "sync-end", domain: "syncRun", written: 1, at: 1_000 });
+    post({ type: "sync-end", domain: "facility", written: 1, at: 1_000 });
+
+    post({ type: "activations-reset", domains: ["syncRun"] });
+
+    expect(serviceState.syncedAt.syncRun).toBeUndefined();
+    expect(serviceState.syncedAt.facility).toBe(1_000);
+  });
+
+  it("clears every domain when sync stops, so the next login starts unfetched", async () => {
+    const sync = setupAppDbSync({ db: fakeAppDb(), createSyncService });
+    await sync.startAppDbSync();
+    post({ type: "sync-end", domain: "syncRun", written: 1, at: 1_000 });
+
+    await sync.stopAppDbSync();
+
+    expect(serviceState.syncedAt).toEqual({});
   });
 });
 

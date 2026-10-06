@@ -82,6 +82,11 @@ export const serviceState = reactive({
    * Last completed pass per domain, epoch ms, taken from the `at` the worker stamps at the end of
    * the pass. Distinct from `lastSyncAt`, which is global: a screen asking "has MY domain been
    * fetched for this shop yet" cannot tell that from a timestamp some other domain moved.
+   *
+   * Only full passes of the domain's CURRENT activation count. An entry is removed when the screen
+   * that activated the domain leaves or re-scopes it (shop A to shop B), a pass that finishes for a
+   * screen that already left is ignored, a single-record refetch does not count, and `stop()` clears
+   * the lot. So a value always means "fetched for whatever holds this domain now".
    */
   syncedAt: {} as Record<string, number>,
   written: {} as Record<string, number>,
@@ -218,18 +223,19 @@ export function createSyncService(opts: SyncServiceOptions): SyncService {
     }
     if (data.type === "sync-end" && data.domain) {
       serviceState.written[String(data.domain)] = data.written ?? 0;
-      serviceState.syncedAt[String(data.domain)] = data.at ?? Date.now();
+      if (data.current !== false) serviceState.syncedAt[String(data.domain)] = data.at ?? Date.now();
       serviceState.lastSyncAt = Date.now();
       // A successful full snapshot verifies the whole domain and therefore every scoped row.
       clearDomainErrors(String(data.domain));
     } else if (data.type === "refetch-end" && data.domain) {
       serviceState.written[String(data.domain)] = data.written ?? 0;
-      serviceState.syncedAt[String(data.domain)] = data.at ?? Date.now();
       // A targeted read verifies only its own PK scope. A legacy message without scope cannot
       // safely prove that some other failed scope recovered, so it clears nothing.
       if (typeof data.scope === "string" && data.scope) {
         clearScopeError(String(data.domain), data.scope);
       }
+    } else if (data.type === "activations-reset" && Array.isArray(data.domains)) {
+      for (const domain of data.domains) delete serviceState.syncedAt[String(domain)];
     } else if (data.type === "sync-error" && data.domain) {
       const scope = typeof data.scope === "string" && data.scope ? data.scope : undefined;
       recordSyncError(String(data.domain), String(data.message ?? "failed"), scope);
@@ -295,6 +301,8 @@ export function createSyncService(opts: SyncServiceOptions): SyncService {
     harness = null;
     viewDomains = null;
     serviceState.running = false;
+    // The next login's passes, not this session's, decide what has been fetched.
+    for (const domain of Object.keys(serviceState.syncedAt)) delete serviceState.syncedAt[domain];
   }
 
   return {

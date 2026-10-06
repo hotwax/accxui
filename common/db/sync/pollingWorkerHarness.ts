@@ -186,7 +186,12 @@ export function createSyncHarness(getDb: (omsInstance: string) => BaseDB): SyncH
       const completed = force || interval !== undefined || await hasSyncedThisLogin(getDb(ctx.omsInstance), entry.name);
       const at = Date.now();
       if (completed) lastRunAt[clockKey] = at;
-      post({ type: "sync-end", domain: entry.name, written, at, retryPending: !completed });
+      // `current` is false when the screen that activated this pass has since left or re-scoped,
+      // so the main thread does not count it as a pass for whatever holds the domain now.
+      post({
+        type: "sync-end", domain: entry.name, written, at, retryPending: !completed,
+        key: clockKey, current: isActive(clockKey),
+      });
       syncChannel?.postMessage({ type: "domain-synced", domain: entry.name });
 
       return written as number;
@@ -325,6 +330,7 @@ export function createSyncHarness(getDb: (omsInstance: string) => BaseDB): SyncH
   }
 
   function setDomains(domains: ActiveDomain[]): void {
+    const before = activeDomains();
     viewDomains = domains ?? [];
     viewGeneration += 1;
     // Drop run history only for activations no longer active, so a re-activation bootstraps again
@@ -333,6 +339,14 @@ export function createSyncHarness(getDb: (omsInstance: string) => BaseDB): SyncH
     for (const key of Object.keys(lastRunAt)) {
       if (!keys.has(key)) delete lastRunAt[key];
     }
+    // A dropped activation's passes no longer answer "has this screen's data been fetched". Reset a
+    // domain unless an activation of it that was already active survives (the start set, say).
+    const kept = before.filter((entry) => keys.has(activationKey(entry)));
+    const reset = [...new Set(before
+      .filter((entry) => !keys.has(activationKey(entry)))
+      .map((entry) => entry.name)
+      .filter((name) => !kept.some((entry) => entry.name === name)))];
+    if (reset.length) post({ type: "activations-reset", domains: reset });
     runNewActivations();
   }
 

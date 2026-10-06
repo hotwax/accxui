@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("comlink", () => ({ expose: () => {} }));
 
@@ -341,6 +341,57 @@ describe("createSyncHarness screen activation", () => {
 
     expect(second.sync).not.toHaveBeenCalled();
     harness.stop();
+  });
+
+  describe("status messages", () => {
+    let posted: Record<string, any>[];
+    beforeEach(() => {
+      posted = [];
+      vi.stubGlobal("self", { postMessage: (msg: Record<string, any>) => posted.push(msg) });
+    });
+    afterEach(() => vi.unstubAllGlobals());
+
+    it("resets a domain whose screen activation was dropped or re-scoped", async () => {
+      registerSyncDomain(domain({ name: "live", syncClass: "A", intervalMs: 60_000 }));
+      const harness = createSyncHarness(stubDb);
+      await harness.start({ ...START, domains: [] });
+      harness.setDomains([{ name: "live", args: { shopId: "A" } }]);
+
+      harness.setDomains([{ name: "live", args: { shopId: "B" } }]);
+
+      expect(posted.filter((m) => m.type === "activations-reset")).toEqual([{ type: "activations-reset", domains: ["live"] }]);
+      harness.stop();
+    });
+
+    it("keeps a domain the start set still holds", async () => {
+      registerSyncDomain(domain({ name: "seed" }));
+      const harness = createSyncHarness(stubDb);
+      await harness.start({ ...START, domains: [{ name: "seed" }] });
+      harness.setDomains([{ name: "seed" }]);
+      await tick();
+
+      harness.setDomains([]);
+
+      expect(posted.some((m) => m.type === "activations-reset")).toBe(false);
+      harness.stop();
+    });
+
+    it("marks a pass that finished after its screen left as not current", async () => {
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => { release = resolve; });
+      registerSyncDomain(domain({ name: "live", syncClass: "A", intervalMs: 60_000, sync: vi.fn(async () => { await gate; return 1; }) }));
+      const harness = createSyncHarness(stubDb);
+      await harness.start({ ...START, domains: [] });
+      harness.setDomains([{ name: "live", args: { shopId: "A" } }]);
+      await tick();
+
+      harness.setDomains([]);
+      release();
+      await tick(); await tick();
+
+      expect(posted.find((m) => m.type === "sync-end" && m.domain === "live")).toMatchObject({ current: false });
+      harness.stop();
+    });
   });
 });
 
