@@ -55,6 +55,8 @@ export function setupAppDbSync(config: AppDbSyncConfig): AppDbSync {
   let service: SyncService | null = null;
   let starting: Promise<void> | null = null;
   let startGeneration = 0;
+  /** The wipe `stopAppDbSync` is running, which a start must wait out. */
+  let clearing: Promise<void> | null = null;
 
   function syncService(): SyncService | null {
     return service;
@@ -184,6 +186,19 @@ export function setupAppDbSync(config: AppDbSyncConfig): AppDbSync {
 
   function startAppDbSync(onSynced?: () => void): Promise<void> {
     if (starting) return starting;
+    // A worker started mid-wipe reads the old session's once-per-login markers, skips the seed, and
+    // the wipe then empties the tables behind it. An embedded login hits this: `updateToken` makes
+    // `isAuthenticated` true at once, so App.vue starts the sync while `postLogin` is still clearing.
+    if (clearing) {
+      const waiting: Promise<void> = clearing.then(() => {
+        // A stop since then dropped this start; a later start is not this one's to make.
+        if (starting !== waiting) return;
+        starting = null;
+        return startAppDbSync(onSynced);
+      });
+      starting = waiting;
+      return waiting;
+    }
     const generation = ++startGeneration;
 
     const factory = config.createSyncService ?? defaultCreateSyncService;
@@ -256,7 +271,13 @@ export function setupAppDbSync(config: AppDbSyncConfig): AppDbSync {
     starting = null;
     bootstrapState.running = false;
     clearSeedTables();
-    await clearDatabaseTables(config.db.raw()).catch(() => {});
+    // Chained so a start waiting on `clearing` also waits out an earlier wipe still running.
+    const clear: Promise<void> = (clearing ?? Promise.resolve())
+      .then(() => clearDatabaseTables(config.db.raw()))
+      .catch(() => {});
+    clearing = clear;
+    await clear;
+    if (clearing === clear) clearing = null;
   }
 
   async function whenReady(): Promise<void> {

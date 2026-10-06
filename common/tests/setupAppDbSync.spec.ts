@@ -470,3 +470,71 @@ describe("activation and refresh routing", () => {
     await sync.stopAppDbSync();
   });
 });
+
+/**
+ * Embedded login: `updateToken` makes `isAuthenticated` true at once, so App.vue's watcher starts the
+ * sync while `postLogin`'s wipe is still clearing. A worker started then reads the previous session's
+ * once-per-login markers, skips the seed, and the wipe empties the tables behind it.
+ */
+describe("start during a database wipe", () => {
+  /** A database whose clear stays open until `finishClear` runs. */
+  const slowClearDb = () => {
+    let finishClear!: () => void;
+    const cleared = new Promise<void>((resolve) => { finishClear = resolve; });
+    const base = fakeAppDb().raw() as any;
+    const db = { raw: () => ({ ...base, transaction: async () => cleared }) } as unknown as AppDb;
+    return { db, finishClear };
+  };
+
+  beforeEach(() => {
+    __resetErrorState();
+    workerStub.onmessage = null;
+  });
+
+  it("waits for the wipe to finish before starting the worker", async () => {
+    const { db, finishClear } = slowClearDb();
+    const factory = vi.fn(createSyncService);
+    const sync = setupAppDbSync({ db, createSyncService: factory });
+
+    const stopping = sync.stopAppDbSync();
+    const starting = sync.startAppDbSync();
+    await Promise.resolve();
+    expect(factory).not.toHaveBeenCalled();
+
+    finishClear();
+    await stopping;
+    await starting;
+
+    expect(factory).toHaveBeenCalledTimes(1);
+    expect(sync.syncService()).not.toBeNull();
+  });
+
+  it("starts once when a second start joins the one waiting on the wipe", async () => {
+    const { db, finishClear } = slowClearDb();
+    const factory = vi.fn(createSyncService);
+    const sync = setupAppDbSync({ db, createSyncService: factory });
+
+    const stopping = sync.stopAppDbSync();
+    const fromWatcher = sync.startAppDbSync();
+    const fromPostLogin = sync.startAppDbSync();
+    finishClear();
+    await Promise.all([stopping, fromWatcher, fromPostLogin]);
+
+    expect(factory).toHaveBeenCalledTimes(1);
+  });
+
+  it("drops a waiting start that a later stop superseded", async () => {
+    const { db, finishClear } = slowClearDb();
+    const factory = vi.fn(createSyncService);
+    const sync = setupAppDbSync({ db, createSyncService: factory });
+
+    const firstStop = sync.stopAppDbSync();
+    const starting = sync.startAppDbSync();
+    const secondStop = sync.stopAppDbSync();
+    finishClear();
+    await Promise.all([firstStop, starting, secondStop]);
+
+    expect(factory).not.toHaveBeenCalled();
+    expect(sync.syncService()).toBeNull();
+  });
+});

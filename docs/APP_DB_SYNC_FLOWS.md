@@ -291,6 +291,12 @@ sleeping laptop) lands on `/login` with no 401 and so no `postLogout`. Without t
 previous session's rows and its once-per-login markers would still be there, and the next login
 would skip the seed. `postLogin` runs once per real login, never on a reload.
 
+A `startAppDbSync()` that arrives while that wipe is still clearing waits for it to finish before it
+starts the worker. An embedded login needs this: `updateToken` makes `isAuthenticated` true at once,
+so App.vue's watcher starts the sync before `postLogin`'s clear has committed. Without the wait, that
+worker would read the old markers, skip the seed, and the clear would then empty the tables behind
+it. A stop that lands during the wait drops the waiting start.
+
 ```mermaid
 flowchart TD
     PL["store/user.ts postLogin"] --> ST["await stopAppDbSync()<br/>(errors logged, never thrown)"]
@@ -1148,7 +1154,7 @@ flowchart TD
       L6 --> L6b["harness = null; held viewDomains = null"]
       L6b --> L7["serviceState.running = false"]
       L7 --> L8["clearSeedTables()<br/>unsubscribe every useSeedData live table, empty the map"]
-      L8 --> L9["clearDatabaseTables(db.raw())<br/>one rw txn over every table: clear() each data table;<br/>in syncMeta delete every key EXCEPT 'schemaVersion'<br/>errors are logged, never block logout"]
+      L8 --> L9["clearDatabaseTables(db.raw())<br/>one rw txn over every table: clear() each data table;<br/>in syncMeta delete every key EXCEPT 'schemaVersion'<br/>errors are logged, never block logout<br/>a start that arrives meanwhile waits for it (F-START)"]
     end
 
     subgraph sw["OMS instance switch"]
