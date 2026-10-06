@@ -67,6 +67,12 @@ export interface SyncHarness {
 }
 
 const DEFAULT_BASE_TICK_MS = 5_000;
+/**
+ * How long a domain with no `intervalMs` waits after a failed or unfinished pass before it is due
+ * again. It stays due until one pass completes, but the base tick is short for the screens' sake,
+ * and retrying every tick hammered an endpoint that kept failing (a 403, a gateway page).
+ */
+export const RETRY_WITHOUT_INTERVAL_MS = 30_000;
 
 export function createSyncHarness(getDb: (omsInstance: string) => BaseDB): SyncHarness {
   let ctx: SyncContext = { maargUrl: "", token: "", omsInstance: "", now: Date.now() };
@@ -102,6 +108,21 @@ export function createSyncHarness(getDb: (omsInstance: string) => BaseDB): SyncH
     return activeDomains().some((entry) => activationKey(entry) === key);
   }
   const lastRunAt: Record<string, number> = {};
+  /** When a domain with no interval, by activation key, may next be retried after a failed pass. */
+  const retryAt: Record<string, number> = {};
+  /** Due by its clock, and not waiting out a failure. Only scheduled runs wait; forced ones do not. */
+  function dueNow(entries: ActiveDomain[], now: number): ActiveDomain[] {
+    return dueDomains(entries, lastRunAt, now, (entry) => effectiveInterval(entry, getSyncDomain(entry.name)))
+      .filter((entry) => (retryAt[activationKey(entry)] ?? 0) <= now);
+  }
+  /** Forget the run and retry clocks of every activation key not in `keep` (all of them when omitted). */
+  function dropClocks(keep?: Set<string>): void {
+    for (const clock of [lastRunAt, retryAt]) {
+      for (const key of Object.keys(clock)) {
+        if (!keep?.has(key)) delete clock[key];
+      }
+    }
+  }
   /**
    * Screen activations `setDomains` started at once, by activation key, while they run.
    *
@@ -185,7 +206,12 @@ export function createSyncHarness(getDb: (omsInstance: string) => BaseDB): SyncH
       const interval = effectiveInterval(entry, domain);
       const completed = force || interval !== undefined || await hasSyncedThisLogin(getDb(ctx.omsInstance), entry.name);
       const at = Date.now();
-      if (completed) lastRunAt[clockKey] = at;
+      if (completed) {
+        lastRunAt[clockKey] = at;
+        delete retryAt[clockKey];
+      } else {
+        retryAt[clockKey] = at + RETRY_WITHOUT_INTERVAL_MS;
+      }
       // `current` is false when the screen that activated this pass has since left or re-scoped,
       // so the main thread does not count it as a pass for whatever holds the domain now.
       post({
@@ -196,7 +222,10 @@ export function createSyncHarness(getDb: (omsInstance: string) => BaseDB): SyncH
 
       return written as number;
     } catch (err) {
+      // A domain with an interval waits that interval before retrying; one without waits
+      // RETRY_WITHOUT_INTERVAL_MS, and stays due until a pass completes.
       if (effectiveInterval(entry, domain) !== undefined) lastRunAt[clockKey] = Date.now();
+      else retryAt[clockKey] = Date.now() + RETRY_WITHOUT_INTERVAL_MS;
       const { isAuth, message } = classifyError(err);
       post({ type: isAuth ? "auth-error" : "sync-error", domain: entry.name, message });
       if (propagateError) throw err;
@@ -221,7 +250,7 @@ export function createSyncHarness(getDb: (omsInstance: string) => BaseDB): SyncH
     activeTickGeneration = viewGeneration;
     const due = force
       ? (scope === "all" ? activeDomains() : viewDomains)
-      : dueDomains(activeDomains(), lastRunAt, now, (entry) => effectiveInterval(entry, getSyncDomain(entry.name)))
+      : dueNow(activeDomains(), now)
         .filter((entry) => !activationRuns.has(activationKey(entry)));
     if (!due.length) return;
     post({ type: "sync-cycle-start", domains: due.map(({ name }) => name), force });
@@ -324,7 +353,7 @@ export function createSyncHarness(getDb: (omsInstance: string) => BaseDB): SyncH
       post({ type: "sync-error", domain: "__start", message: error.message });
       throw error;
     }
-    for (const key of Object.keys(lastRunAt)) delete lastRunAt[key];
+    dropClocks();
     await tick();
     timer = setInterval(() => void tick(), baseTickMs);
   }
@@ -336,9 +365,7 @@ export function createSyncHarness(getDb: (omsInstance: string) => BaseDB): SyncH
     // Drop run history only for activations no longer active, so a re-activation bootstraps again
     // while the start set keeps its once-per-login clock.
     const keys = new Set(activeDomains().map(activationKey));
-    for (const key of Object.keys(lastRunAt)) {
-      if (!keys.has(key)) delete lastRunAt[key];
-    }
+    dropClocks(keys);
     // A dropped activation's passes no longer answer "has this screen's data been fetched". Reset a
     // domain unless an activation of it that was already active survives (the start set, say).
     const kept = before.filter((entry) => keys.has(activationKey(entry)));
@@ -358,7 +385,7 @@ export function createSyncHarness(getDb: (omsInstance: string) => BaseDB): SyncH
    */
   function runNewActivations(): void {
     if (!timer || !ctx.token) return;
-    const due = dueDomains(viewDomains, lastRunAt, Date.now(), (entry) => effectiveInterval(entry, getSyncDomain(entry.name)))
+    const due = dueNow(viewDomains, Date.now())
       .filter((entry) => !activationRuns.has(activationKey(entry)));
     let previous: Promise<unknown> = Promise.resolve();
     for (const entry of due) {

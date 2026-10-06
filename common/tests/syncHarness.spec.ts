@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("comlink", () => ({ expose: () => {} }));
 
-import { createSyncHarness } from "../db/sync/pollingWorkerHarness";
+import { createSyncHarness, RETRY_WITHOUT_INTERVAL_MS } from "../db/sync/pollingWorkerHarness";
 import { clearSyncRegistry, registerSyncDomain } from "../db/sync/syncRegistry";
 import type { SyncDomain } from "../db/types";
 
@@ -392,6 +392,89 @@ describe("createSyncHarness screen activation", () => {
       expect(posted.find((m) => m.type === "sync-end" && m.domain === "live")).toMatchObject({ current: false });
       harness.stop();
     });
+  });
+});
+
+describe("createSyncHarness retry of a domain with no interval", () => {
+  beforeEach(() => {
+    clearSyncRegistry();
+    vi.useFakeTimers();
+  });
+  afterEach(() => vi.useRealTimers());
+
+  /** A login marker, so a successful seed pass counts as finished. */
+  const markedDb = () => {
+    const db = stubDb();
+    db.syncMeta.get = async (key: string) => (key.startsWith("loginSync:") ? { synced: true } : undefined);
+    return db;
+  };
+
+  // A failing seed domain stays due until it succeeds, but not on every 5s tick.
+  it("waits RETRY_WITHOUT_INTERVAL_MS after a failed pass, then retries", async () => {
+    const seed = domain({ name: "seed", sync: vi.fn(async () => { throw new Error("403"); }) });
+    registerSyncDomain(seed);
+    const harness = createSyncHarness(markedDb);
+    await harness.start({ ...START, domains: [{ name: "seed" }] });
+    expect(seed.sync).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(RETRY_WITHOUT_INTERVAL_MS - 5_000);
+    expect(seed.sync).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(seed.sync).toHaveBeenCalledTimes(2);
+    harness.stop();
+  });
+
+  // The empty-fetch guard refuses a snapshot without writing the login marker: also unfinished.
+  it("waits the same after a pass that did not finish", async () => {
+    const seed = domain({ name: "seed" });
+    registerSyncDomain(seed);
+    const harness = createSyncHarness(stubDb);
+    await harness.start({ ...START, domains: [{ name: "seed" }] });
+
+    await vi.advanceTimersByTimeAsync(RETRY_WITHOUT_INTERVAL_MS - 5_000);
+    expect(seed.sync).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(seed.sync).toHaveBeenCalledTimes(2);
+    harness.stop();
+  });
+
+  it("does not run again once a retry succeeds", async () => {
+    const seed = domain({ name: "seed", sync: vi.fn().mockRejectedValueOnce(new Error("down")).mockResolvedValue(1) });
+    registerSyncDomain(seed);
+    const harness = createSyncHarness(markedDb);
+    await harness.start({ ...START, domains: [{ name: "seed" }] });
+
+    await vi.advanceTimersByTimeAsync(RETRY_WITHOUT_INTERVAL_MS * 3);
+
+    expect(seed.sync).toHaveBeenCalledTimes(2);
+    harness.stop();
+  });
+
+  // "Refresh" in Settings is the user's way out; it must not wait.
+  it("does not hold back a forced pass", async () => {
+    const seed = domain({ name: "seed", sync: vi.fn(async () => { throw new Error("403"); }) });
+    registerSyncDomain(seed);
+    const harness = createSyncHarness(markedDb);
+    await harness.start({ ...START, domains: [{ name: "seed" }] });
+
+    await harness.syncAll().catch(() => undefined);
+
+    expect(seed.sync).toHaveBeenCalledTimes(2);
+    harness.stop();
+  });
+
+  it("leaves a domain with an interval on its own interval", async () => {
+    const live = domain({ name: "live", syncClass: "A", intervalMs: 10_000, sync: vi.fn(async () => { throw new Error("down"); }) });
+    registerSyncDomain(live);
+    const harness = createSyncHarness(markedDb);
+    await harness.start({ ...START, domains: [{ name: "live" }] });
+
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    expect(live.sync).toHaveBeenCalledTimes(2);
+    harness.stop();
   });
 });
 
