@@ -14,6 +14,7 @@
 import { expose } from "comlink";
 import { type BaseDB, ensureDbReady, hasSyncedThisLogin } from "../storage/baseDb";
 import { DB_SYNC_CHANNEL, subscribeToken } from "./channels";
+import { cacheScopeKey } from "./reconciliation";
 import type { SyncContext, SyncDomain } from "../types";
 import {
   type ActiveDomain,
@@ -66,11 +67,6 @@ export interface SyncHarness {
 }
 
 const DEFAULT_BASE_TICK_MS = 5_000;
-
-/** A stable string for one PK, so two refetches of the same record share a queue. */
-function scopeKeyOf(pk: Record<string, unknown>): string {
-  return Object.keys(pk).sort().map((k) => `${k}=${String(pk[k])}`).join("|");
-}
 
 export function createSyncHarness(getDb: (omsInstance: string) => BaseDB): SyncHarness {
   let ctx: SyncContext = { maargUrl: "", token: "", omsInstance: "", now: Date.now() };
@@ -360,7 +356,9 @@ export function createSyncHarness(getDb: (omsInstance: string) => BaseDB): SyncH
   }
 
   async function refetchOne(request: { domain: string; pk: Record<string, unknown> }): Promise<number> {
-    const scope = scopeKeyOf(request.pk);
+    // The main thread records a failed refetch under cacheScopeKey(pk) too, so both sides must
+    // key the same PK identically or one failure is filed twice and only one copy ever clears.
+    const scope = cacheScopeKey(request.pk);
     const queueKey = `${request.domain}:${scope}`;
     const previous = refetchQueues.get(queueKey) ?? Promise.resolve();
     const operation = runSharedDomainOperation(

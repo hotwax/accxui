@@ -28,6 +28,7 @@ vi.mock("../db/sync/channels", () => ({
 }));
 
 import { setupAppDbSync } from "../db/sync/setupAppDbSync";
+import { cacheScopeKey } from "../db/sync/reconciliation";
 import { createSyncService, __resetErrorState, serviceState } from "../db/sync/syncService";
 import type { AppDb } from "../db/schema/defineAppDb";
 
@@ -96,6 +97,21 @@ describe("app db sync error surfacing", () => {
 
     // B recovered; A never did, so the domain stays in error carrying A's message.
     expect(serviceState.errors.carrier).toBe("first");
+  });
+
+  it("clears a failed mutation refetch once that record refetches successfully", async () => {
+    const sync = await start();
+    const pk = { enumId: "X" };
+    harnessStub.refetchOne.mockImplementationOnce(async () => {
+      // The worker reports the failure before its Comlink promise rejects.
+      post({ type: "sync-error", domain: "enum", scope: cacheScopeKey(pk), message: "boom" });
+      throw new Error("boom");
+    });
+
+    await expect(sync.refreshAfterMutation("enum", pk)).rejects.toThrow();
+    post({ type: "refetch-end", domain: "enum", scope: cacheScopeKey(pk), written: 1 });
+
+    expect(serviceState.errors.enum).toBeUndefined();
   });
 
   it("clears the whole domain when a full snapshot succeeds", async () => {

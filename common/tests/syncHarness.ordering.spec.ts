@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("comlink", () => ({ expose: () => {} }));
 
 import { createSyncHarness } from "../db/sync/pollingWorkerHarness";
+import { cacheScopeKey } from "../db/sync/reconciliation";
 import { clearSyncRegistry, registerSyncDomain } from "../db/sync/syncRegistry";
 import type { SyncDomain } from "../db/types";
 
@@ -117,6 +118,29 @@ describe("harness operation ordering", () => {
 
     await expect(harness.refetchOne({ domain: "d", pk: { id: "1" } })).rejects.toThrow("refetch failed");
     harness.stop();
+  });
+
+  /**
+   * The main thread files a failed refetch under cacheScopeKey(pk). The worker's status messages
+   * must use the same key, or the later refetch-end clears a different entry than the failure.
+   */
+  it("reports a refetch's scope with the shared cache scope key", async () => {
+    const posted: Record<string, unknown>[] = [];
+    vi.stubGlobal("self", { postMessage: (msg: Record<string, unknown>) => posted.push(msg) });
+    registerSyncDomain({
+      name: "d", label: "d", syncClass: "B",
+      sync: async () => 0,
+      refetchOne: async () => { throw new Error("refetch failed"); },
+    } as SyncDomain);
+
+    const harness = createSyncHarness(stubDb);
+    await harness.start({ ...START, domains: [] });
+    await harness.refetchOne({ domain: "d", pk: { b: "2", a: "1" } }).catch(() => {});
+    harness.stop();
+    vi.unstubAllGlobals();
+
+    const failure = posted.find((msg) => msg.type === "sync-error");
+    expect(failure?.scope).toBe(cacheScopeKey({ a: "1", b: "2" }));
   });
 
   it("rejects a refetch for a domain that has none", async () => {
