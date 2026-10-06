@@ -193,7 +193,8 @@ describe("createSyncHarness lifecycle", () => {
     release();
     await Promise.all([running, later]);
 
-    expect(second.sync).toHaveBeenCalledTimes(1);
+    // Once when activated, once more for the forced pass, which must not settle for the pass over [first].
+    expect(second.sync).toHaveBeenCalledTimes(2);
     harness.stop();
   });
 
@@ -263,6 +264,82 @@ describe("createSyncHarness setDomains", () => {
     await harness.syncNow();
 
     expect(a.sync).toHaveBeenCalledTimes(1);
+    harness.stop();
+  });
+});
+
+describe("createSyncHarness screen activation", () => {
+  beforeEach(() => clearSyncRegistry());
+
+  const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  // After login the seed pass can run for seconds; the screen's own data must not queue behind it.
+  it("runs a newly activated screen domain at once, alongside a running pass", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const seed = domain({ name: "seed" });
+    const live = domain({ name: "live", syncClass: "A", intervalMs: 60_000 });
+    registerSyncDomain(seed); registerSyncDomain(live);
+    const harness = createSyncHarness(stubDb);
+    await harness.start({ ...START });
+    (seed.sync as any).mockImplementation(async () => { await gate; return 1; });
+    const running = harness.syncAll(); // a long pass, held inside seed
+    await tick();
+
+    harness.setDomains([{ name: "live" }]);
+    await tick();
+
+    expect(live.sync).toHaveBeenCalledTimes(1);
+    release();
+    await running;
+    harness.stop();
+  });
+
+  // Screens ask for a refresh right after activating; that must not fetch the same rows twice.
+  it("lets a forced pass wait on the activation run instead of repeating it", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const live = domain({ name: "live", syncClass: "A", intervalMs: 60_000, sync: vi.fn(async () => { await gate; return 1; }) });
+    registerSyncDomain(live);
+    const harness = createSyncHarness(stubDb);
+    await harness.start({ ...START, domains: [] });
+
+    harness.setDomains([{ name: "live" }]);
+    const refresh = harness.syncNow();
+    release();
+    await refresh;
+
+    expect(live.sync).toHaveBeenCalledTimes(1);
+    harness.stop();
+  });
+
+  it("reports an activation run's failure to the forced pass waiting on it", async () => {
+    const live = domain({ name: "live", syncClass: "A", intervalMs: 60_000, sync: vi.fn(async () => { throw new Error("down"); }) });
+    registerSyncDomain(live);
+    const harness = createSyncHarness(stubDb);
+    await harness.start({ ...START, domains: [] });
+
+    harness.setDomains([{ name: "live" }]);
+
+    await expect(harness.syncNow()).rejects.toThrow(/live/);
+    harness.stop();
+  });
+
+  it("does not run an activation the screen dropped before its turn", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const first = domain({ name: "first", syncClass: "A", intervalMs: 60_000, sync: vi.fn(async () => { await gate; return 1; }) });
+    const second = domain({ name: "second", syncClass: "A", intervalMs: 60_000 });
+    registerSyncDomain(first); registerSyncDomain(second);
+    const harness = createSyncHarness(stubDb);
+    await harness.start({ ...START, domains: [] });
+
+    harness.setDomains([{ name: "first" }, { name: "second" }]);
+    harness.setDomains([{ name: "first" }]);
+    release();
+    await tick(); await tick();
+
+    expect(second.sync).not.toHaveBeenCalled();
     harness.stop();
   });
 });

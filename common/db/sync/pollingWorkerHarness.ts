@@ -97,7 +97,18 @@ export function createSyncHarness(getDb: (omsInstance: string) => BaseDB): SyncH
       return true;
     });
   }
+  /** Whether an activation, by key, is still active: a screen may leave or re-scope mid-run. */
+  function isActive(key: string): boolean {
+    return activeDomains().some((entry) => activationKey(entry) === key);
+  }
   const lastRunAt: Record<string, number> = {};
+  /**
+   * Screen activations `setDomains` started at once, by activation key, while they run.
+   *
+   * A pass that comes due meanwhile skips them, and a forced pass waits on them instead of fetching
+   * the same rows again: a screen typically asks for a refresh right after activating.
+   */
+  const activationRuns = new Map<string, Promise<number>>();
   const refetchQueues = new Map<string, Promise<void>>();
   const domainExclusiveQueues = new Map<string, Promise<void>>();
   const domainSharedOperations = new Map<string, Set<Promise<void>>>();
@@ -205,7 +216,8 @@ export function createSyncHarness(getDb: (omsInstance: string) => BaseDB): SyncH
     activeTickGeneration = viewGeneration;
     const due = force
       ? (scope === "all" ? activeDomains() : viewDomains)
-      : dueDomains(activeDomains(), lastRunAt, now, (entry) => effectiveInterval(entry, getSyncDomain(entry.name)));
+      : dueDomains(activeDomains(), lastRunAt, now, (entry) => effectiveInterval(entry, getSyncDomain(entry.name)))
+        .filter((entry) => !activationRuns.has(activationKey(entry)));
     if (!due.length) return;
     post({ type: "sync-cycle-start", domains: due.map(({ name }) => name), force });
     try {
@@ -213,6 +225,11 @@ export function createSyncHarness(getDb: (omsInstance: string) => BaseDB): SyncH
       const failures: Array<{ domain: string; error: unknown }> = [];
       for (const entry of due) {
         try {
+          const inFlight = activationRuns.get(activationKey(entry));
+          if (inFlight) {
+            await inFlight.catch((error) => { if (propagateErrors) throw error; });
+            continue;
+          }
           await runDomain(entry, force, propagateErrors);
         } catch (error) {
           failures.push({ domain: entry.name, error });
@@ -315,6 +332,33 @@ export function createSyncHarness(getDb: (omsInstance: string) => BaseDB): SyncH
     const keys = new Set(activeDomains().map(activationKey));
     for (const key of Object.keys(lastRunAt)) {
       if (!keys.has(key)) delete lastRunAt[key];
+    }
+    runNewActivations();
+  }
+
+  /**
+   * Start the screen's newly due activations now, rather than on the next tick or behind a pass
+   * already running (after login that is every seed domain). Before `start()` there is no timer and
+   * the first tick covers them. They run alongside any running pass: work on one domain is still
+   * serialised by `runDomain`.
+   */
+  function runNewActivations(): void {
+    if (!timer || !ctx.token) return;
+    const due = dueDomains(viewDomains, lastRunAt, Date.now(), (entry) => effectiveInterval(entry, getSyncDomain(entry.name)))
+      .filter((entry) => !activationRuns.has(activationKey(entry)));
+    let previous: Promise<unknown> = Promise.resolve();
+    for (const entry of due) {
+      const key = activationKey(entry);
+      // Sequential among themselves, like a tick. Skipped if the screen moved on before its turn.
+      const run = previous
+        .catch(() => undefined)
+        .then(() => (isActive(key) ? runDomain(entry, false, true) : 0));
+      previous = run;
+      activationRuns.set(key, run);
+      // Removed once settled; the catch only marks the rejection handled, `sync-error` reported it.
+      run.catch(() => undefined).finally(() => {
+        if (activationRuns.get(key) === run) activationRuns.delete(key);
+      });
     }
   }
 
