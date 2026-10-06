@@ -3,7 +3,7 @@
 **Audience:** app developers working in `apps/*`.
 **Design of record:** [APP_DB_ARCHITECTURE.md](APP_DB_ARCHITECTURE.md) · diagrams in
 [APP_DB_SYNC_FLOWS.md](APP_DB_SYNC_FLOWS.md).
-**Last updated:** 2026-09-30 — `useSeedData` rewritten around one live query per seed table, with synchronous reactive getters and async `get*` getters (§1a); Company's `useSeed.ts` lookups now wrap it. 2026-09-29 — `common/db` split into `schema/`, `storage/`, `seed/`, `composables/`, `sync/` (deep-import paths in §6–§7); view-scoped activation moved onto `setupAppDbSync`; `useDbSync` removed.
+**Last updated:** 2026-10-06 — `seedData` plain object for stores, `.withSync()` on seed list getters, `allowedTransitions` scoped to a status flow (§1a); `QueryOptions` combine `scope` + `equals` and `dateField` orders newest first (§1b); `syncNow` vs `syncAll`, held early activations (§5); `keyDefaults` (§2); refetch with no strategy is a no-op (§4); stop on `postLogin` too (§6). 2026-09-30 — `useSeedData` rewritten around one live query per seed table, with synchronous reactive getters and async `get*` getters (§1a); Company's `useSeed.ts` lookups now wrap it. 2026-09-29 — `common/db` split into `schema/`, `storage/`, `seed/`, `composables/`, `sync/` (deep-import paths in §6–§7); view-scoped activation moved onto `setupAppDbSync`; `useDbSync` removed.
 
 This is the how-to. It answers "I need X on screen — what do I write?", using what Company and Order
 Manager actually do. Read the design doc when you need to know *why*; read this to get work done.
@@ -33,7 +33,7 @@ Three ways in. Pick by what the screen needs.
 
 | You need | Use | Shape |
 |---|---|---|
-| A label, option list or joined lookup for seed data | `useSeedData()` | `seed.facilityName(id)` in a template or `computed` |
+| A label, option list or joined lookup for seed data | `useSeedData()` in components; `seedData` in stores and utils | `seed.facilityName(id)` in a template or `computed` |
 | A live list or row that re-renders on change | `useDb(table, options?)` | `{ records, first, count, hydrated, error }` |
 | Row counts + last-sync per domain (Settings) | `useDbStatus(db, catalog, actions)` | `{ domains, totalRows, refreshAll, … }` |
 
@@ -44,16 +44,17 @@ arguments and resolves the active database itself. This is Order Manager's main 
 Company's `useSeed.ts` lookups wrap it.
 
 Each seed table is one Dexie `liveQuery`, opened the first time any getter needs it and kept until
-logout. Every caller shares that one read, so a table is read once per session, and the query
-re-emits whenever the table changes: the login sync filling it, a `refreshAfterMutation`, or a
-resync from Settings. A table nobody asks for is never read. There is no init step.
+sync stops (logout, or the stop at the start of a login). Every caller shares that one read, so a
+table is read once per session, and the query re-emits whenever the table changes: the login sync
+filling it, a `refreshAfterMutation`, or a resync from Settings. A table nobody asks for is never
+read. There is no init step.
 
 Getters come in two kinds, told apart by name:
 
 | Kind | Names | Returns | Use it for |
 |---|---|---|---|
-| Reactive | no prefix: `statusDescription`, `facilityName`, `enumsByType`, `countries`, `shipmentMethodOptions`, … | a value, synchronously | templates and `computed`s |
-| Async | `get` prefix: `getFacilities`, `getGeos`, `getProductStores`, `getEnumsByType`, … | a Promise of the table's current rows | stores, and code that must act on the rows, such as building a request or a decision from them |
+| Reactive | no prefix: `statusDescription`, `facilityName`, `enumsByType`, `countries`, `shipmentMethodOptions`, `partyRelationshipTypes`, `allowedTransitions`, … | a value, synchronously | templates and `computed`s |
+| Async | `get` prefix: `getFacilities`, `getGeos`, `getProductStores`, `getEnumsByType`, … | a Promise of the table's rows once its first local read lands | code that must act on the rows, such as building a request from them |
 
 ```ts
 import { useSeedData } from "@common/db";
@@ -76,20 +77,53 @@ const facilityRows = await seed.getFacilities();
 const facilityIds = facilityRows.filter(isPhysicalFacility).map((facility) => facility.facilityId);
 ```
 
+**In stores, services and utils, use `seedData`, not `useSeedData()`.** It is the same getter set as
+a plain object, and it reads the same shared tables, so it answers exactly what the composable does.
+Pinia stores never call a composable:
+
+```ts
+import { seedData } from "@common/db";
+
+const parentTypeId = seedData.facilityType(seedData.facility(facilityId)?.facilityTypeId)?.parentTypeId;
+```
+
 **Don't resolve seed data into a ref.** There's no need for `watch` + `await` + a label-map `ref`:
 the reactive getter already re-renders on its own, and a watcher only adds a raw-id flash and a race
 between out-of-order reads.
 
 **A cold table answers with the raw id or `[]`.** The first render after a table's first use shows
-the id (or an empty list) until the read lands, a few milliseconds later, then re-renders. There is
-no loaded flag. If a screen must tell "not loaded yet" from "genuinely empty", or must not act on a
-half-read table, use an async `get*` getter or `useDb`'s `hydrated`. Code that stamps a looked-up
-value permanently (for example `buildAddressState` in Order Manager's `BadAddressTaskCard.vue`)
-awaits `getGeos()` for that reason.
+the id (or an empty list) until the read lands, a few milliseconds later, then re-renders. On a
+fresh login the table may also still be empty because the background sync hasn't filled it yet.
 
-Getters accept a missing id (`undefined` or `null`) and answer `""`. Countries come from
-`geoTypeEnumId === "GEOT_COUNTRY"`; a country's states follow its `GAT_REGIONS` associations only,
-so group memberships such as DBIC never appear as states.
+**When an empty list drives a decision, use `.withSync()`.** Every list getter has it, with the
+same arguments, and it answers `{ data, synced }`. `synced` turns true once the tables behind the
+getter hold this login's sync (it reads the domain's `loginSync:` marker in the same transaction as
+the rows), so an empty `data` with `synced` true really is empty:
+
+```ts
+// Order Manager's AddContactModal: "no states" only once geos have synced (SG, HK have none).
+const countryStates = computed(() => seed.statesForCountry.withSync(form.countryGeoId));
+const isLoadingStates = computed(() => !!form.countryGeoId && !countryStates.value.synced);
+```
+
+`synced` stays false if that domain's sync fails, so a screen that must not spin forever also
+accepts "first read landed and `serviceState.running` is false" (Order Manager's
+`OrderTimeline.vue` does this).
+
+**The async `get*` getters wait for the first local read, not for the sync.** Use them when the rows
+must be in hand before you continue, such as code that stamps a looked-up value permanently
+(`buildAddressState` in Order Manager's `BadAddressTaskCard.vue` awaits `getGeos()`). On a fresh
+login they can still resolve `[]`, so they do not tell "not synced yet" from "empty". Use
+`.withSync()` or `useDb`'s `hydrated` for that.
+
+Label getters accept a missing id (`undefined` or `null`) and answer `""`; list getters answer `[]`.
+Countries come from `geoTypeEnumId === "GEOT_COUNTRY"`; a country's states follow its `GAT_REGIONS`
+associations only, so group memberships such as DBIC never appear as states.
+
+`allowedTransitions(statusId, statusFlowId?)` reads one status flow, `Default` unless you name
+another, as OMS does for an order with none. Flows reuse status ids, so reading every flow would mix
+their transitions. Rows come in `transitionSequence` order with `toStatusDescription` added, and
+carry `transitionName` and `conditionExpression`.
 
 ### 1b. `useDb()` — reactive reads
 
@@ -117,8 +151,20 @@ const { records } = useDb<any>("productStoreFacilities", { scope: { field: "prod
 Pass a **function** when the options depend on reactive state — it re-subscribes when they change.
 Pass a plain object when they're static.
 
-`QueryOptions`: `scope` (one indexed equality), `equals` (first key hits the index, the rest filter
-in memory), `dateField` + `since`/`until` (range), `filter` (in-memory predicate), `limit`, `order`.
+`useDb(table, options?)` reads the signed-in app database; `useDb(db, table, options?)` takes an
+explicit Dexie handle.
+
+`QueryOptions`:
+
+- `scope` and `equals` are one set of equalities (`scope` is just the first), and every one holds on
+  the result. The read uses the widest declared index that covers them: `[scope+…equals+dateField]`,
+  then `[scope+…equals]`, then the first indexed field. Whatever the index can't cover is filtered
+  in memory, and with no usable index the whole table is read. Matching is strict `===`, so a number
+  never matches a string.
+- `dateField` **orders** the result, newest first unless `order: "asc"`; `since`/`until` bound it.
+- `filter` (in-memory predicate), then `limit`, applied after sorting, so `dateField` + `limit` is
+  "the latest N".
+- `order` defaults to `"desc"` with a `dateField`, otherwise storage order.
 
 > **`hydrated`, not `records.length`.** `hydrated` is false while the first sync is still running, so
 > use it to tell "not loaded yet" from "genuinely empty". Rendering an empty state off
@@ -160,15 +206,21 @@ widgets: defineEntity({
 ```
 
 `FieldKind` picks the coercion: `text` → trimmed string, `count` → number, `date` → epoch millis
-(accepts millis, numeric string or ISO), `structured` → passed through.
+(accepts millis, numeric string or ISO), `structured` → passed through as-is (an empty array stays `[]`).
+
+A row missing **any** primary-key member is dropped as unkeyable. If the server legitimately omits
+a key member (a document attached to no feed), give it a stand-in with `keyDefaults: { feedId: "" }`.
+Each key in `keyDefaults` must be a primary-key field. Use it only where the absence is a real state,
+never to cover a wrong field name.
 
 > ⚠️ **`fields` is a whitelist, and it is the only thing stored.** A field you don't declare is
 > dropped at write time — it is not tucked away anywhere. If a screen needs it, declare it. This is
 > the single most common cause of "the row is in IndexedDB but my field is undefined".
 
-**2. Add an index for every way you query it.** `scope`, `equals` and `dateField` all need one.
-A two-part question ("this shop's widgets, newest first") wants a compound index `[shopId+createdDate]`,
-not two single-field ones.
+**2. Add an index for every way you query it.** A `scope`, `equals` or `dateField` with no index
+still works, but it reads the whole table and filters or sorts in memory. A two-part question ("this
+shop's widgets, newest first") wants a compound index `[shopId+createdDate]`, not two single-field
+ones: the read then comes back filtered and ordered from the index alone.
 
 **3. Bump the version** in your app's db module:
 
@@ -188,7 +240,7 @@ A database recording a different version than the build declares is **dropped an
 use, and the worker refills it. That is the only migration mechanism: there is no in-place upgrade.
 
 Bump it for *any* schema change — new table, added or removed index, changed primary key, changed
-`fields`, changed `rename`. **Nothing detects a forgotten bump.** The app will run, and rows written
+`fields`, changed `rename` or `keyDefaults`. **Nothing detects a forgotten bump.** The app will run, and rows written
 by the previous build will still be there with their old shape — a `date` field still holding an ISO
 string, a renamed field still absent. Treat bumping as part of the change, not a step afterwards.
 
@@ -204,9 +256,17 @@ mergeSchemas(commonSchema.pick([...COMPANY_SEED_TABLES]), companySchema)
 Order Manager reads all of them, so it just passes `commonSchema`. An app picking seven gets seven
 tables, not 29.
 
-You may declare **your own** table with a seed table's name — Company's `statuses` hits
-`oms/statuses` while the seed one hits `admin/status`. Put it in your own schema and don't `pick`
-the seed one; the framework tracks provenance, so the status card still points at the right endpoint.
+Two ways to fill a seed table differently from the framework:
+
+- **Same table, your own domain.** Pick the seed table, and register a domain with the seed domain's
+  **name** and your endpoint, leaving the seed one out of `registerDomains`. Company does this for
+  `statuses`: it picks the seed table, but registers `{ name: "status", listUrl: "oms/statuses" }`
+  from `referenceDomains.ts` instead of the seed `admin/status` one, and filters it out through
+  `OVERRIDDEN_SEED_TABLES` in its worker entry. Company's status card uses the worker catalog
+  (`syncService()?.catalog()`), so it shows the domain that actually runs.
+- **Your own table under a seed name.** Declare it in your own schema and don't `pick` the seed one.
+  The framework tracks provenance, so `appDb.statusCatalog` leaves it out instead of pointing it at
+  the seed endpoint.
 
 ---
 
@@ -294,6 +354,18 @@ Which refetch strategy your domain needs:
 | That route wraps the record differently from the list | `byPk` + `byPkRecordKey: "jobDetail"` |
 | No by-id route, but the list filters by id | `refetchScope` |
 | The stored row is (parent, child) and the mutation only knows the parent | `refetchScope` — a plain upsert would leave the old child row behind |
+| None of `byPk`, `refetchScope` or `fanOut` configured | **Nothing happens.** `refreshAfterMutation` resolves `0` and the row stays stale. Add one, or call `resyncDomain(name)` instead |
+
+Check the seed domain before relying on it. Of the seed domains, only `productStore` and `facility`
+(`byPk`), `enum` and `groupFacility` (`refetchScope`), and the `fanOut` ones (`productStoreFacility`,
+`productStoreFacilityGroup`, `productStoreShipmentMethod`, which re-read every row for the
+`productStoreId` in the key) reconcile after a mutation. `enum` refetches by its
+`enumId` (`refreshAfterMutation("enum", { enumId })`); `status`, `geo`, `carrier` and the other
+type tables don't, so after mutating one of those use `resyncDomain`.
+
+A `byPk` read that fails rejects, so it surfaces as `CacheReconciliationError` rather than a silent
+stale row. A `byPk` route may answer with the record itself or a one-item list; an empty answer
+removes the stored row.
 
 ---
 
@@ -342,12 +414,21 @@ ignore the call, instead of wiping the domains the new view just switched on. Fo
 |---|---|
 | `syncDomainsReady` | `Ref<boolean>` — the worker has accepted this activation |
 | `syncDomainsError` | `ComputedRef<string>` — an error from one of the *activated* domains, else `""`. Drive the screen's warning banner from this |
-| `syncNow()` | Force a pass over the active set (a "refresh" button). Clears no markers |
+| `syncNow()` | Force a pass over **this screen's** activated domains (a "refresh" button). Not the login seed set, and it clears no markers. Called mid-pass, it queues a fresh pass instead of resolving against the running one |
 | `serviceState.syncedAt[domain]` (from `@common/db`) | When that domain last finished a pass. Use it to tell "nothing for this shop" from "not fetched yet" |
 
 **One screen, one set.** There is one worker and one active set. If two features on one screen
 both need polling, build one combined list and activate it once, the way `useShopify` composes its
-sync sessions. Two separate `activateSyncDomains` calls overwrite each other.
+sync sessions. Two separate `activateSyncDomains` calls overwrite each other. The login set (class
+B) is separate: it stays active alongside whatever a screen activates, and a screen can't switch it
+off.
+
+An activation that runs before the sync has started (a deep link lands before `App.vue` starts it)
+is held and handed to the worker when it comes up, so the screen doesn't lose its set.
+
+`syncNow()` is the screen's refresh. Settings' "Refresh all" is `resyncReferenceData()`: it clears
+every sync marker, then forces a pass over every active domain, login set and screen set together
+(`syncService()?.syncAll()` underneath).
 
 Two rules that matter:
 
@@ -404,7 +485,7 @@ export const {
 
 ```ts
 // 4. src/main.ts — register the real resolver, keeping commonUtil out of the worker chunk
-setOmsInstanceResolver(() => commonUtil.getOMSInstanceName());
+myAppDb.setOmsInstanceResolver(() => commonUtil.getOMSInstanceName());
 ```
 
 ```ts
@@ -413,9 +494,21 @@ watch(useAuth().isAuthenticated, (authed) => { if (authed) void startAppDbSync()
 ```
 
 ```ts
-// 6. src/store/user.ts — stop and clear on logout
-await stopAppDbSync().catch(() => { /* never block logout on cleanup */ });
+// 6. src/store/user.ts — stop and clear at the start of postLogin, and again on logout
+async postLogin() {
+  // A session that expired silently never ran postLogout, so its rows and once-per-login
+  // markers are still there. Clear them before anything reads, then start fresh.
+  await stopAppDbSync().catch((error) => logger.error("Failed to clear the local database on login", error));
+  // ... profile, permissions ...
+  void startAppDbSync();
+},
+async postLogout() {
+  await stopAppDbSync().catch(() => { /* never block logout on cleanup */ });
+},
 ```
+
+`stopAppDbSync` closes the seed live queries and empties every table, but keeps the
+`schemaVersion` record, so the next login doesn't rebuild the database.
 
 If your app's domains reach the database through `myAppDb.entity(...)` rather than the factories,
 the worker must also register the resolver — see how Company does it inside `exposeWorkerHarness`.
@@ -451,8 +544,13 @@ the primary key where the token belongs — after your mutation already succeede
 **A snapshot domain prunes.** It treats the fetched set as authoritative and deletes everything in
 scope that isn't in it. The factory guards the obvious footguns (a fetch that returns rows none of
 which can be keyed; an empty fetch over a populated table on an auto sync), but if you hand-write a
-snapshot pass, pass `requireComplete: true` to `pageAll` so a truncated walk throws instead of
-pruning live rows.
+snapshot pass, pass `requireComplete: true` to `pageAll` (`@common/core/workerRemoteApi`) so a
+truncated walk throws instead of pruning live rows. The factory itself does not set it.
+
+**A hand-written `liveQuery` needs an `async` querier that awaits inside it.** Dexie tracks which
+tables a querier read only across the awaits of an `async` function; a plain arrow that returns a
+promise loses the tracking at its first await, so the query never re-runs when the table changes.
+`useDb` and `useSeedData` already do this.
 
 **Bump `version` when you touch the schema.** Nothing checks it. §2.
 
@@ -463,7 +561,11 @@ pruning live rows.
 | Symptom | Likely cause | Check |
 |---|---|---|
 | Row is there, one field is `undefined` | Field not in `fields`, or the API names it differently | Declare it, or add a `rename` |
-| Scoped query returns nothing, unscoped works | The scope field isn't indexed, or is absent because a `rename` was needed | Entity `indexes` and `rename` |
+| Scoped query returns nothing, unscoped works | The field is not in `fields`, is absent because a `rename` was needed, or holds a different type (matching is strict `===`, so `123` ≠ `"123"`) | Entity `fields` and `rename`; the stored value's type |
+| Scoped or dated query is slow on a big table | No index covers it, so the whole table is read and filtered in memory | Add the field, or a compound `[scope+dateField]`, to `indexes` (and bump `version`) |
+| "Latest N" shows the oldest rows | No `dateField`, so `limit` cuts storage order | Pass `dateField`; it orders newest first |
+| Seed list empty on a fresh login, screen shows "none" | Read before the seed sync landed: a reactive getter or `get*` answers `[]` until then | Use the getter's `.withSync()` and wait for `synced` (§1a) |
+| `refreshAfterMutation` resolves but the row is stale | The domain has no `byPk`, `refetchScope` or `fanOut`, so the refetch does nothing | §4; use `resyncDomain(name)` |
 | Table stays empty, no error | Domain not registered, or the table name differs between domain and schema | Worker entry; copy Company's `domainTables.spec.ts` |
 | Table empty and the status card says "none" | Class-B domain never ran — check `syncMeta` for its `loginSync:` marker | Force via `resyncDomain(name)` |
 | Snapshot wiped rows that still exist server-side | Envelope mis-declared, so the response unwrapped to `[]` | `collectionKey`; add `strictCollection: true` |
@@ -493,4 +595,4 @@ domain last finished, and `resyncReferenceData()` clears every sync marker and r
 | Sync policy | `src/config/appSyncConfig.ts` | none — harness default |
 | Main-thread facade | `src/services/appDbSync.ts` | `src/services/appDbSync.ts` |
 | Per-view activation | `activateSyncDomains` / `deactivateSyncDomains` from `src/services/appDbSync.ts` | none |
-| Read examples | `src/composables/useSeed.ts` (seed lookups wrap `useSeedData`) | `useSeedData()` reactive getters throughout |
+| Read examples | `src/composables/useSeed.ts` (seed lookups wrap `useSeedData`) | `useSeedData()` reactive getters throughout; `seedData` in `src/store/orderDetail.ts` |

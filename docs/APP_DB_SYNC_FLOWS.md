@@ -1,8 +1,8 @@
 # AccxUI Local Database & Sync — Flow Diagrams
 
 **Status:** Approved
-**Version:** 1.2
-**Date:** 2026-09-30
+**Version:** 1.3
+**Date:** 2026-10-06
 **Companion:** [APP_DB_ARCHITECTURE.md](APP_DB_ARCHITECTURE.md) — the prose design; this document is
 the diagram set it references.
 **How-to:** [APP_DB_DEVELOPER_GUIDE.md](APP_DB_DEVELOPER_GUIDE.md) — recipes for app developers.
@@ -44,14 +44,16 @@ import rather than producing a permanently empty index.
 
 ```mermaid
 flowchart TD
-    A["defineEntity({ primaryKey, fields, indexes?, rename? })"] --> B["split primaryKey on ','<br/>trim, drop empties"]
+    A["defineEntity({ primaryKey, fields, indexes?, rename?, keyDefaults? })"] --> B["split primaryKey on ','<br/>trim, drop empties"]
     B --> C{"any PK field?"}
     C -- no --> X1["THROW: a non-empty primaryKey is required"]
     C -- yes --> D{"PK field repeated?"}
     D -- yes --> X2["THROW: primaryKey repeats field"]
     D -- no --> E{"PK field declared in fields?"}
     E -- no --> X3["THROW: key member that is never stored"]
-    E -- yes --> F["keyPath = 1 field ? 'id' : '[a+b+c]'"]
+    E -- yes --> KD{"every keyDefaults field<br/>is a PK member?"}
+    KD -- no --> X8["THROW: keyDefaults names a non-primary-key field"]
+    KD -- yes --> F["keyPath = 1 field ? that field : '[a+b+c]'"]
     F --> G{"for each index"}
     G --> H{"duplicate?"}
     H -- yes --> X4["THROW: duplicate index"]
@@ -64,8 +66,12 @@ flowchart TD
     J -- no --> L{"index declared in fields?"}
     L -- no --> X7["THROW: index on an unprojected field"]
     L -- yes --> G
-    G -- done --> M["Entity {<br/>primaryKey, primaryKeyFields,<br/>fields, fieldNames, indexes, rename,<br/>schema = [keyPath, ...indexes].join(', ')<br/>}"]
+    G -- done --> M["Entity {<br/>primaryKey, primaryKeyFields,<br/>fields, fieldNames, indexes, rename, keyDefaults,<br/>schema = [keyPath, ...indexes].join(', ')<br/>}"]
 ```
+
+`keyDefaults` gives a stand-in value for a primary-key member the server may legitimately omit (a
+document attached to no feed), so the row is stored rather than dropped as unkeyable (see F-PROJ).
+`extendIndexes` carries it over when it rebuilds an entity.
 
 Source: `common/db/schema/defineEntity.ts`.
 Coercion kinds consumed later by `projectRow`: `common/db/storage/projection.ts`.
@@ -120,7 +126,9 @@ flowchart TD
     SET --> RET["AppDb facade"]
 
     RET --> G["get(omsInstance)"]
-    G --> GN["dbName = omsInstance + '-' + suffix"]
+    G --> GE{"omsInstance non-empty?"}
+    GE -- no --> XG["THROW: no OMS instance"]
+    GE -- yes --> GN["dbName = omsInstance + '-' + suffix"]
     GN --> GQ{"activeDb?.name === dbName"}
     GQ -- yes --> GR["reuse handle"]
     GQ -- no --> GC["activeDb?.close()<br/>a liveQuery holding it stops serving the old tenant"]
@@ -164,34 +172,61 @@ declared version (a rollback) both count as mismatches.
 
 The check is memoised per database name; the open is not, so a connection closed later is reopened.
 
+**Why the gate runs in Dexie's global zone.** Live queries call `ensureDbReady` from inside their
+querier (`dbClient.live`, `useSeedData`, `useDbStatus`), where Dexie refuses writes. Dexie also carries
+a live query's zone into nearby native continuations. So when a live query was the database's first
+use, the check failed with `ReadOnlyError` and never wrote the marker, and the database was rebuilt
+on every load. `ensureDbReady` is therefore not an `async` function. It returns a chain of Dexie
+promises:
+
+```mermaid
+flowchart LR
+    C["caller (any zone)"] --> P["Dexie.Promise.resolve()"]
+    P --> O["inGlobalZone(openDb)"]
+    O --> V["versionCheckOf(db)<br/>memoised; first use starts<br/>inGlobalZone(verifyDeclaredVersion)<br/>as a Dexie-promise chain"]
+    V --> R["resolves in the CALLER's zone:<br/>a querier stays inside its live query (reads tracked),<br/>any other caller stays outside it (writes allowed)"]
+```
+
 Source: `baseDb.ts`.
 
 ---
 
 ## F-BOOT-M — Main-thread module evaluation
 
+ES modules evaluate every import before the importing module's body runs. `main.ts` imports
+`App.vue` first, and `App.vue` imports `services/appDbSync.ts`, so the database and the sync facade
+both exist before `main.ts` registers the live resolver.
+
 ```mermaid
 sequenceDiagram
     autonumber
     participant M as main.ts
+    participant APP as App.vue
+    participant SVC as services/appDbSync.ts
     participant DBM as db/companyDb.ts
     participant FW as defineAppDb
     participant REG as appDbRegistry
-    participant SVC as services/appDbSync.ts
 
-    M->>DBM: import
+    M->>APP: import (first app import)
+    APP->>SVC: import
+    SVC->>DBM: import
     DBM->>FW: defineAppDb({ suffix, version, schema })
     FW->>REG: setAppDb(appDb)
     DBM->>DBM: setOmsInstanceResolver(() => "default")  // test fallback
-    M->>DBM: setOmsInstanceResolver(() => commonUtil.getOMSInstanceName())
-    Note over M,DBM: main.ts replaces the fallback.<br/>Kept out of the db module so commonUtil never reaches the worker chunk.
-    M->>SVC: import
     SVC->>SVC: setupAppDbSync({ db, getWorkerUrl, createSyncService })
-    Note over SVC: no worker spawned yet — start() does that
+    Note over SVC: no worker spawned and raw() never called —<br/>start() does both, so the fallback resolver is never used
+    Note over M: main.ts body runs after all imports
+    M->>DBM: setOmsInstanceResolver(() => commonUtil.getOMSInstanceName())
+    Note over M,DBM: Kept out of the db module so commonUtil never reaches the worker chunk.
 ```
 
-Company: `apps/company/src/main.ts`, `src/db/companyDb.ts`, `src/services/appDbSync.ts`.
-Order Manager: `apps/order-manager/src/main.ts`, `src/services/appDbSync.ts`.
+Company: `apps/company/src/main.ts`, `src/App.vue`, `src/db/companyDb.ts`, `src/services/appDbSync.ts`.
+
+Order Manager follows the same order, with two differences (`apps/order-manager/src/main.ts`):
+
+- `db/orderManagerDb.ts` registers no `"default"` fallback resolver.
+- The `main.ts` body also calls `registerDomains(Object.values(commonDomains))` on the **main thread**,
+  before it sets the resolver. Company's main thread registers no domains.
 
 ---
 
@@ -205,8 +240,10 @@ flowchart TD
     I2 --> EC["each hand-written module also creates<br/>companyDb.entity('table') in module scope<br/>(late-binding, see F-DB)"]
     W --> I3["import companyDb / orderManagerDb"]
     I3 --> SA["defineAppDb runs again in THIS realm<br/>and calls setAppDb into the worker's own registry"]
+    I1 --> SEL["Company: keep commonDomains whose table is in<br/>companyDb.seedTables, minus the 5 overridden tables<br/>Order Manager: Object.values(commonDomains)"]
+    I3 --> SEL
     DE --> RD["registerDomains([...])<br/>Map name -> SyncDomain"]
-    I1 --> RD
+    SEL --> RD
     RD --> EX["exposeWorkerHarness(getDb)<br/>= Comlink expose(createSyncHarness(getDb))"]
     EX --> SUB["subscribeToken(...) — this harness instance's own<br/>BroadcastChannel subscription"]
 ```
@@ -222,15 +259,15 @@ exposeWorkerHarness((omsInstance) => {
 });
 ```
 
-Order Manager does not need it — every one of its domains is factory-built and resolves through
-`getAppDb().get(omsInstance)`, which takes the instance as a parameter
-(`apps/order-manager/src/workers/appSync.worker.ts`).
+Order Manager does not need it. Every one of its domains is factory-built and resolves through
+`getAppDb().get(omsInstance)`, which takes the instance as a parameter. Its worker hands the harness
+`getOrderManagerDb` (`apps/order-manager/src/workers/appSync.worker.ts`).
 
 ```mermaid
 graph LR
     subgraph MT["Main-thread realm"]
       R1[("appDbRegistry<br/>activeAppDb")]
-      D1["domain registry: EMPTY<br/>(no worker entry imported here)"]
+      D1["domain registry: EMPTY in Company<br/>(no worker entry imported here);<br/>all 29 commonDomains in Order Manager (main.ts)"]
     end
     subgraph WK["Worker realm"]
       R2[("appDbRegistry<br/>activeAppDb")]
@@ -246,6 +283,27 @@ graph LR
 
 ## F-START — Login to first sync
 
+### Login starts from an empty database
+
+Both apps' `postLogin` call `stopAppDbSync()` **before** anything else reads the database. The
+logout wipe does not always run: a session that expires while nothing is requesting (a closed tab, a
+sleeping laptop) lands on `/login` with no 401 and so no `postLogout`. Without this step, the
+previous session's rows and its once-per-login markers would still be there, and the next login
+would skip the seed. `postLogin` runs once per real login, never on a reload.
+
+```mermaid
+flowchart TD
+    PL["store/user.ts postLogin"] --> ST["await stopAppDbSync()<br/>(errors logged, never thrown)"]
+    ST --> ST1["stop any sync the isAuthenticated watcher already started<br/>clearSeedTables(); clearDatabaseTables() keeps schemaVersion<br/>(same steps as logout, F-TEAR)"]
+    ST1 --> PR["fetch profile, permissions<br/>(Order Manager: also product stores and preference)"]
+    PR --> SA["void startAppDbSync()  — the sequence below"]
+```
+
+Sources: `apps/company/src/store/user.ts` (`postLogin`), `apps/order-manager/src/store/user.ts`
+(`postLogin`).
+
+### Start sequence
+
 ```mermaid
 sequenceDiagram
     autonumber
@@ -258,39 +316,52 @@ sequenceDiagram
     participant API as Maarg
 
     U->>SAS: startAppDbSync()
-    Note over SAS: idempotent — a second call returns the same in-flight promise
+    Note over SAS: idempotent — a second call returns the same promise<br/>(kept after success, cleared only on failure)
     Note over SAS: generation is bumped on every start and stop
     SAS->>SS: createSyncService({ workerUrl, db: appDb.raw(), onStatus })
+    opt a screen already activated (deep link before the sync started)
+        SAS->>SS: setDomains(activeSyncDomains) — held as viewDomains, no worker yet
+    end
     SAS->>SS: start()
     Note over SS: idempotent too — its own starting promise and startGeneration
     SS->>DB: ensureDbReady(db) — version gate
-    Note over SS,DB: runs BEFORE the worker exists, so nothing can race it
+    Note over SS,DB: runs BEFORE the worker exists, so the worker cannot race it
     SS->>SS: generation check (stop() during the shape check aborts here)
     SS->>WF: createWorker(workerUrl)
     WF-->>SS: { api (Comlink), terminate, worker }
     SS->>SS: worker.onmessage = handleMessage(generation, e)
     SS->>SS: publisher = createTokenPublisher(), then lastToken = commonUtil.getToken()
+    opt viewDomains held
+        SS->>H: api.setDomains(viewDomains)
+        Note over SS,H: sent before start(), the worker handles calls in order,<br/>so the first tick already covers the screen's set
+    end
     SS->>H: api.start({ maargUrl, token, omsInstance, baseTickMs, domains })
     H->>H: ctx = { maargUrl, token, omsInstance, now }
-    H->>H: active = payload.domains ?? every registered class-B domain
+    H->>H: baseDomains = payload.domains ?? every registered class-B domain
     H->>DB: ensureDbReady(getDb(omsInstance))
-    alt open failed
+    alt getDb threw (e.g. no OMS instance)
         H-->>SS: postMessage sync-error { domain: "__start" }
         H-->>SS: throw
     end
+    Note over H,DB: ensureDbReady itself never throws (it logs and goes on),<br/>so in practice only getDb reaches this branch
     H->>H: clear lastRunAt
-    H->>H: await tick()
-    loop each due domain
-        H-->>SS: sync-start
-        H->>API: fetch pages
-        H->>DB: write rows
-        H-->>SS: sync-end { domain, written, at, retryPending }
-        H-->>U: BroadcastChannel domain-synced
+    H->>H: await tick() — F-TICK
+    opt something is due (base ∪ view)
+        H-->>SS: sync-cycle-start { domains, force: false }
+        loop each due domain, sequentially
+            H-->>SS: sync-start
+            H->>API: fetch pages
+            H->>DB: write rows
+            H-->>SS: sync-end { domain, written, at, retryPending }
+            H-->>U: BroadcastChannel domain-synced
+        end
+        H-->>U: BroadcastChannel sync-complete
+        H-->>SS: sync-cycle-end { at, force: false }
     end
-    H-->>U: BroadcastChannel sync-complete
     H->>H: timer = setInterval(tick, baseTickMs ?? 5000)
+    SS->>SS: generation check (stop() while starting aborts here)
+    SS->>SS: tokenWatch = setInterval(pushTokenIfChanged, 15000)<br/>serviceState.lastSyncAt = now
     SS-->>SAS: resolved
-    SS->>SS: tokenWatch = setInterval(pushTokenIfChanged, 15000)
     SAS->>SAS: clearDomainErrors("__start"), then onSynced?.()
 ```
 
@@ -299,29 +370,73 @@ Entry points that call `startAppDbSync()`:
 | App | Where |
 |---|---|
 | Company | `App.vue` (on `isAuthenticated` flipping true), `store/user.ts` (`postLogin`), `useCarriers.ts` (via the `startReferenceSync` alias) |
-| Order Manager | `App.vue`, `store/user.ts` |
+| Order Manager | `App.vue`, `store/user.ts` (`postLogin`) |
 
 Both paths are safe to fire together — `startAppDbSync` and `SyncService.start` are each idempotent.
 The start is driven off a watcher rather than `onMounted` because `isAuthenticated` is false at mount
 and flips true a moment later, which an `onMounted`-only start would miss entirely (`App.vue`).
 
+Company's `services/appDbSync.ts` wraps `startAppDbSync` and also calls `deleteLegacyCaches()` once
+per page load, best effort.
+
 ---
 
 ## F-TICK — Harness tick and scheduling
 
+The harness keeps **two activation sets**:
+
+- `baseDomains` is the start set: `payload.domains`, or every registered class-B domain. A screen
+  never replaces it.
+- `viewDomains` is the set the open screen passed to `setDomains` (F-ACT).
+
+`activeDomains()` is base then view, with duplicates (same `activationKey`) dropped. Three entry
+points drive a pass:
+
+| Call | Force | Scope | What it runs |
+|---|---|---|---|
+| timer / `start()` → `tick()` | no | — | `dueDomains(activeDomains(), ...)` |
+| `syncNow()` → `tick(true, true, "view")` | yes | view | every `viewDomains` entry |
+| `syncAll()` → `tick(true, true, "all")` | yes | all | every `activeDomains()` entry |
+
+### Admission: share, queue or begin
+
 ```mermaid
 flowchart TD
-    T["tick(force?, propagateErrors?)"] --> G{"running || !ctx.token"}
-    G -- yes --> RET["return — a tick never overlaps itself,<br/>and never runs tokenless"]
-    G -- no --> SET["running = true"]
-    SET --> DUE{"force?"}
-    DUE -- yes --> ALL["due = active (every activation)"]
-    DUE -- no --> CALC["due = dueDomains(active, lastRunAt, now, effectiveInterval)"]
-    ALL --> LOOP
-    CALC --> LOOP["for each due activation, SEQUENTIALLY"]
+    T["tick(force, propagateErrors, scope)"] --> TOK{"ctx.token empty?"}
+    TOK -- yes --> R0["resolve at once — never runs tokenless"]
+    TOK -- no --> RUN{"a tick running (activeTick)?"}
+    RUN -- no --> BEGIN["beginTick(force, scope)<br/>record activeTickForced / Scope / Generation"]
+    RUN -- yes --> F{"force?"}
+    F -- no --> SHARE1["return activeTick — a scheduled tick<br/>shares whatever is running"]
+    F -- yes --> COV{"running tick is forced<br/>AND covers this scope (all ⊇ view)<br/>AND chose its domains at the current viewGeneration?"}
+    COV -- yes --> SHARE2["return activeTick"]
+    COV -- no --> Q{"a forced pass already queued?"}
+    Q -- yes --> W["return it; an 'all' request widens<br/>queuedForcedScope to 'all'"]
+    Q -- no --> NEWQ["queue ONE forced pass behind the running tick<br/>(its failure is ignored), started with<br/>queuedForcedScope read at that moment"]
+```
+
+A forced pass never resolves against a pass that skipped its domains. A manual refresh issued
+mid-tick, or after `setDomains` changed the screen set, waits and gets its own pass. `setDomains`
+bumps `viewGeneration`, which is how a running forced pass is known to be stale.
+
+### One pass
+
+```mermaid
+flowchart TD
+    E["executeTick(force, scope)"] --> DUE{"force?"}
+    DUE -- "yes, view" --> V["due = viewDomains"]
+    DUE -- "yes, all" --> A["due = activeDomains()"]
+    DUE -- no --> CALC["due = dueDomains(activeDomains(), lastRunAt, now, effectiveInterval)"]
+    V --> EMPTY
+    A --> EMPTY
+    CALC --> EMPTY{"due empty?"}
+    EMPTY -- yes --> X["return — no messages posted"]
+    EMPTY -- no --> CS["post sync-cycle-start { domains, force }"]
+    CS --> LOOP["for each due activation, SEQUENTIALLY"]
     LOOP --> RD["runDomain(entry) via runExclusiveDomainOperation(entry.name)"]
-    RD --> EX["executeDomain"]
-    EX --> POST1["post sync-start"]
+    RD --> REG{"domain registered?"}
+    REG -- no --> UR["post sync-error 'unregistered domain'"]
+    REG -- yes --> POST1["post sync-start"]
     POST1 --> CALL["domain.sync(ctx, entry.args, { force })"]
     CALL --> OK{"threw?"}
     OK -- no --> COMP["completed = force<br/>|| effectiveInterval !== undefined<br/>|| hasSyncedThisLogin(db, name)"]
@@ -334,12 +449,13 @@ flowchart TD
     OK -- yes --> ERRS{"has cadence?"}
     ERRS -- yes --> S3["stamp lastRunAt anyway — do not hot-loop a failing class-A domain"]
     ERRS -- no --> S4["leave unset — class B retries next tick"]
-    S3 --> POST3["post sync-error"]
-    S4 --> POST3
-    POST3 --> LOOP
+    S3 --> CLS["classifyError: 401 / unauthorized → post auth-error<br/>else post sync-error"]
+    S4 --> CLS
+    CLS --> LOOP
+    UR --> LOOP
     BC --> LOOP
-    LOOP -- done --> DONE["BroadcastChannel sync-complete;<br/>throw an aggregate if propagateErrors and any failed"]
-    DONE --> FIN["running = false (finally)"]
+    LOOP -- done --> AGG["throw an aggregate if propagateErrors and any failed"]
+    AGG --> FIN["finally: BroadcastChannel sync-complete<br/>post sync-cycle-end { at, force }<br/>activeTick cleared"]
 ```
 
 ### The `dueDomains` rule
@@ -398,8 +514,21 @@ flowchart TD
 
 Source: `defineSnapshotDomain.ts`.
 
-Both guards stand down for `force`, which is how every manual path arrives — `syncNow`,
-`syncDomainNow` and `resyncDomain` all reach the domain as `{ force: true }`.
+Both guards stand down for `force`, which is how every manual path arrives. Each one reaches the
+domain as `{ force: true }`, but they cover different sets:
+
+```mermaid
+flowchart LR
+    SN["syncNow()<br/>a screen's manual refresh"] --> HV["harness tick(force, 'view')<br/>viewDomains only"]
+    RR["resyncReferenceData()<br/>status card 'Refresh all'"] --> CM["delete every 'domain:' and 'loginSync:' marker"]
+    CM --> HA["service.syncAll() → harness tick(force, 'all')<br/>baseDomains ∪ viewDomains"]
+    RD["resyncDomain(name)<br/>status card, one row"] --> DM["delete 'loginSync:' + name"]
+    DM --> HD["service.syncDomainNow(name)<br/>runDomain(entry, force, propagate)"]
+```
+
+A screen's `syncNow` therefore no longer re-runs the login seed set. `SyncService.syncNow` and
+`syncAll` wait for a start already in flight rather than returning without a pass
+(`syncService.ts`, `setupAppDbSync.ts`).
 
 ---
 
@@ -426,9 +555,11 @@ sequenceDiagram
     D->>DB: snapshotReplace(all stamped rows)
 ```
 
-`refetchOne` on a fan-out domain without a `byPk` takes a narrower path: re-list **that one parent**
-and snapshot-replace only `{ field: parentKeyField, value: parentId }`, so one store's slice is
-refreshed and pruned without touching the others (`defineSnapshotDomain.ts`).
+`refetchOne` on a fan-out domain without a `byPk` takes a narrower path. It re-lists **that one
+parent** and snapshot-replaces only `{ field: parentKeyField, value: parentId }`, so one store's
+slice is refreshed and pruned without touching the others. This check runs **first**, so it wins
+over a `refetchScope` the domain also declares. A `pk` without the parent key returns 0, and so does
+a fetch whose rows are all unkeyable (`defineSnapshotDomain.ts`).
 
 ---
 
@@ -475,7 +606,7 @@ Contrast with F-SNAP:
 flowchart TD
     subgraph pa["pageAll — complete set (class B)"]
       A0{"unpaged || batchSize === 0?"}
-      A0 -- yes --> A1["one request with pageSize=viewSize=250<br/>(Moqui defaults to 20 and would truncate silently)"]
+      A0 -- yes --> A1["one request with pageSize = viewSize = batchSize || 250<br/>(Moqui defaults to 20 and would truncate silently)"]
       A0 -- no --> A2["pageIndex = 0"]
       A2 --> A3["GET with pageIndex/pageSize + viewIndex/viewSize"]
       A3 --> A4{"strictCollection?"}
@@ -484,7 +615,7 @@ flowchart TD
       A5 --> A6
       A6 --> A7{"rows empty?"}
       A7 -- yes --> AEND["stop"]
-      A7 -- no --> A8["dedupe by keyOf into seenKeys; count newKeys"]
+      A7 -- no --> A8["key = keyOf ? keyOf(row) : JSON.stringify(row)<br/>keyed: dedupe into seenKeys, a new key counts as new<br/>unkeyable (keyOf → undefined): kept AND counted as new"]
       A8 --> A9{"rows.length < batchSize?"}
       A9 -- yes --> AEND
       A9 -- no --> A10{"newKeys === 0?"}
@@ -513,6 +644,14 @@ flowchart TD
     end
 ```
 
+Unkeyable rows count as progress so that a walk over them does not stop after one page with a false
+"ignores pageIndex" warning. Without a `keyOf`, the row's own JSON is its identity.
+
+`requireComplete` is opt-in, and `defineSnapshotDomain` does **not** set it. So a snapshot built from
+a walk cut short by the backstop or by an endpoint that ignores `pageIndex` only warns, and the
+snapshot-replace that follows prunes rows the walk never reached. Today only Company's
+`shopifyTransferSyncDomain` passes `requireComplete: true`.
+
 Two request-shaping details in `workerRemoteApi.ts` worth keeping visible:
 
 - **Array params expand into repeated keys:** `{ id: ["A","B"] }` becomes `id=A&id=B`.
@@ -523,8 +662,8 @@ Two request-shaping details in `workerRemoteApi.ts` worth keeping visible:
   `response.json()` throws `SyntaxError: unexpected end of input`. Only that exact message is
   swallowed; a real parse failure (an HTML error page) still propagates.
 
-Base-URL rewriting: `oms/` and `shippingGateways/` prefixes are routed to `/rest/s1/`,
-everything else to `/api/`.
+Base-URL rewriting: a bare instance name becomes `https://{name}.hotwax.io/`. Then `oms/` and
+`shippingGateways/` prefixes are routed to `/rest/s1/`, and everything else to `/api/`.
 
 ---
 
@@ -543,10 +682,19 @@ flowchart TD
     KEEP -- no --> SKIP["omit the field entirely"]
     PUT --> LOOP
     SKIP --> LOOP
-    LOOP -- done --> PK{"every PK member present?"}
+    LOOP -- done --> KD["for each keyDefaults[field]:<br/>row[field] === undefined ? row[field] = fallback"]
+    KD --> PK{"every PK member present?"}
     PK -- no --> NULL["return null — record is UNKEYABLE and cannot be stored"]
     PK -- yes --> ROW["{ ...row, syncedAt: now }"]
 ```
+
+Coercion kinds: `text` is trimmed and an empty string is dropped; `count` and `date` are parsed to
+numbers (dates to epoch millis); `structured` passes through as is. An empty array stays `[]`,
+because screens read the stored row and a list field that vanished when empty would read as
+`undefined.length`.
+
+`entityKeyOf` treats `""` as a missing key member, **except** for a member whose declared
+`keyDefaults` value is `""` itself.
 
 ```mermaid
 flowchart TD
@@ -601,28 +749,41 @@ sequenceDiagram
     end
     SAS->>SS: service.refetchOne(domain, pk)
     SS->>H: Comlink refetchOne({ domain, pk })
-    H->>H: scope = scopeKeyOf(pk) (sorted k=v joined by '|')
+    H->>H: scope = cacheScopeKey(pk) (sorted JSON-like form)
     H->>H: queue on refetchQueues[domain:scope]<br/>and runSharedDomainOperation(domain)
+    alt domain has no refetchOne
+        H-->>SS: postMessage sync-error { domain, scope, "domain has no refetchOne" }
+        H-->>SAS: throw
+    end
     H->>H: ctx.now = Date.now()
-    alt domain has byPk
-        H->>WAPI: GET byPk(pk).url
-        alt record returned
+    Note over H: snapshot domains (defineSnapshotDomain.refetchOne) check in THIS order
+    alt 1. fanOut and no byPk
+        H->>WAPI: pageAll(urlFor(pk[parentKeyField]))  (no parent key → return 0)
+        H->>DB: snapshotReplace(stamped, { parentKeyField, parentId })
+    else 2. byPk
+        H->>WAPI: GET byPk(pk).url — a failure REJECTS (no catch)
+        H->>H: raw = byPkRecordKey ? resp[byPkRecordKey] : resp<br/>a one-item array is unwrapped to its item
+        alt raw is an object
             H->>DB: upsertMany([raw])
         else nothing returned
-            H->>DB: remove(entityKeyOf(pk))
+            H->>DB: remove(entityKeyOf(pk)) — the record is gone server-side
         end
-    else domain has refetchScope
+    else 3. refetchScope
+        Note over H: scope value null/undefined → return 0, no request
         H->>WAPI: pageAll(listUrl, { ...listParams, ...scopeParams })
         H->>DB: snapshotReplace(rows, scope) — prunes that slice too
-    else fanOut without byPk
-        H->>WAPI: pageAll(urlFor(parentId))
-        H->>DB: snapshotReplace(stamped, { parentKeyField, parentId })
+    else none of the three
+        H->>H: return 0
     end
+    Note over H,DB: fan-out and refetchScope paths return 0 without writing<br/>when every fetched row is unkeyable
+    Note over H,WAPI: cursor domains (defineCursorDomain.refetchOne) instead page<br/>listUrl newest-first with { [first PK field]: id }, total 1, then upsert
+    Note over H: the activation's args are passed through when the domain is active with args
     H-->>SS: postMessage refetch-end { domain, scope, written }
     SS->>SS: clearScopeError(domain, scope)
     DB-->>V: liveQuery emits the new row
     Note over H,SS: on failure classifyError yields auth-error (401/unauthorized) or sync-error
-    Note over H,SS: both carry the scope, and the error is then rethrown
+    Note over H,SS: both carry the scope (cacheScopeKey form), and the error is then rethrown
+    Note over SAS: on rejection: recordSyncError(domain, msg, cacheScopeKey(pk))<br/>(same key the worker posted, so a no-op duplicate), then throw CacheReconciliationError
 ```
 
 **Choosing `refetchScope` over `byPk`** — the strategy follows the endpoint and the row shape, as
@@ -638,6 +799,9 @@ sequenceDiagram
 - `serviceJob` uses `byPk` **with** `byPkRecordKey: "jobDetail"`, because the by-PK route wraps the
   job in a different envelope from the list route. Without the key the envelope itself is stored, its
   `jobName` is undefined, and the row is silently dropped.
+- The common `enum` seed domain uses `refetchScope` by `enumId`. `admin/enums` filters on any
+  Enumeration field, so re-listing one `enumId` refreshes it, and a deleted enum comes back empty and
+  is pruned (`seedDomains.ts`). Before this, `refreshAfterMutation("enum", { enumId })` did nothing.
 
 **Why the error type is distinct** (`reconciliation.ts`): the mutation *committed*.
 `mutationCommitted = true` keeps that stage explicit so a retry cannot duplicate a create or replay
@@ -713,29 +877,36 @@ sequenceDiagram
     Vw->>S: onIonViewWillEnter: activateSyncDomains(domains, SYNC_OWNER)
     S->>S: generation = ++activationGeneration<br/>activeOwner = SYNC_OWNER, activeSyncDomains = domains
     S->>S: clearDomainErrors(each activated domain)
-    alt no service (failed start / test double)
+    alt no service yet (deep link before start, failed start, test double)
         S->>S: syncDomainsReady = true, return
+        Note over S: the set stays in activeSyncDomains, the next startAppDbSync<br/>replays it into the new service (F-START)
     end
     S->>SS: setDomains(domains)
-    SS->>H: Comlink setDomains(domains)
-    H->>H: active = domains
-    H->>H: drop lastRunAt keys not in the new activation set
+    SS->>SS: viewDomains = domains (held even while no worker exists)
+    opt worker exists
+        SS->>H: Comlink setDomains(domains)
+        H->>H: viewDomains = domains, viewGeneration++
+        H->>H: drop lastRunAt keys not in baseDomains ∪ viewDomains
+        Note over H: baseDomains (the login class-B set) is untouched<br/>and keeps its once-per-login clock
+    end
     S->>S: if generation still current: syncDomainsReady = true
     loop every baseTick
-        H->>H: dueDomains(active, lastRunAt, now, effectiveInterval)
+        H->>H: dueDomains(baseDomains ∪ viewDomains, lastRunAt, now, effectiveInterval)
         H->>H: run whichever are due, at each activation's own cadence
     end
     Vw->>S: onIonViewDidLeave: deactivateSyncDomains(SYNC_OWNER)
-    alt activeOwner !== SYNC_OWNER
-        S-->>Vw: return — another screen holds the worker now
+    alt activeOwner !== SYNC_OWNER, or activeSyncDomains already empty
+        S-->>Vw: return — another screen holds the worker, or nothing to clear
     else still the holder
         S->>S: activeOwner = null, set = [], ready = false, activationGeneration++
         S->>SS: setDomains([])
         SS->>H: Comlink setDomains([])
-        Note over H: the activation set empties, and the timer finds nothing due
+        Note over H: viewDomains empties. baseDomains stays active,<br/>but its class-B entries already ran, so nothing is due
     end
     Note over H: rows already written stay, so a revisit paints instantly
 ```
+
+A screen's manual refresh (`syncNow`) forces only `viewDomains`; see F-SNAP for the manual paths.
 
 ### Why the owner guard exists — Ionic transition order
 
@@ -781,12 +952,12 @@ imperative re-activation after a mutation or a data load.
 `ActiveDomain` is `{ name, intervalMs?, args? }` (`syncRegistry.ts`). `intervalMs` overrides the
 domain's declared cadence; `args` are handed to `sync(ctx, args)` and participate in `activationKey`.
 
-**One active set.** Two features that must poll on one screen compose one domain list and activate
+**One screen set.** There is one `viewDomains` set beside the start set. Two features that must poll on one screen compose one domain list and activate
 it once. `useShopify` does this for its sync sessions, which keeps each feature's `intervalMs`
 cadence on one activation. Two separate activations would overwrite each other.
 
-Order Manager has **no** activation call sites — the harness default (every registered class-B
-domain) is its entire policy.
+Order Manager has **no** activation call sites. The harness start set (every registered class-B
+domain) is its entire policy, and `viewDomains` stays empty.
 
 ---
 
@@ -805,15 +976,17 @@ flowchart TD
       A3 --> A8["onUnmounted: unsubscribe"]
     end
 
-    subgraph b["useSeedData() — shared live seed tables"]
+    subgraph b["useSeedData() / seedData — shared live seed tables"]
       B1["getter needs a table: seedTable(table)"]
       B1 --> B2{"entry for dbName/table<br/>in the module map?"}
-      B2 -- "no (first use)" --> B3["rows = shallowRef([])<br/>entity(table).live({}).subscribe()<br/>store entry { rows, loaded, subscription }"]
+      B2 -- "no (first use)" --> B3["rows = shallowRef([]), synced = shallowRef(false)<br/>liveQuery(async () => await readSeedTable(table)).subscribe()<br/>store entry { rows, synced, loaded, subscription }"]
       B2 -- yes --> B4["reuse it: no new read"]
-      B3 --> B5["next: rows.value = all; loaded settles<br/>re-emits on any write to the table:<br/>login sync, refreshAfterMutation, resync"]
+      B3 --> RS["readSeedTable: ensureDbReady, then ONE 'r' transaction over<br/>[table, syncMeta]: table.toArray() +<br/>syncMeta.get('loginSync:' + domain) (no seed domain → synced)"]
+      RS --> B5["next: rows.value = rows; synced.value = marker.synced;<br/>loaded settles. Re-emits on a write to the table or to<br/>that one marker: login sync, refreshAfterMutation, resync"]
       B3 --> B6["error: warn, drop the entry<br/>(the next use opens a fresh one)"]
       B4 --> B7["reactive getter: reads rows.value<br/>(tracked by the calling template / computed)<br/>raw id or [] until the first emission"]
       B5 --> B7
+      B7 --> WS["list getter .withSync(...args) → { data, synced }<br/>synced = every table the getter reads has synced this login,<br/>so an empty data is real rather than 'not landed yet'"]
       B4 --> B8["async get*: await loaded,<br/>then return the current rows.value"]
       B5 --> B8
       B7 --> B9["labels: first non-empty of description, enumName,<br/>name, groupName, facilityName, storeName — else the raw id<br/>joins in memory: statesForCountry (GAT_REGIONS), enumsByParentType, ..."]
@@ -838,9 +1011,24 @@ flowchart TD
 
 The two live reads differ in lifetime. A `useDb` subscription belongs to the component that opened
 it and closes on unmount. A `useSeedData` table is opened by whichever caller needs it first, is
-shared by every later caller, and stays open until logout (`clearSeedTables` in F-TEAR). That is at
-most one subscription per seed table, and it re-runs only when that table is written
-(`useSeedData.ts`).
+shared by every later caller, and stays open until logout or the login-time clear (`clearSeedTables`
+in F-TEAR). That is at most one subscription per seed table. It re-runs only when that table or its
+own domain's `loginSync:` marker is written, because `get` on one key keeps the other domains'
+markers out of its read set (`useSeedData.ts`).
+
+The seed querier must itself be `async` (`async () => await readSeedTable(table)`). Dexie carries
+its read tracking across the awaits inside `readSeedTable` only for an async querier. A plain arrow
+that returns the promise records no tables, so the query would never re-run.
+
+`seedData` is a plain module-level object, the result of one `useSeedData()` call. Stores import it
+so they can read seed data without calling a composable.
+
+`useDb` reads through `dbClient`'s query rules:
+
+- `scope` and `equals` are one set of equalities, and every one holds on the result. They resolve
+  through the widest declared index that covers them, and the rest are applied in memory.
+- `dateField` orders the result, newest first unless `order: "asc"`, and `since`/`until` bound it.
+- Without `dateField`, rows come back in storage order (`dbClient.ts`, `types.ts`).
 
 Catalog source per app:
 
@@ -870,12 +1058,14 @@ flowchart TD
     RE -- yes --> RE1["clearScopeError(domain, scope)"]
     RE -- no --> RE2["clear nothing — a scopeless message<br/>cannot prove another scope recovered"]
     TY -- sync-error --> ER["recordSyncError(domain, message, scope?)"]
+    TY -- "sync-start, sync-cycle-start,<br/>sync-cycle-end" --> PASS["no bookkeeping in the service"]
 
     AE --> FWD
     SE --> FWD
     RE1 --> FWD
     RE2 --> FWD
-    ER --> FWD["opts.onStatus(data) -> setupAppDbSync's listener<br/>repeats the same bookkeeping (idempotent),<br/>so a test double's statuses are still recorded"]
+    PASS --> FWD
+    ER --> FWD["opts.onStatus(data) -> setupAppDbSync's listener<br/>repeats the same bookkeeping (idempotent),<br/>so a test double's statuses are still recorded;<br/>it files an error with no domain under '__start'"]
     FWD --> SDE["syncDomainsError = last error among the<br/>ACTIVATED domains, in activation order"]
 ```
 
@@ -899,9 +1089,11 @@ flowchart LR
   screen's activated set, so a background domain's failure cannot light that screen's banner, and
   `activateSyncDomains` clears those domains' errors first so a newly opened screen starts clean.
 - A repeated scoped failure is re-inserted at the end of the map so the visible message reflects the
-  newest failure — unless it is the duplicate the service's own `catch` records after the worker
-  already posted it, which would otherwise reorder the visible diagnostic
-  (`syncService.ts`).
+  newest failure. `recordSyncError` skips re-insertion when the same scope already holds the same
+  message. That skip absorbs the duplicate that `refreshAfterMutation`'s `catch` records after the
+  worker has already posted the failure: both key the scope with `cacheScopeKey(pk)`
+  (`reconciliation.ts`), e.g. `{"enumId":"X"}`, so one failed refetch leaves one entry, and a later
+  successful `refetch-end` for the same record clears it.
 
 Source: `syncService.ts`, `setupAppDbSync.ts`.
 
@@ -942,17 +1134,21 @@ scope, so each harness instance owns its own subscription (`pollingWorkerHarness
 
 ## F-TEAR — Logout, instance switch, teardown
 
+`stopAppDbSync()` is the one teardown. It runs at logout (`postLogout`) **and** at the start of every
+login (`postLogin`, F-START), so a session that ended without a logout cannot leak into the next one.
+
 ```mermaid
 flowchart TD
-    subgraph lo["Logout — user.ts postLogout"]
-      L1["stopAppDbSync()"] --> L2["startGeneration++ — invalidate any in-flight start"]
-      L2 --> L3["service.stop()"]
-      L3 --> L4["clearInterval(tokenWatch)"]
+    subgraph lo["stopAppDbSync — user.ts postLogout, and postLogin before anything else"]
+      L1["setupAppDbSync: startGeneration++, starting = null<br/>— invalidate any in-flight start"] --> L3["service.stop(); service = null"]
+      L3 --> L2["service: startGeneration++ (late worker messages dropped), starting = null"]
+      L2 --> L4["clearInterval(tokenWatch)"]
       L4 --> L5["publisher.close()"]
       L5 --> L6["terminate() — kills the worker AND its timer"]
-      L6 --> L7["serviceState.running = false"]
+      L6 --> L6b["harness = null; held viewDomains = null"]
+      L6b --> L7["serviceState.running = false"]
       L7 --> L8["clearSeedTables()<br/>unsubscribe every useSeedData live table, empty the map"]
-      L8 --> L9["clearDatabaseTables(db.raw())<br/>rw txn over every table, keeps syncMeta['schemaVersion'],<br/>never blocks logout"]
+      L8 --> L9["clearDatabaseTables(db.raw())<br/>one rw txn over every table: clear() each data table;<br/>in syncMeta delete every key EXCEPT 'schemaVersion'<br/>errors are logged, never block logout"]
     end
 
     subgraph sw["OMS instance switch"]
@@ -965,19 +1161,32 @@ flowchart TD
 
     subgraph vs["View exit (class A)"]
       V0["onIonViewDidLeave -> deactivateSyncDomains(owner)"]
-      V0 --> VQ{"owner still holds the worker?"}
+      V0 --> VQ{"owner still holds the worker<br/>and the set is non-empty?"}
       VQ -- no --> VN["no-op — the next screen already activated (F-ACT)"]
       VQ -- yes --> V1["setDomains([]); syncDomainsReady = false"]
-      V1 --> V2["harness `active` empties; timer still ticks, nothing is due"]
+      V1 --> V2["harness viewDomains empties; baseDomains stays,<br/>timer still ticks, nothing is due"]
       V2 --> V3["rows stay — a revisit paints instantly from the DB"]
     end
 ```
 
-Logout does **not** clear the error maps behind `serviceState.errors`. Stale entries are cleared
-per domain, by the next successful `sync-end` or by `activateSyncDomains`.
+**Why `schemaVersion` survives the clear.** The main thread has already verified the version in its
+realm, so after a logout and login in the same tab it writes straight to the emptied database. The
+sync worker that the login starts is a separate realm. If the marker were gone, the worker would take
+the database for an unrecorded build, delete and rebuild it, and drop what the main thread had just
+written. In fulfillment that was the facility master list, so the Open page stayed empty until a
+reload (`baseDb.ts`).
+
+Teardown deliberately leaves two things in place:
+
+- **The error maps** behind `serviceState.errors`. Stale entries are cleared per domain, by the next
+  successful `sync-end` or by `activateSyncDomains`.
+- **The main-thread screen set.** `stopAppDbSync` resets neither `activeSyncDomains` nor
+  `activeOwner`. A screen that never deactivated before the stop has its set replayed into the next
+  service by `startAppDbSync` (F-START).
 
 Also available: `deleteLegacyCaches()` (`baseDb.ts`) drops the superseded fixed-name databases
-`DataManagerLogCacheDB` and `CompanyCacheDB`.
+`DataManagerLogCacheDB` and `CompanyCacheDB`. Company's `startAppDbSync` wrapper calls it once per
+page load (`apps/company/src/services/appDbSync.ts`).
 
 ---
 
@@ -988,11 +1197,11 @@ graph TB
     subgraph co["Company"]
       CSCHEMA["companySchema.ts — 48 entities"]
       CPICK["commonSchema.pick(17)"]
-      CDB["companyDb = defineAppDb('CompanyDB', v3)"]
+      CDB["companyDb = defineAppDb('CompanyDB', v4)"]
       CSCHEMA --> CDB
       CPICK --> CDB
       CW["appSync.worker.ts"]
-      CSEED["24 commonDomains (5 deliberately omitted)"]
+      CSEED["12 commonDomains — those whose table is in<br/>companyDb.seedTables, minus the 5 overridden tables"]
       CHAND["22 hand-written domains (19 class A, 3 class B)"]
       CREF["26 referenceDomains — Company-specific class-B domains and seed overrides"]
       CSEED --> CW
@@ -1009,25 +1218,31 @@ graph TB
 
     subgraph om["Order Manager"]
       OSCH["commonSchema — all 29, no own tables"]
-      ODB["orderManagerDb = defineAppDb('OrderManagerDB', v1)"]
+      ODB["orderManagerDb = defineAppDb('OrderManagerDB', v2)"]
       OSCH --> ODB
       OW["appSync.worker.ts"]
-      OSEED["registerDomains(Object.values(commonDomains)) — all 29"]
+      OSEED["registerDomains(Object.values(commonDomains)) — all 29<br/>(also on the main thread, in main.ts)"]
       OSEED --> OW
       ODB --> OW
       OSVC["services/appDbSync.ts"]
       ODB --> OSVC
-      OSVC --> ODEF["no activation — harness default:<br/>every registered class-B domain"]
+      OSVC --> ODEF["no activation — the harness start set<br/>(every registered class-B domain) is the whole policy"]
       OSVC --> OSET["Settings.vue -> useDbStatus(static statusCatalog)"]
-      ODB --> OREAD["useSeedData() in ~30 files"]
+      ODB --> OREAD["useSeedData() / seedData in ~35 files"]
     end
 ```
 
-The five seed domains Company deliberately does **not** register — `carrier`,
-`carrierShipmentMethod`, `shopifyShop`, `facilityGroup`, `status` — are re-declared in
-`referenceDomains.ts` with app-specific `listParams`, `strictCollection`, `refetchScope` or `byPk`,
-while the *tables* still come from `commonSchema.pick(...)`. The `seedTables` provenance set is what
-keeps the two facts from contradicting each other (`appSync.worker.ts`,
+Company's worker does not hand-list its seed domains. It derives them from the composed schema: a
+common domain is registered only when its table is in `companyDb.seedTables`, which holds the 17
+picked tables. That leaves out the 12 common domains whose tables Company never picked; a hand list
+once registered them and each failed on every login sync. It also leaves out the five overridden
+tables (`OVERRIDDEN_SEED_TABLES`: `carriers`, `carrierShipmentMethods`, `shopifyShops`,
+`facilityGroups`, `statuses`), which gives 17 − 5 = 12 common domains.
+
+The five overridden domains (`carrier`, `carrierShipmentMethod`, `shopifyShop`, `facilityGroup`,
+`status`) are re-declared in `referenceDomains.ts` with app-specific `listParams`, `strictCollection`,
+`refetchScope` or `byPk`, while the *tables* still come from `commonSchema.pick(...)`. The `seedTables`
+provenance set is what keeps the two facts from contradicting each other (`appSync.worker.ts`,
 `referenceDomains.ts`).
 
 ---
