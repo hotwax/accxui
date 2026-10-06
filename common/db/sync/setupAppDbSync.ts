@@ -10,7 +10,7 @@ import {
   serviceState,
   type SyncService,
 } from "./syncService";
-import type { ActiveDomain } from "./syncRegistry";
+import { type ActiveDomain, activationKey } from "./syncRegistry";
 import { CacheReconciliationError, cacheScopeKey } from "./reconciliation";
 
 export interface AppDbSyncConfig {
@@ -99,13 +99,18 @@ export function setupAppDbSync(config: AppDbSyncConfig): AppDbSync {
   /** Scope the worker to the domains the open view needs. Safe to call again to re-scope. */
   async function activateSyncDomains(domains: ActiveDomain[], owner: string): Promise<void> {
     const generation = ++activationGeneration;
+    const previousKeys = new Set(activeSyncDomains.value.map(activationKey));
     activeOwner = owner;
     activeSyncDomains.value = domains;
     // A newly activated domain has not been tried by THIS screen yet, so a failure recorded while
     // another screen held it is stale evidence. Clearing here means the first pass either succeeds
     // (stays clear) or fails and records fresh — rather than a just-opened screen inheriting a
-    // banner, or `manualRefresh` throwing on someone else's failure.
-    for (const domain of domains) clearDomainErrors(domain.name);
+    // banner, or `manualRefresh` throwing on someone else's failure. A domain already active with
+    // the same args keeps its failure: the worker does not re-run it, so the failure still stands
+    // (the inventory area re-activates its unchanged set on every move between its pages).
+    for (const domain of domains) {
+      if (!previousKeys.has(activationKey(domain))) clearDomainErrors(domain.name);
+    }
     const current = syncService();
     if (!current) {
       // No worker (a failed start, or a test double that never spawned one). The view is still

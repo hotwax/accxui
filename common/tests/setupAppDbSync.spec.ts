@@ -464,6 +464,29 @@ describe("syncDomainsError", () => {
     expect(sync.syncDomainsError.value).toBe("");
   });
 
+  // The inventory area re-activates its unchanged set on every move between its pages; the worker
+  // does not re-run those domains, so their failure still stands and must stay on the badge.
+  it("keeps the failure of a domain re-activated with the same args", async () => {
+    const sync = await started();
+    const domains = [{ name: "inventoryRows", args: { shopId: "1" } }];
+    await sync.activateSyncDomains(domains, "areaOwner");
+    post({ type: "sync-error", domain: "inventoryRows", message: "boom" });
+
+    await sync.activateSyncDomains([{ name: "inventoryRows", args: { shopId: "1" } }], "areaOwner");
+
+    expect(sync.syncDomainsError.value).toBe("boom");
+  });
+
+  it("clears the failure when the domain is re-activated with different args", async () => {
+    const sync = await started();
+    await sync.activateSyncDomains([{ name: "inventoryRows", args: { shopId: "1" } }], "areaOwner");
+    post({ type: "sync-error", domain: "inventoryRows", message: "boom" });
+
+    await sync.activateSyncDomains([{ name: "inventoryRows", args: { shopId: "2" } }], "areaOwner");
+
+    expect(sync.syncDomainsError.value).toBe("");
+  });
+
   it("forwards syncNow to the worker", async () => {
     const sync = await started();
 
