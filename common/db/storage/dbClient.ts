@@ -172,9 +172,9 @@ async function runQuery(
     if (!dateOrdered) {
       rows = [...rows].sort((a, b) => (dateOf(a, dateField) ?? 0) - (dateOf(b, dateField) ?? 0));
     }
-    if (order === "desc") rows.reverse();
+    if (order === "desc") rows = [...rows].reverse();
   } else if (order === "desc") {
-    rows.reverse();
+    rows = [...rows].reverse();
   }
 
   return limit && limit > 0 ? rows.slice(0, limit) : rows;

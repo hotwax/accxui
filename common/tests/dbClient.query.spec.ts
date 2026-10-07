@@ -60,6 +60,19 @@ describe("dbClient.query", () => {
     expect(rows.map((row) => row.id)).toEqual(["4", "2"]);
   });
 
+  it("never reverses the array the table handed back", async () => {
+    // Dexie 4 shares one result array between identical live queries; reversing it in place
+    // flipped every other reader of that query (NS-05 / ORDER-02 / PROD09).
+    const shared = [...ROWS].sort((a, b) => a.initDate - b.initDate);
+    const table = { ...memoryTable(ROWS, ["initDate"]), orderBy: () => ({ toArray: async () => shared }) };
+    const entity = dbClient({ table: () => table } as unknown as BaseDB).entity<any>("messages");
+    const first = await entity.query({ dateField: "initDate" });
+    const second = await entity.query({ dateField: "initDate" });
+    expect(first.map((row) => row.id)).toEqual(["4", "2", "3", "1"]);
+    expect(second.map((row) => row.id)).toEqual(["4", "2", "3", "1"]);
+    expect(shared.map((row) => row.id)).toEqual(["1", "3", "2", "4"]);
+  });
+
   it("orders oldest first when asked", async () => {
     const entity = clientOver(ROWS, ["initDate"]);
     const rows = await entity.query({ dateField: "initDate", order: "asc" });
