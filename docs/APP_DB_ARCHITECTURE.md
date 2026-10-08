@@ -1,8 +1,8 @@
 # AccxUI Local Database & Sync — Design
 
 **Status:** Approved
-**Version:** 1.2
-**Date:** 2026-09-30
+**Version:** 1.3
+**Date:** 2026-10-06
 **Scope:** `common/db/**`, `common/core/workerRemoteApi.ts`, `common/core/workerFactory.ts`,
 `apps/company/src/**`, `apps/order-manager/src/**`
 **Companion:** [APP_DB_SYNC_FLOWS.md](APP_DB_SYNC_FLOWS.md) — every flow diagram referenced below.
@@ -197,6 +197,13 @@ defineEntity({
 })
 ```
 
+`keyDefaults` (optional) gives a stand-in value to a primary-key member whose **absence is a real
+state**. Without one, a record missing any key member is dropped as unkeyable; with one, the member
+is stored as the declared stand-in. Company's `inventoryEventDocuments` (key
+`dataDocumentId,dataFeedId`) declares `keyDefaults: { dataFeedId: "" }`, because a data document
+attached to no feed arrives with no `dataFeedId` at all. It must not be used to paper over a wrong
+field name.
+
 **`FieldKind`** (`types.ts`) selects the coercion applied at projection time
 (`projection.ts`):
 
@@ -205,7 +212,10 @@ defineEntity({
 | `text` | `String(v).trim()` | null/undefined/empty after trim |
 | `count` | `Number(v)` | null/undefined/empty/non-finite |
 | `date` | epoch millis — number, numeric string, or `Date.parse` | unparseable |
-| `structured` | passed through | empty array, or null/undefined |
+| `structured` | passed through; an empty array stays `[]` | null/undefined |
+
+An empty list is kept as `[]` on purpose: the stored row is what screens read, and a list field that
+vanished when empty would be read as `undefined.length` by every caller.
 
 **Validation performed at module evaluation** (all throws — see flow `F-ENT` in the flows document):
 
@@ -214,6 +224,7 @@ defineEntity({
 | non-empty `primaryKey` | `defineEntity.ts` |
 | no repeated PK field | `defineEntity.ts` |
 | every PK field is declared in `fields` | `defineEntity.ts` |
+| every `keyDefaults` key is a PK field | `defineEntity.ts` |
 | no duplicate index | `defineEntity.ts` |
 | index does not restate the key path | `defineEntity.ts` |
 | every member of a compound index `[a+b]` is a declared field | `defineEntity.ts` |
@@ -245,7 +256,8 @@ schema can be picked from by several apps at once:
 - **`pick(tables)`** — subset; throws on an unknown table (`defineSchema.ts`). Seed provenance is
   carried across for the picked tables only (`defineSchema.ts`).
 - **`extendIndexes(map)`** — appends extra secondary indexes. Rebuilds through `defineEntity`
-  (`defineSchema.ts`) so the added indexes face the *same* validation the entity's own did.
+  (`defineSchema.ts`) so the added indexes face the *same* validation the entity's own did; the
+  entity's `rename` and `keyDefaults` are carried across.
 - **`mergeSchemas(...schemas)`** — throws when two schemas claim one table name
   (`defineSchema.ts`).
 
@@ -266,13 +278,14 @@ map, records the combined table-name list, and declares `version(n).stores(...)`
 
 | Member | Behavior |
 |---|---|
-| `name(oms)` | `` `${oms}-${suffix}` ``; throws on an empty instance (`defineAppDb.ts`) |
+| `name(oms)` | `` `${oms}-${suffix}` ``; throws on an empty instance (`defineAppDb.ts`). `defineAppDb` itself throws on an empty `suffix` |
 | `get(oms)` | Memoizes one handle; on a different name **closes the previous handle** so a `liveQuery` still holding it stops serving the old tenant (`defineAppDb.ts`) |
 | `setOmsInstanceResolver(fn)` | Registered once per **realm** at boot |
 | `raw()` | `get(resolver())`; throws if no resolver is registered (`defineAppDb.ts`) |
 | `client()` | Returns **one** late-binding `DbClient` built from `raw`, not from a handle |
 | `entity(table)` | `client().entity(table)` |
 | `schema` / `entities` / `tableNames` / `seedTables` | The composed declaration, read-only |
+| `version` | The declared schema version (default `1`); see *Schema evolution* below |
 | `statusCatalog` | Derived: composed tables ∩ `seedTables` ∩ `commonDomainsByTable` |
 
 **Late binding is load-bearing** (`defineAppDb.ts`). A domain may hold its entity client in a
@@ -382,14 +395,31 @@ cannot write — those two methods throw rather than silently storing the raw se
 | Reactive | `live(options)` returning a Dexie `Observable` |
 | Sync-shaped | `upsertMany`, `snapshotReplace`, `newestCursor`, `rowsMissing` |
 
-`buildQuery` (`dbClient.ts`) translates `QueryOptions` into a Dexie `Collection` with a fixed
-precedence: `scope` → first key of `equals` → `dateField` range → whole table; then `order === "desc"`
-reverses, then `filter` (in-memory), then `limit`. Only the *first* `equals` key reaches the index;
-`newestCursor` and `defineCachedEntity.count` narrow the rest in memory.
+`runQuery` (`dbClient.ts`) serves `query`, `first`, `count` (when options are given) and `live`.
+Its contract is the one `QueryOptions` documents (`types.ts`):
+
+- **`scope` and `equals` are one set of equalities** — `scope` is simply the first of them — and
+  *every* one holds on the result.
+- The read resolves through the **widest declared index** that covers them, checked by name against
+  the table's Dexie schema: `[scope+...equals+dateField]` (a range on the date, already inside
+  `since`/`until`), then `[scope+...equals]`, then the first equality field that is itself indexed,
+  then the whole table. Whatever the index did not absorb is filtered in memory.
+- With no equalities, an indexed `dateField` is read by range (`since`/`until`) or in index order.
+- **`dateField` orders the result**, newest first unless `order: "asc"`. This is the "latest N" read
+  every monitoring screen makes, so a `dateField` that did not sort would hand them the oldest rows.
+  `since`/`until` bound it, in memory when no index applied them. Without `dateField`, rows come in
+  storage order and `order: "desc"` reverses it.
+- Then `filter` (in memory), then `limit` (a slice of the ordered result).
+
+`count(options)` with options materializes the matching rows and returns their length; with none it
+is a plain `Table.count()`.
 
 `newestCursor` (`dbClient.ts`) prefers a compound index `[scope+equals...+dateField]` when the
 table actually declares it — checked by name against `tableRef.schema.indexes` — and otherwise falls
-back to reading the scope and folding with `newestValue`.
+back to reading the scope, narrowing by `equals` in memory and folding with `newestValue`. With
+`equals` but no scope it reads through the first `equals` field when that is indexed, else the whole
+table. `defineCachedEntity.count` and `.newestCursor` (the worker-side counterparts) read the scope
+through its index and narrow by `equals` in memory.
 
 ### 4.7 Projection — `projection.ts`
 
@@ -401,8 +431,9 @@ Deliberately free of Dexie and Vue, so every rule is unit-testable without Index
    (`projection.ts`) — the fallback is per-field, so a source that already uses the stored name
    wins over the rename.
 2. Coerce by `FieldKind`; drop `undefined` results.
-3. Return `null` when **any** PK member failed to project — an unkeyable record cannot be stored.
-4. Emit `{ ...row, syncedAt: now }` — the declared fields and nothing else. The untouched
+3. Give each PK member that is still absent its `keyDefaults` stand-in, when the entity declares one.
+4. Return `null` when **any** PK member is still missing — an unkeyable record cannot be stored.
+5. Emit `{ ...row, syncedAt: now }` — the declared fields and nothing else. The untouched
    server payload is deliberately not kept alongside them: storing both doubles every row, and a
    field a screen needs belongs in `fields`, where the schema can index and coerce it.
 
@@ -412,6 +443,9 @@ Supporting helpers:
   (`projection.ts`).
 - `diffStaleKeys(existing, fresh)` compares through `canonicalKey` but returns the **original** key
   form, so the result goes straight to `bulkDelete` (`projection.ts`).
+- `entityKeyOf(row, entity)` builds a stored row's key, or `undefined` when a member is
+  null/undefined. An empty string counts as missing too, unless that member's `keyDefaults` stand-in
+  is `""` (`projection.ts`).
 - `isUnkeyableFetch` is the snapshot safety valve: records came back but none can be keyed.
 - `keepNewerThan` / `newestValue` support cursor domains.
 - `isEffectiveNow` implements Moqui's `fromDate`/`thruDate` association lifetimes.
@@ -438,12 +472,12 @@ primary key where the token belongs, *after* the mutation has already succeeded.
 
 Fetch the **complete** set, then replace: upsert the fresh rows and prune everything in scope the
 fresh set no longer contains. Config (`defineSnapshotDomain.ts`) covers list URL, envelope key,
-paging, a fan-out, and two mutually exclusive refetch strategies.
+paging, a fan-out, and the refetch strategies.
 
 | Option | Effect |
 |---|---|
 | `listUrl`, `listParams` | the list request |
-| `collectionKey` | `null` = bare array; a string = `resp[key]`; omitted = "first array value" guess |
+| `collectionKey` | a string = `resp[key]`; `null` or omitted = a bare array, else the "first array value" guess. Only with `strictCollection` does `null` *require* a bare array |
 | `strictCollection` | throw on an unrecognized envelope instead of degrading to `[]` |
 | `batchSize` (default 250), `unpaged` | paging |
 | `fanOut` | one request per parent row, stamping the parent key onto each child |
@@ -452,9 +486,22 @@ paging, a fan-out, and two mutually exclusive refetch strategies.
 | `scopeOnSync` | restrict the snapshot's prune to one partition |
 | `projection` | explicit `Entity`; defaults to `getAppDb().entities[table]` |
 
+`refetchOne` picks **one** strategy, in a fixed precedence rather than by exclusivity
+(`defineSnapshotDomain.ts`): a `fanOut` domain without `byPk` re-lists the parent's slice; otherwise
+`byPk`; otherwise `refetchScope`; otherwise it does nothing and returns `0`.
+
+The `byPk` path does not catch: the mutation that asked for the refetch has already committed, so a
+failed read rejects (and reaches the caller as a `CacheReconciliationError`) rather than resolving
+`0` while the row stays stale. The response — or `resp[byPkRecordKey]` — may be the record itself or
+a one-item list. When no record comes back, the local row is deleted, so the table keeps no ghost of
+a record removed server-side.
+
 `requireComplete` is **not** a factory option. It belongs to `pageAll` (`workerRemoteApi.ts`), and
 the factory never sets it, so a snapshot walk that hits the page backstop warns and carries on. A
-hand-written snapshot pass should pass it itself (see F-PAGE).
+hand-written snapshot pass should pass it itself (see F-PAGE). `pageAll` de-duplicates across pages
+by the caller's `keyOf` — the factory passes the projected key — or, with no `keyOf`, by the
+record's own JSON. A record `keyOf` cannot key is kept and still counts as progress, so a walk over
+such records does not stop after one page as if the server had ignored `pageIndex`.
 
 Two guards protect against wiping a populated table (see flow `F-SNAP`):
 
@@ -507,10 +554,13 @@ the late-binding client of §4.4.
 exports used elsewhere: `commonDomainsByTable` (the status-catalog join, `seedDomains.ts`) and
 `COMMON_TABLE_NAMES` / `COMMON_DOMAIN_NAMES`.
 
-Three shapes appear:
+Four shapes appear:
 
-- plain list (`status`, `enum`, `geo`, and most of the rest);
+- plain list (`status`, `geo`, and most of the rest);
 - list plus `byPk` refetch (`productStore`, `facility`);
+- list plus `refetchScope`, re-listing one slice and snapshot-replacing it: `enum` refetches the
+  mutated enum by `enumId` (so `refreshAfterMutation("enum", { enumId })` drops a deleted enum), and
+  `groupFacility` re-lists one `facilityGroupId`;
 - list plus `fanOut` over `productStores` (`productStoreFacility`, `productStoreFacilityGroup`,
   `productStoreShipmentMethod`), where `refetchOne` re-lists and snapshot-replaces just that
   parent's slice (`defineSnapshotDomain.ts`).
@@ -546,12 +596,56 @@ worker's own event loop, the held bearer token, and teardown of the single timer
 (default 5 s) runs whichever activated domains are due, so N domains share one thread and one token
 subscription.
 
-`start(payload)` builds `ctx`, defaults `active` to **every registered class-B domain** when the
-caller names none (`pollingWorkerHarness.ts`), runs `ensureDbReady`, clears `lastRunAt`, runs one
-tick immediately, then `setInterval(tick, baseTickMs)`.
+**Two activation sets.** The harness keeps the domains it polls in two sets, and the active set is
+their union, de-duplicated by `activationKey` (`activeDomains()` in `pollingWorkerHarness.ts`):
 
-**Concurrency control** — three structures, because a poll tick and a post-mutation refetch can
-target one domain at once:
+| Set | Set by | Holds |
+|---|---|---|
+| `baseDomains` — the *start set* | `start(payload)` | `payload.domains`, or **every registered class-B domain** when the caller names none. Never replaced by a screen |
+| `viewDomains` — the *screen set* | `setDomains(domains)` | what the open screen activated (class A with args, typically) |
+
+`setDomains` replaces only the screen set, so the login seed set keeps polling alongside whatever a
+screen activates. It bumps a `viewGeneration` counter and drops `lastRunAt` only for activations no
+longer active: a re-activated domain bootstraps again, while the start set keeps its once-per-login
+clock. It is safe to call before `start()` — the set is simply held until the first tick.
+
+After `start()`, `setDomains` also runs the screen's newly due activations **at once**
+(`runNewActivations`), instead of leaving them for the next tick or queued behind a running pass —
+after login that pass is the whole seed set. They run one after another, alongside any running
+pass; `runDomain` still serialises work on any one domain. While one is in flight, a scheduled tick
+skips it and a forced pass waits on it instead of fetching again, so the refresh a screen issues
+right after activating costs one fetch, not two. An activation the screen drops before its turn is
+skipped.
+
+`setDomains` posts `activations-reset` naming each domain whose activation it dropped, unless an
+activation of that domain that was already active survives (the start set, say).
+
+`start(payload)` builds `ctx`, sets the start set, runs `ensureDbReady` (posting a `__start`
+`sync-error` if that throws), clears `lastRunAt`, runs one tick immediately, then
+`setInterval(tick, baseTickMs)`. A tick does nothing until a token is held.
+
+**Tick and forced passes.** A scheduled tick runs `dueDomains(activeDomains(), …)` sequentially —
+they share one thread and one backend. Forced passes come from the main thread:
+
+| Call | Forces |
+|---|---|
+| `syncNow()` | the **screen set** only — a page's manual refresh |
+| `syncAll()` | every active domain, start set **and** screen set — "Refresh all" |
+| `syncDomainNow(domain)` | one domain, bypassing the once-per-login guard |
+
+Overlapping passes are reconciled rather than dropped (`tick()`):
+
+- A scheduled tick that finds a tick running shares that tick.
+- A forced pass shares a running pass only when that pass is itself forced, covers its scope (an
+  `"all"` pass covers a `"view"` request), and chose its domains after the last `setDomains`.
+  Otherwise it **queues** behind the running pass, so a manual refresh issued mid-tick still gets a
+  pass over the domains it asked for instead of resolving against a pass that skipped them.
+- One queued pass serves every later forced request; an `"all"` request widens a queued `"view"` pass.
+- `syncNow` and `syncAll` propagate failures: the pass still runs every domain it chose, then rejects
+  naming the ones that failed. A scheduled tick swallows them (each is already posted as a status).
+
+**Concurrency control per domain** — three structures, because a poll tick and a post-mutation
+refetch can target one domain at once:
 
 | Structure | Purpose |
 |---|---|
@@ -562,23 +656,36 @@ target one domain at once:
 **`lastRunAt` stamping is deliberate, not incidental** (`pollingWorkerHarness.ts`): a run is
 stamped when it was forced, when the activation has a cadence, or when the domain actually recorded
 `loginSync:`. Otherwise the clock is left unset and the tick reports `retryPending: true`, so a
-class-B domain that returned nothing is retried on the next tick rather than marked done.
+class-B domain that returned nothing is retried rather than marked done.
+
+A domain with no cadence that fails, or returns without finishing, gets a `retryAt` of
+`RETRY_WITHOUT_INTERVAL_MS` (30 s) instead. It stays due until one pass completes, but scheduled
+ticks skip it until then, so an endpoint that keeps failing (a 403, a gateway page) is not hit on
+every 5 s tick. A domain with a cadence already waits its interval after a failure. Forced passes
+("Refresh", "Refresh all") ignore the wait, and a success, `start()` or the activation being
+dropped clears it.
 
 Messages the worker emits — `postMessage` for status, `BroadcastChannel(DB_SYNC_CHANNEL)` for
 "rows changed":
 
 | `postMessage` | When |
 |---|---|
-| `sync-start` | before a domain's `sync` |
+| `sync-cycle-start` `{domains, force}` | a tick or forced pass found domains to run, before the first |
+| `sync-start` `{domain}` | before a domain's `sync` |
 | `sync-end` `{domain, written, at, retryPending}` | after a successful `sync` |
-| `sync-error` `{domain, scope?, message}` | a failed `sync` or refetch, or an unregistered domain |
+| `sync-error` `{domain, scope?, message}` | a failed `sync` or refetch, an unregistered domain, a refetch on a domain with no `refetchOne`, or (`domain: "__start"`) a failed open on start |
+| `auth-error` `{domain, scope?, message}` | a failed `sync` **or** refetch classified as auth (status 401, or an "unauthorized"/"invalid token" message) — posted *instead of* `sync-error` |
 | `refetch-end` `{domain, scope, written}` | after a successful `refetchOne` |
-| `auth-error` | a refetch failure classified 401/unauthorized |
+| `sync-cycle-end` `{at, force}` | after that pass, whether or not it failed |
 
 | `BroadcastChannel` | When |
 |---|---|
 | `{type: "domain-synced", domain}` | after each successful domain sync |
-| `{type: "sync-complete"}` | at the end of every tick |
+| `{type: "sync-complete"}` | at the end of every tick or forced pass that ran at least one domain, including one that failed. A tick with nothing due posts nothing |
+
+The worker's refetch `scope` is `cacheScopeKey(pk)` from `sync/reconciliation.ts`: the PK as
+JSON-like text with its keys sorted (for example `{"enumId":"X"}`). The main thread keys a failed
+refetch the same way, so both sides name one record's failure identically.
 
 #### 4.10.2 Main thread — `sync/syncService.ts`
 
@@ -586,7 +693,19 @@ Messages the worker emits — `postMessage` for status, `BroadcastChannel(DB_SYN
 awaits the same in-flight attempt rather than spawning a second worker — App.vue mounts race),
 `ensureDbReady` *before* the worker exists to race it, spawn via `WorkerFactory` (Comlink-wrapped),
 publish the token at start and then every `tokenWatchMs` (default 15 s), route `auth-error` to the
-app's hook, and mirror every status message into the reactive `serviceState`.
+app's hook (after pushing the latest token and recording the error against its domain), and mirror
+every status message into the reactive `serviceState`.
+
+The service mirrors the harness's RPCs — `setDomains`, `syncNow`, `syncAll`, `syncDomainNow`,
+`refetchOne`, `catalog`, `registeredDomains` — and holds two cases the worker cannot yet see:
+
+- **A screen set set before the worker exists.** A view that activates during boot (a deep link)
+  runs before the Comlink handle does. `setDomains` therefore records the set first, and `start()`
+  sends it to the worker *before* `harness.start(...)`, so the worker's first pass already covers it.
+  `stop()` forgets it.
+- **A refresh during a start.** `syncNow` / `syncAll` wait out a start in flight rather than
+  vanishing against a handle that is not usable yet. `syncDomainNow`, `refetchOne` and `catalog`
+  answer `0` / `[]` when there is no worker.
 
 A **`startGeneration` counter** (`syncService.ts`) is bumped on every `start()`/`stop()` so a
 terminated attempt's last queued worker message — posted before teardown, delivered after — is
@@ -598,12 +717,16 @@ ignored rather than mutating state past that teardown.
 |---|---|---|
 | `running` | `start()` / `stop()` | a start attempt is in flight |
 | `lastSyncAt` | `sync-end`, successful `start()` | global; moves when *any* domain finishes |
-| `syncedAt[domain]` | `sync-end`, `refetch-end` | per domain: the `at` the worker stamped on its last completed pass |
+| `syncedAt[domain]` | `sync-end` (current only); removed on `activations-reset` and `stop()` | per domain: the `at` the worker stamped on the last completed pass of its **current** activation |
 | `written[domain]` | `sync-end`, `refetch-end` | rows written by that pass |
 | `errors[domain]` | `recordSyncError` / `clear*Error` | the visible message per domain (see below) |
 
 `syncedAt` exists because a screen asking "has *my* domain been fetched for this shop yet?" cannot
-answer that from `lastSyncAt`, which any other domain can move. `serviceState` is a Vue `reactive`,
+answer that from `lastSyncAt`, which any other domain can move. It only ever describes whatever
+holds the domain now. A `sync-end` with `current: false` is ignored (the pass was for a screen that
+has since left or re-scoped). An `activations-reset` removes the entry, so opening shop B after shop A
+waits for B's own pass. A `refetch-end` does not count, since one re-read record says nothing about
+the screen's set. `stop()` clears everything, so a new login starts unfetched. `serviceState` is a Vue `reactive`,
 so a `computed` reading `syncedAt[name]` before the key exists still tracks it and re-runs when the
 worker first writes it.
 
@@ -612,7 +735,13 @@ a successful full snapshot clears the whole domain, while a targeted `refetch-en
 own scope, because a message carrying no scope cannot prove some other failed scope recovered.
 `recordSyncError`, `clearDomainErrors` and `clearScopeError` are exported so that every writer —
 the worker status stream, a failed `start()`, a failed post-mutation refetch — goes through the one
-set of maps rather than keeping a parallel copy.
+set of maps rather than keeping a parallel copy. The visible message for a domain is its
+domain-level error if any, else the most recently recorded scoped one.
+
+**One failed refetch, one entry.** When a refetch fails, the worker posts the scoped failure and its
+Comlink promise then rejects into `refreshAfterMutation`, which records the same failure as a
+fallback. Both use `cacheScopeKey(pk)`, so `recordSyncError` sees the scope already holds that
+message and skips it. A later successful `refetch-end` for the same record then clears the error.
 
 #### 4.10.3 App facade — `sync/setupAppDbSync.ts`
 
@@ -625,12 +754,12 @@ owns the one service handle, so it also owns the domain set that handle is polli
 | Export | Behavior |
 |---|---|
 | `syncService()` | The live `SyncService`, or `null` before start / after a failed start |
-| `startAppDbSync(onSynced?)` | Idempotent (own `starting` promise plus `startGeneration`); creates the service, starts it, records `__start` failures |
+| `startAppDbSync(onSynced?)` | Idempotent (own `starting` promise plus `startGeneration`); creates the service, hands it any screen set activated before it existed, starts it, records `__start` failures |
 | `stopAppDbSync()` | Stops the service, closes the `useSeedData` live tables (`clearSeedTables`), and **clears every data table** (`setupAppDbSync.ts`) |
 | `refreshAfterMutation(domain, pk)` | `whenReady()` then `service.refetchOne`; any failure is wrapped in `CacheReconciliationError` |
 | `resyncDomain(domain)` | Deletes `loginSync:{domain}` then `syncDomainNow` |
-| `resyncReferenceData()` | Deletes every `domain:` / `loginSync:` marker, then `syncNow` |
-| `syncNow()` | Forces a pass over whatever is currently active. Clears no markers — the cheap "refresh what is on screen" |
+| `resyncReferenceData()` | "Refresh all": deletes every `domain:` / `loginSync:` marker, then `service.syncAll()` — every active domain, the login seed set included |
+| `syncNow()` | Forces a pass over the **screen set** only. Clears no markers — the cheap "refresh what is on screen" |
 | `bootstrapState` | `reactive` view over `serviceState` (running / written / errors) |
 
 **View-scoped activation** (replaces the former Company composable `useDbSync`)
@@ -638,17 +767,20 @@ owns the one service handle, so it also owns the domain set that handle is polli
 | Export | Behavior |
 |---|---|
 | `createSyncDomainOwner(label)` | Returns a distinct owner id, `` `${label}:${n}` ``, for one screen **instance** |
-| `activateSyncDomains(domains, owner)` | Records `owner` as the holder, stores the set, clears stale errors for those domains, then `service.setDomains(domains)`. Idempotent — call again to re-scope |
+| `activateSyncDomains(domains, owner)` | Records `owner` as the holder, stores the set, clears stale errors for the domains it newly activates (one already active with the same args keeps its failure, since the worker does not re-run it), then `service.setDomains(domains)`. Idempotent — call again to re-scope |
 | `deactivateSyncDomains(owner?)` | Clears the set and calls `setDomains([])` — but **only if `owner` still holds the worker**. No owner means an unconditional clear |
 | `syncDomainsReady` | `Ref<boolean>`: true once the latest activation's `setDomains` resolved (or immediately when there is no service) |
 | `syncDomainsError` | `ComputedRef<string>`: the error of an *activated* domain, or `""` |
 
 The rules the activation half enforces:
 
-- **One worker, one active set.** The set is module-scoped inside `setupAppDbSync` and not
-  exported. Two features that need to poll together on one screen compose one domain list and
-  activate it once (Company's `useShopify` does this); two separate activations would overwrite
-  each other.
+- **One worker, one screen set.** The set is module-scoped inside `setupAppDbSync` and not
+  exported; it is the harness's screen set, polled alongside the start set (§4.10.1). Two features
+  that need to poll together on one screen compose one domain list and activate it once (Company's
+  `useShopify` does this); two separate activations would overwrite each other.
+- **An activation survives boot.** A screen that activates before the service exists (a deep link
+  lands before App.vue starts the sync) keeps its set: `startAppDbSync` hands it to the new service,
+  which sends it to the worker ahead of `start()`.
 - **Teardown is keyed on the owner, not the domain set.** Ionic fires `didLeave` on the outgoing
   view *after* `willEnter` on the incoming one, so the old view's teardown routinely runs when the
   new view already holds the worker. Without the check it would wipe the new view's domains, and
@@ -681,18 +813,60 @@ association write: the server change *did* land, only the local reconciliation f
 | Composable | Shape | Notes |
 |---|---|---|
 | `useDb(table, options?)` | `{ records, first, count, hydrated, error }` | One entry point, always a list; `first` is a computed, because reading one row through `equals` on the PK is the same index lookup `get()` does. Re-subscribes on any options change (`deep: true`), unsubscribes on unmount. |
-| `useSeedData()` | reactive getters (no prefix) plus a few async `get*` getters | One Dexie `liveQuery` per seed table, keyed by database name and table, opened on first use and kept until logout. All callers share it, and it re-emits on any write to the table. Reactive getters (`statusDescription`, `enumsByType`, `countries`, …) are synchronous reads of the table's `shallowRef`, for templates and computeds. Async `get*` getters await the first emission and return the current rows, for stores and code that must act on the rows. Joins happen in memory, and labels fall back to the raw id. Not a Pinia store, and not page-scoped. |
-| `useDbStatus(db, catalogSource, actions)` | `{ domains, loaded, refreshing, totalRows, oldestSyncedAt, lastSyncedAt, refreshDomain, refreshAll }` | Drives the Settings card off a `liveQuery` over `syncMeta` plus per-table counts, plus a `DB_SYNC_CHANNEL` listener. |
+| `useSeedData()` / `seedData` | reactive getters (no prefix), list getters with `.withSync(...)`, plus a few async `get*` getters | One Dexie `liveQuery` per seed table, keyed by database name and table, opened on first use and kept until logout. All callers share it. Not a Pinia store, and not page-scoped. Detail below. |
+| `useDbStatus(db, catalogSource, actions)` | `{ domains, loaded, catalogLoaded, refreshing, totalRows, oldestSyncedAt, lastSyncedAt, refreshDomain, refreshAll }` | Drives the Settings card off a `liveQuery` over `syncMeta` plus per-table counts, plus a `DB_SYNC_CHANNEL` listener. |
 
 `hydrated` (`useDb.ts`) is `emitted && (records.length > 0 || !serviceState.running)` — that is
 what lets a view distinguish "the seed sync has not finished yet" from "this table is genuinely
 empty", and it is the only reason `serviceState` is reactive.
 
-`useSeedData` has no such flag: a table's first render answers with the raw id or `[]` until its
-first read lands. Company's `useSeed.ts` wrappers rebuild `hydrated` on top of it with the same
-formula (the async getter has resolved, and there are rows or `serviceState.running` is false).
-`clearSeedTables()` unsubscribes every live table; `stopAppDbSync` calls it on logout. The OMS
-instance cannot change without logout, so there is no per-instance eviction.
+**`useSeedData` (`composables/useSeedData.ts`).** Each seed table's live query reads, in **one**
+`"r"` transaction, the table's rows *and* its seed domain's `loginSync:{domain}` marker
+(`readSeedTable`; the domain comes from `commonDomainsByTable`, and a table no seed domain fills
+counts as synced). The sync commits a domain's rows before its marker and logout clears both, so a
+read that sees the marker also sees the rows. The query therefore re-emits when the table changes
+— the login sync, a `refreshAfterMutation`, a resync — and when that one marker lands. It calls
+`ensureDbReady` inside the querier (see *Inside a live query*, §4.4), and the querier is itself
+`async`, because Dexie only carries its read tracking across the awaits of an async querier.
+
+Three kinds of getter:
+
+- **Reactive getters** (no prefix) are synchronous reads of the table's `shallowRef`, for templates
+  and computeds. On a cold table they answer with the raw id or `[]` for that first render.
+  - Labels, falling back to the raw id: `statusDescription`, `enumDescription`, `facilityName`,
+    `productStoreName`, `carrierName`, `shipmentMethodDescription`, `paymentMethodDescription`,
+    `geoName`, `orderAdjustmentTypeDescription`, the return / contact-purpose /
+    communication-event / party-relationship descriptions.
+  - Rows by key: `facility(id)`, `facilityType(id)`.
+  - Lists: whole tables (`statuses`, `enums`, `enumTypes`, `geos`, `facilities`, `facilityTypes`,
+    `carriers`, `shipmentMethodTypes`, `paymentMethodTypes`, `roleTypes`, `partyRelationshipTypes`,
+    `shopifyShops`, `shopifyShopLocations`) and derived ones (`statusItemsByType`, `enumsByType`,
+    `enumsByParentType`, `orderIdentificationTypeOptions`, `productStoreFacilities`,
+    `shipmentMethodsByCarrier`, `shipmentMethodOptions`, `countries`, `states`, `statesForCountry`,
+    `dbicCountries`, `allowedTransitions`).
+- **`.withSync(...args)`** on every list getter answers `{ data, synced }` (`WithSync<T>`;
+  the getter's type is `ListGetter`). `synced` is true once **every** table behind the getter holds
+  this login's sync, so an empty `data` is real. Use it wherever an empty list drives a decision
+  ("this country has no states"). Label getters have none: a missing row already answers with the id.
+- **Async `get*` getters** (`getProductStores`, `getFacilities`, `getFacilityTypes`, `getGeos`,
+  `getPaymentMethodTypes`, `getEnumsByType`, `getProductStoreFacilities`,
+  `getFacilityParentTypeIds`, `getStatesForCountry`) await the table's first emission and return
+  its current rows.
+
+`allowedTransitions(statusId, statusFlowId?)` reads **one** status flow — `statusFlowId`, or
+`"Default"` when none is named, as OMS validates an order without one — because flows reuse status
+ids (a transfer order's flow also leaves `ITEM_CREATED`). It returns the transitions in authored
+`transitionSequence` (unsequenced last, then by target status), each with `toStatusDescription`.
+
+`seedData` is the same API as a plain object (`export const seedData: SeedData = useSeedData()`), for
+stores, services and utils, which do not call composables. Every getter reads the shared module-level
+tables, so it and `useSeedData()` answer the same.
+
+Company's `useSeed.ts` wrappers still rebuild `hydrated` on top of `useSeedData` with `useDb`'s
+formula (the async getter has resolved, and there are rows or `serviceState.running` is false)
+rather than using `withSync`. `clearSeedTables()` unsubscribes every live table; `stopAppDbSync`
+calls it on logout. The OMS instance cannot change without logout, so there is no per-instance
+eviction.
 
 `useDbStatus` accepts **either** a static `SyncDomainCatalogItem[]` or a function returning the
 worker's registry-derived catalog over Comlink, resolving the async form once and re-subscribing when
@@ -708,19 +882,21 @@ it goes from empty to populated (`useDbStatus.ts`). The per-domain `status` is
 | Piece | File |
 |---|---|
 | Own schema — **48 tables** | `src/db/companySchema.ts` |
-| Database — 17 picked seed tables plus its own 48 (65 data tables), schema `version: 3` | `src/db/companyDb.ts` |
-| Worker entry — registers 24 seed plus 22 hand-written plus 26 reference domains (72 total) | `src/workers/appSync.worker.ts` |
+| Database — 17 picked seed tables plus its own 48 (65 data tables), schema `version: 4` | `src/db/companyDb.ts` |
+| Worker entry — registers 12 seed plus 22 hand-written plus 26 reference domains (60 total: 41 class B, 19 class A) | `src/workers/appSync.worker.ts` |
 | Hand-written domains | `src/workers/domains/*.ts` (15 files, plus `referenceDomains.ts`; ~2 600 lines together) |
 | App-owned sync policy | `src/config/appSyncConfig.ts` |
 | Main-thread facade, including view-scoped activation | `src/services/appDbSync.ts` |
-| Per-view class-A activation call sites | `views/NetSuite.vue`, `ShopifyProductSync.vue`, `ShopifyInventorySync.vue`, `ShopifyFulfillmentSync.vue`; `composables/useShopify.ts`, `useProductStoreOnboardingInitialLoad.ts` |
+| Per-view class-A activation call sites | `views/NetSuite.vue`, `NetSuiteSyncMonitor.vue`, `ShopifyProductSync.vue`, `ShopifyInventorySync.vue`, `ShopifyFulfillmentSync.vue`, `ShopifyTransferSync.vue`, `ShopifyTransferSyncDetail.vue`; `composables/useShopify.ts`, `useProductStoreOnboardingInitialLoad.ts`; `services/inventorySyncArea.ts` |
 | Read composables | `src/composables/useSeed.ts` (seed lookups are thin wrappers over `useSeedData`; its own tables stay on `useDb`), `useSystemMessage.ts`, `useAppVersion.ts` |
 
 ```ts
 // src/db/companyDb.ts
 export const companyDb = defineAppDb({
   suffix: "CompanyDB",
-  version: 3,   // v2: shopifyLocationInventory* stores; v3: inventory ledger / fulfillment re-key
+  // v2: shopifyLocationInventory* stores; v3: inventory ledger / fulfillment re-key;
+  // v4: restored fields screens read, re-keyed facilityIdentifications and shopifyTransferPending
+  version: 4,
   schema: mergeSchemas(commonSchema.pick([...COMPANY_SEED_TABLES]), companySchema),
 });
 companyDb.setOmsInstanceResolver(() => "default");   // test/fallback; main.ts replaces it
@@ -728,10 +904,14 @@ companyDb.setOmsInstanceResolver(() => "default");   // test/fallback; main.ts r
 
 Notable app-level choices:
 
+- **Only the seed domains for picked tables.** The worker derives its seed domains from the composed
+  schema — every `commonDomains` entry whose table is in `companyDb.seedTables` — rather than from a
+  hand list, so it never registers a seed domain for a table Company did not pick (`appSync.worker.ts`).
 - **Overrides rather than seed reuse.** `carrier`, `carrierShipmentMethod`, `shopifyShop`,
-  `facilityGroups` and `statuses` are re-declared in `referenceDomains.ts` with Company-specific
+  `facilityGroup` and `status` are re-declared in `referenceDomains.ts` with Company-specific
   `listParams`, `refetchScope`, `strictCollection` and `byPk`, while the *table* still comes from the
-  seed schema. The seed domain for those names is simply not registered (`appSync.worker.ts`).
+  seed schema. The seed domains for those five tables are excluded (`OVERRIDDEN_SEED_TABLES` in
+  `appSync.worker.ts`), which is why 17 picked tables yield 12 seed domains.
 - **The worker registers its own resolver** (`appSync.worker.ts`), because Company's hand-written
   domains reach the database through `companyDb.entity(...)`, then `raw()`, then the resolver. Order
   Manager does not need this.
@@ -743,8 +923,7 @@ Notable app-level choices:
   `harness.setDomains(...)` in the worker. `ShopifyProductSync.vue` is the fullest example: system
   messages per feature type, data-manager logs per import config, the sync-run spine, service-job
   runs scoped to displayed jobs, and `productUpdateHistory` scoped to one shop. The former
-  `composables/useDbSync.ts` wrapper has been deleted (see
-  `docs/superpowers/specs/2026-09-21-remove-usedbsync-design.md`).
+  `composables/useDbSync.ts` wrapper has been deleted.
 - Screens read per-domain freshness from `serviceState.syncedAt[domain]` (for example
   `ShopifyTransferSync`'s "loaded" gate) and show a banner from `syncDomainsError`.
 - `appSyncConfig.ts` encodes the rule the machinery cannot: **do not poll an arbitrary window of
@@ -757,9 +936,11 @@ Notable app-level choices:
 ### 5.2 Order Manager (`apps/order-manager`)
 
 ```ts
-// src/db/orderManagerDb.ts:30
+// src/db/orderManagerDb.ts
 export const orderManagerDb = defineAppDb({
-  suffix: "OrderManagerDB", version: 1,
+  suffix: "OrderManagerDB",
+  // v2: statusFlowTransitions gained transitionName and conditionExpression.
+  version: 2,
   schema: commonSchema,          // the whole seed schema; no tables of its own
 });
 ```
@@ -772,9 +953,11 @@ export const orderManagerDb = defineAppDb({
   pre-`defineAppDb` call sites unchanged (`orderManagerDb.ts`).
 - The Settings card uses the **static** `orderManagerDb.statusCatalog`; Company uses the async worker
   catalog.
-- Reads go almost entirely through `useSeedData()` — around 30 files across components and views
-  call its reactive getters straight from templates and computeds, with no watchers. The few places
-  that build requests or brokering decisions from seed rows await its `get*` getters.
+- Reads go almost entirely through `useSeedData()` — around 35 files across components, views and
+  stores call its reactive getters straight from templates and computeds. Components that decide on
+  an empty list use `.withSync` (`AddContactModal.vue`'s states, `OrderTimeline.vue`'s facility
+  lookups). Stores read the plain `seedData` object synchronously (`store/orderDetail.ts`), and the
+  places that must wait for the rows await its `get*` getters.
 - `services/appDbSync.ts` re-exports only the lifecycle half of `setupAppDbSync`; with no class-A
   domains it has no use for the activation members.
 
@@ -788,8 +971,8 @@ No `src/db`, no sync worker. Not a consumer of this framework.
 |---|---|---|
 | Seed tables picked | 17 of 29 | all 29 |
 | Own tables | 48 | 0 |
-| Schema version | 3 | 1 |
-| Domains registered | 72 (24 seed, 22 hand-written, 26 reference) | 29 seed |
+| Schema version | 4 | 2 |
+| Domains registered | 60 (12 seed, 22 hand-written, 26 reference) | 29 seed |
 | Class-A domains | 19 | 0 |
 | View-scoped activation | `activateSyncDomains` / `deactivateSyncDomains` with owners | none |
 | Worker registers OMS resolver | yes | no (not needed) |
@@ -869,17 +1052,20 @@ The framework layer is verified by the following specs under `common/tests/`:
 | `commonSchema.spec.ts` | the 29 seed entities agree with `COMMON_TABLE_NAMES` |
 | `defineAppDb.spec.ts` | naming, handle reuse, status catalog |
 | `dbClient.spec.ts` | compound-key pass-through, empty-key short-circuit, resolver late binding |
-| `projection.spec.ts` | coercions, unkeyable rows, `diffStaleKeys` |
+| `dbClient.query.spec.ts` | `runQuery`: every equality applied, `dateField` ordering and bounds, `count` agreeing with `query` |
+| `projection.spec.ts` | coercions (an empty structured list kept as `[]`), unkeyable rows, `keyDefaults`, `diffStaleKeys` |
 | `cachedEntity.spec.ts` | `defineCachedEntity` snapshot/upsert/cursor |
 | `snapshotDomain.{contract,keys,label}.spec.ts` | envelope handling, key building, labels |
 | `cursorDomain.spec.ts` | shallow-window deepening, cursor params |
 | `syncRegistry.spec.ts` | `activationKey`, `dueDomains` |
-| `syncHarness.spec.ts`, `syncHarness.ordering.spec.ts` | tick, queues, exclusive/shared ordering |
+| `syncHarness.spec.ts`, `syncHarness.ordering.spec.ts` | tick, queues, exclusive/shared ordering; start set vs screen set, `syncNow` vs `syncAll`, forced passes queued and widened |
 | `ensureDbReady.spec.ts` | open, version-gate rebuild, memoised check, first use inside a live query |
 | `syncService.spec.ts` | idempotent start, generation guard, error routing, `syncedAt` |
-| `setupAppDbSync.spec.ts` | activation / owner-guarded deactivation, generation guard, scoped `syncDomainsError` |
+| `setupAppDbSync.spec.ts` | activation / owner-guarded deactivation, generation guard, scoped `syncDomainsError`, an activation made before start, Refresh all routed to `syncAll` |
 | `clearDatabaseTables.spec.ts` | the logout clear keeps the schema version |
 | `useDbStatus.spec.ts` | catalog resolution, counts, status derivation |
+| `useSeedData.spec.ts` | the seed lookups, `seedData` answering like `useSeedData()`, `allowedTransitions` per flow, async getters on a cold table |
+| `useAuth.spec.ts` | logout reading an OFBiz text response and an already-parsed Maarg one |
 | `workerRemoteApi.spec.ts`, `workerFetch.spec.ts` | query serialization, paging, empty-body 200 |
 
 ---
@@ -891,31 +1077,31 @@ The framework layer is verified by the following specs under `common/tests/`:
 | `common/db/index.ts` | 32 | barrel (main thread only) |
 | `common/db/types.ts` | 78 | `DbRow`, `DbKey`, `FieldKind`, `QueryOptions`, `SyncContext`, `SyncDomain` |
 | **`common/db/schema/`** | | **declaring entities, schemas and the app database** |
-| `common/db/schema/defineEntity.ts` | 129 | entity declaration and validation |
-| `common/db/schema/defineSchema.ts` | 116 | `defineSchema`, `pick`, `extendIndexes`, `mergeSchemas` |
+| `common/db/schema/defineEntity.ts` | 144 | entity declaration and validation |
+| `common/db/schema/defineSchema.ts` | 117 | `defineSchema`, `pick`, `extendIndexes`, `mergeSchemas` |
 | `common/db/schema/defineAppDb.ts` | 144 | per-app database facade |
 | `common/db/schema/appDbRegistry.ts` | 14 | active-app-db singleton |
 | **`common/db/storage/`** | | **Dexie access and row projection** |
-| `common/db/storage/baseDb.ts` | 203 | `BaseDB`, `ensureDbReady` (open + version gate), login markers |
-| `common/db/storage/dbClient.ts` | 345 | `DbClient` / `EntityClient` |
-| `common/db/storage/projection.ts` | 169 | coercion, keying, diffing |
+| `common/db/storage/baseDb.ts` | 212 | `BaseDB`, `ensureDbReady` (open + version gate, global-zone check), `clearDatabaseTables`, login markers |
+| `common/db/storage/dbClient.ts` | 413 | `DbClient` / `EntityClient` |
+| `common/db/storage/projection.ts` | 179 | coercion, keying, diffing |
 | **`common/db/seed/`** | | **framework seed tables and their domains** |
-| `common/db/seed/seedSchema.ts` | 307 | `commonSchema`: 29 seed entities |
-| `common/db/seed/seedDomains.ts` | 299 | `commonDomains`: 29 seed class-B domains, `commonDomainsByTable`, `COMMON_TABLE_NAMES` |
+| `common/db/seed/seedSchema.ts` | 337 | `commonSchema`: 29 seed entities |
+| `common/db/seed/seedDomains.ts` | 305 | `commonDomains`: 29 seed class-B domains, `commonDomainsByTable`, `COMMON_TABLE_NAMES` |
 | **`common/db/composables/`** | | **Vue read surface (main thread only)** |
 | `common/db/composables/useDb.ts` | 92 | reactive list read |
-| `common/db/composables/useSeedData.ts` | 290 | live seed lookups |
+| `common/db/composables/useSeedData.ts` | 427 | live seed lookups, `withSync`, `seedData` |
 | `common/db/composables/useDbStatus.ts` | 218 | status card |
 | **`common/db/sync/`** | | **domains, worker runtime and main-thread lifecycle** |
 | `common/db/sync/defineSyncDomain.ts` | 23 | hand-written domain constructor |
 | `common/db/sync/cachedEntity.ts` | 104 | `defineCachedEntity`, the worker-side write helper both factories share |
-| `common/db/sync/defineSnapshotDomain.ts` | 206 | class-B factory |
+| `common/db/sync/defineSnapshotDomain.ts` | 207 | class-B factory |
 | `common/db/sync/defineCursorDomain.ts` | 134 | class-A factory |
 | `common/db/sync/syncRegistry.ts` | 104 | registry and scheduling rule |
-| `common/db/sync/pollingWorkerHarness.ts` | 317 | worker runtime |
-| `common/db/sync/syncService.ts` | 299 | main-thread worker lifecycle, `serviceState`, error maps |
-| `common/db/sync/setupAppDbSync.ts` | 327 | app-facing facade, view-scoped activation |
+| `common/db/sync/pollingWorkerHarness.ts` | 400 | worker runtime: start set / screen set, forced passes, queues |
+| `common/db/sync/syncService.ts` | 322 | main-thread worker lifecycle, `serviceState`, error maps |
+| `common/db/sync/setupAppDbSync.ts` | 333 | app-facing facade, view-scoped activation |
 | `common/db/sync/channels.ts` | 44 | `DB_SYNC_CHANNEL` (row-change broadcast) and the token push channel |
 | `common/db/sync/reconciliation.ts` | 52 | `CacheReconciliationError`, `isCacheReconciliationError`, `cacheScopeKey` |
-| `common/core/workerRemoteApi.ts` | 303 | worker fetch, `pageAll`, `pageNewestFirst` |
+| `common/core/workerRemoteApi.ts` | 306 | worker fetch, `pageAll`, `pageNewestFirst` |
 | `common/core/workerFactory.ts` | 37 | Comlink worker spawn |

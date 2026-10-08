@@ -14,10 +14,13 @@
 import { expose } from "comlink";
 import { type BaseDB, ensureDbReady, hasSyncedThisLogin } from "../storage/baseDb";
 import { DB_SYNC_CHANNEL, subscribeToken } from "./channels";
+import { cacheScopeKey } from "./reconciliation";
 import type { SyncContext, SyncDomain } from "../types";
 import {
   type ActiveDomain,
   activationKey,
+  type CatalogItem,
+  catalogFrom,
   dueDomains,
   effectiveInterval,
   getAllSyncDomains,
@@ -36,22 +39,22 @@ export interface HarnessStartPayload {
   domains?: ActiveDomain[];
 }
 
-export interface CatalogItem {
-  name: string;
-  table?: string;
-  label: string;
-  syncClass: "A" | "B" | "C";
-}
+export type { CatalogItem };
 
 export interface SyncHarness {
   start: (payload: HarnessStartPayload) => Promise<void>;
-  /** Force every activated domain to run now (manual refresh, routed from the main thread). */
+  /** Force the screen-activated domains to run now (a page's manual refresh). */
   syncNow: () => Promise<void>;
+  /** Force EVERY active domain — the start set and the screen's — to run now ("Refresh all"). */
+  syncAll: () => Promise<void>;
   /** Force one domain to re-sync now, bypassing the once-per-login guard. */
   syncDomainNow: (domain: string) => Promise<number>;
   /** Refetch one record after a mutation. */
   refetchOne: (request: { domain: string; pk: Record<string, unknown> }) => Promise<number>;
-  /** Replace the activated domain set without respawning the worker. */
+  /**
+   * Replace the SCREEN-activated domain set without respawning the worker. The start set (class B by
+   * default) stays active alongside it. Safe to call before `start()`; the set is held until then.
+   */
   setDomains: (domains: ActiveDomain[]) => void;
   stop: () => void;
   /** Diagnostics: which domains this worker build knows about. */
@@ -61,19 +64,69 @@ export interface SyncHarness {
 }
 
 const DEFAULT_BASE_TICK_MS = 5_000;
-
-/** A stable string for one PK, so two refetches of the same record share a queue. */
-function scopeKeyOf(pk: Record<string, unknown>): string {
-  return Object.keys(pk).sort().map((k) => `${k}=${String(pk[k])}`).join("|");
-}
+/**
+ * How long a domain with no `intervalMs` waits after a failed or unfinished pass before it is due
+ * again. It stays due until one pass completes, but the base tick is short for the screens' sake,
+ * and retrying every tick hammered an endpoint that kept failing (a 403, a gateway page).
+ */
+export const RETRY_WITHOUT_INTERVAL_MS = 30_000;
 
 export function createSyncHarness(getDb: (omsInstance: string) => BaseDB): SyncHarness {
   let ctx: SyncContext = { maargUrl: "", token: "", omsInstance: "", now: Date.now() };
-  let active: ActiveDomain[] = [];
+  /** The set `start()` activated — class B by default. Never replaced by a screen. */
+  let baseDomains: ActiveDomain[] = [];
+  /** The set the open screen activated through `setDomains`. */
+  let viewDomains: ActiveDomain[] = [];
   let baseTickMs = DEFAULT_BASE_TICK_MS;
   let timer: ReturnType<typeof setInterval> | null = null;
-  let running = false;
+  let activeTick: Promise<void> | null = null;
+  let activeTickForced = false;
+  let activeTickScope: "view" | "all" = "view";
+  /** `viewGeneration` at the moment the running tick chose its domains. */
+  let activeTickGeneration = 0;
+  let queuedForcedTick: Promise<void> | null = null;
+  /** Read when the queued pass starts, so a later "all" request can widen a queued "view" pass. */
+  let queuedForcedScope: "view" | "all" = "view";
+  /** Bumped by `setDomains`, so a forced pass knows whether a running one still covers its set. */
+  let viewGeneration = 0;
+
+  /** Every active domain, base first, one entry per activation. */
+  function activeDomains(): ActiveDomain[] {
+    const seen = new Set<string>();
+    return [...baseDomains, ...viewDomains].filter((entry) => {
+      const key = activationKey(entry);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }
+  /** Whether an activation, by key, is still active: a screen may leave or re-scope mid-run. */
+  function isActive(key: string): boolean {
+    return activeDomains().some((entry) => activationKey(entry) === key);
+  }
   const lastRunAt: Record<string, number> = {};
+  /** When a domain with no interval, by activation key, may next be retried after a failed pass. */
+  const retryAt: Record<string, number> = {};
+  /** Due by its clock, and not waiting out a failure. Only scheduled runs wait; forced ones do not. */
+  function dueNow(entries: ActiveDomain[], now: number): ActiveDomain[] {
+    return dueDomains(entries, lastRunAt, now, (entry) => effectiveInterval(entry, getSyncDomain(entry.name)))
+      .filter((entry) => (retryAt[activationKey(entry)] ?? 0) <= now);
+  }
+  /** Forget the run and retry clocks of every activation key not in `keep` (all of them when omitted). */
+  function dropClocks(keep?: Set<string>): void {
+    for (const clock of [lastRunAt, retryAt]) {
+      for (const key of Object.keys(clock)) {
+        if (!keep?.has(key)) delete clock[key];
+      }
+    }
+  }
+  /**
+   * Screen activations `setDomains` started at once, by activation key, while they run.
+   *
+   * A pass that comes due meanwhile skips them, and a forced pass waits on them instead of fetching
+   * the same rows again: a screen typically asks for a refresh right after activating.
+   */
+  const activationRuns = new Map<string, Promise<number>>();
   const refetchQueues = new Map<string, Promise<void>>();
   const domainExclusiveQueues = new Map<string, Promise<void>>();
   const domainSharedOperations = new Map<string, Set<Promise<void>>>();
@@ -150,15 +203,28 @@ export function createSyncHarness(getDb: (omsInstance: string) => BaseDB): SyncH
       const interval = effectiveInterval(entry, domain);
       const completed = force || interval !== undefined || await hasSyncedThisLogin(getDb(ctx.omsInstance), entry.name);
       const at = Date.now();
-      if (completed) lastRunAt[clockKey] = at;
-      post({ type: "sync-end", domain: entry.name, written, at, retryPending: !completed });
+      if (completed) {
+        lastRunAt[clockKey] = at;
+        delete retryAt[clockKey];
+      } else {
+        retryAt[clockKey] = at + RETRY_WITHOUT_INTERVAL_MS;
+      }
+      // `current` is false when the screen that activated this pass has since left or re-scoped,
+      // so the main thread does not count it as a pass for whatever holds the domain now.
+      post({
+        type: "sync-end", domain: entry.name, written, at, retryPending: !completed,
+        key: clockKey, current: isActive(clockKey),
+      });
       syncChannel?.postMessage({ type: "domain-synced", domain: entry.name });
 
       return written as number;
     } catch (err) {
+      // A domain with an interval waits that interval before retrying; one without waits
+      // RETRY_WITHOUT_INTERVAL_MS, and stays due until a pass completes.
       if (effectiveInterval(entry, domain) !== undefined) lastRunAt[clockKey] = Date.now();
-      const message = (err as any)?.message ?? (typeof err === "string" ? err : JSON.stringify(err ?? ""));
-      post({ type: "sync-error", domain: entry.name, message });
+      else retryAt[clockKey] = Date.now() + RETRY_WITHOUT_INTERVAL_MS;
+      const { isAuth, message } = classifyError(err);
+      post({ type: isAuth ? "auth-error" : "sync-error", domain: entry.name, message });
       if (propagateError) throw err;
 
       return 0;
@@ -176,23 +242,30 @@ export function createSyncHarness(getDb: (omsInstance: string) => BaseDB): SyncH
     );
   }
 
-  async function tick(force = false, propagateErrors = false): Promise<void> {
-    if (running || !ctx.token) return;
-    running = true;
+  async function executeTick(force: boolean, scope: "view" | "all", propagateErrors: boolean): Promise<void> {
+    const now = Date.now();
+    activeTickGeneration = viewGeneration;
+    const due = force
+      ? (scope === "all" ? activeDomains() : viewDomains)
+      : dueNow(activeDomains(), now)
+        .filter((entry) => !activationRuns.has(activationKey(entry)));
+    if (!due.length) return;
+    post({ type: "sync-cycle-start", domains: due.map(({ name }) => name), force });
     try {
-      const now = Date.now();
-      const due = force
-        ? active
-        : dueDomains(active, lastRunAt, now, (entry) => effectiveInterval(entry, getSyncDomain(entry.name)));
+      // Sequential: these share one thread and one backend; parallel bursts buy nothing here.
       const failures: Array<{ domain: string; error: unknown }> = [];
       for (const entry of due) {
         try {
+          const inFlight = activationRuns.get(activationKey(entry));
+          if (inFlight) {
+            await inFlight.catch((error) => { if (propagateErrors) throw error; });
+            continue;
+          }
           await runDomain(entry, force, propagateErrors);
         } catch (error) {
           failures.push({ domain: entry.name, error });
         }
       }
-      syncChannel?.postMessage({ type: "sync-complete" });
       if (failures.length) {
         throw new Error(
           `Failed to sync domains: ${failures.map(({ domain }) => domain).join(", ")}.`,
@@ -200,8 +273,60 @@ export function createSyncHarness(getDb: (omsInstance: string) => BaseDB): SyncH
         );
       }
     } finally {
-      running = false;
+      syncChannel?.postMessage({ type: "sync-complete" });
+      post({ type: "sync-cycle-end", at: Date.now(), force });
     }
+  }
+
+  function beginTick(force: boolean, scope: "view" | "all", propagateErrors: boolean): Promise<void> {
+    activeTickForced = force;
+    activeTickScope = scope;
+    activeTickGeneration = viewGeneration;
+    // Deferred one microtask so `tracked` is assigned before its cleanup can run, even for a tick
+    // with nothing due that completes at once.
+    const operation = Promise.resolve().then(() => executeTick(force, scope, propagateErrors));
+    const tracked = operation.finally(() => {
+      if (activeTick === tracked) {
+        activeTick = null;
+        activeTickForced = false;
+      }
+    });
+    activeTick = tracked;
+
+    return tracked;
+  }
+
+  /**
+   * A scheduled tick shares whatever tick is running. A FORCED pass never does unless the running
+   * one is forced too: it queues behind it, so a manual refresh issued mid-tick still gets a pass
+   * over the domains it asked for instead of resolving against a pass that skipped them. It shares
+   * a running forced pass only when that pass covers its scope and chose its domains after the last
+   * `setDomains`. One queued pass serves every later forced request; an "all" request widens it.
+   */
+  function tick(force = false, propagateErrors = false, scope: "view" | "all" = "view"): Promise<void> {
+    if (!ctx.token) return Promise.resolve(); // wait until start() supplies a token
+    if (!activeTick) return beginTick(force, scope, propagateErrors);
+    if (!force) return activeTick;
+    const runningCovers = activeTickForced
+      && (activeTickScope === "all" || scope === "view")
+      && activeTickGeneration === viewGeneration;
+    if (runningCovers) return activeTick;
+    if (queuedForcedTick) {
+      if (scope === "all") queuedForcedScope = "all";
+      return queuedForcedTick;
+    }
+
+    const predecessor = activeTick;
+    queuedForcedScope = scope;
+    const queued = predecessor
+      .catch(() => undefined)
+      .then(() => beginTick(true, queuedForcedScope, propagateErrors))
+      .finally(() => {
+        if (queuedForcedTick === queued) queuedForcedTick = null;
+      });
+    queuedForcedTick = queued;
+
+    return queued;
   }
 
   function stop(): void {
@@ -214,7 +339,7 @@ export function createSyncHarness(getDb: (omsInstance: string) => BaseDB): SyncH
   async function start(payload: HarnessStartPayload): Promise<void> {
     stop();
     ctx = { maargUrl: payload.maargUrl, token: payload.token, omsInstance: payload.omsInstance, now: Date.now() };
-    active = payload.domains ?? getAllSyncDomains()
+    baseDomains = payload.domains ?? getAllSyncDomains()
       .filter((d) => d.syncClass === "B")
       .map((d) => ({ name: d.name }));
     baseTickMs = payload.baseTickMs ?? DEFAULT_BASE_TICK_MS;
@@ -225,21 +350,58 @@ export function createSyncHarness(getDb: (omsInstance: string) => BaseDB): SyncH
       post({ type: "sync-error", domain: "__start", message: error.message });
       throw error;
     }
-    for (const key of Object.keys(lastRunAt)) delete lastRunAt[key];
+    dropClocks();
     await tick();
     timer = setInterval(() => void tick(), baseTickMs);
   }
 
   function setDomains(domains: ActiveDomain[]): void {
-    active = domains ?? [];
-    const keys = new Set(active.map(activationKey));
-    for (const key of Object.keys(lastRunAt)) {
-      if (!keys.has(key)) delete lastRunAt[key];
+    const before = activeDomains();
+    viewDomains = domains ?? [];
+    viewGeneration += 1;
+    // Drop run history only for activations no longer active, so a re-activation bootstraps again
+    // while the start set keeps its once-per-login clock.
+    const keys = new Set(activeDomains().map(activationKey));
+    dropClocks(keys);
+    // A dropped activation's passes no longer answer "has this screen's data been fetched". Reset a
+    // domain unless an activation of it that was already active survives (the start set, say).
+    const kept = before.filter((entry) => keys.has(activationKey(entry)));
+    const reset = [...new Set(before
+      .filter((entry) => !keys.has(activationKey(entry)))
+      .map((entry) => entry.name)
+      .filter((name) => !kept.some((entry) => entry.name === name)))];
+    if (reset.length) post({ type: "activations-reset", domains: reset });
+    runNewActivations();
+  }
+
+  /**
+   * Start the screen's newly due activations now, rather than on the next tick or behind a pass
+   * already running (after login that is every seed domain). Before `start()` there is no timer and
+   * the first tick covers them. They run alongside any running pass: work on one domain is still
+   * serialised by `runDomain`.
+   */
+  function runNewActivations(): void {
+    if (!timer || !ctx.token) return;
+    const due = dueNow(viewDomains, Date.now())
+      .filter((entry) => !activationRuns.has(activationKey(entry)));
+    let previous: Promise<unknown> = Promise.resolve();
+    for (const entry of due) {
+      const key = activationKey(entry);
+      // Sequential among themselves, like a tick. Skipped if the screen moved on before its turn.
+      const run = previous
+        .catch(() => undefined)
+        .then(() => (isActive(key) ? runDomain(entry, false, true) : 0));
+      previous = run;
+      activationRuns.set(key, run);
+      // Removed once settled; the catch only marks the rejection handled, `sync-error` reported it.
+      run.catch(() => undefined).finally(() => {
+        if (activationRuns.get(key) === run) activationRuns.delete(key);
+      });
     }
   }
 
   function syncDomainNow(domain: string): Promise<number> {
-    const entry = active.find((candidate) => candidate.name === domain) ?? { name: domain };
+    const entry = activeDomains().find((candidate) => candidate.name === domain) ?? { name: domain };
 
     return runDomain(entry, true, true);
   }
@@ -254,7 +416,7 @@ export function createSyncHarness(getDb: (omsInstance: string) => BaseDB): SyncH
       post({ type: "sync-error", domain: request.domain, scope, message: error.message });
       throw error;
     }
-    const entry = active.find((candidate) => candidate.name === request.domain);
+    const entry = activeDomains().find((candidate) => candidate.name === request.domain);
     ctx.now = Date.now();
     try {
       const written = (entry?.args !== undefined
@@ -276,7 +438,9 @@ export function createSyncHarness(getDb: (omsInstance: string) => BaseDB): SyncH
   }
 
   async function refetchOne(request: { domain: string; pk: Record<string, unknown> }): Promise<number> {
-    const scope = scopeKeyOf(request.pk);
+    // The main thread records a failed refetch under cacheScopeKey(pk) too, so both sides must
+    // key the same PK identically or one failure is filed twice and only one copy ever clears.
+    const scope = cacheScopeKey(request.pk);
     const queueKey = `${request.domain}:${scope}`;
     const previous = refetchQueues.get(queueKey) ?? Promise.resolve();
     const operation = runSharedDomainOperation(
@@ -292,17 +456,13 @@ export function createSyncHarness(getDb: (omsInstance: string) => BaseDB): SyncH
   }
 
   function catalog(): CatalogItem[] {
-    return getAllSyncDomains().map((d) => ({
-      name: d.name,
-      ...(d.table ? { table: d.table } : {}),
-      label: d.label,
-      syncClass: d.syncClass,
-    }));
+    return catalogFrom(getAllSyncDomains());
   }
 
   return {
     start,
-    syncNow: () => tick(true, true),
+    syncNow: () => tick(true, true, "view"),
+    syncAll: () => tick(true, true, "all"),
     syncDomainNow,
     refetchOne,
     setDomains,

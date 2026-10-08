@@ -10,7 +10,7 @@ import {
   serviceState,
   type SyncService,
 } from "./syncService";
-import type { ActiveDomain } from "./syncRegistry";
+import { type ActiveDomain, activationKey } from "./syncRegistry";
 import { CacheReconciliationError, cacheScopeKey } from "./reconciliation";
 
 export interface AppDbSyncConfig {
@@ -55,6 +55,8 @@ export function setupAppDbSync(config: AppDbSyncConfig): AppDbSync {
   let service: SyncService | null = null;
   let starting: Promise<void> | null = null;
   let startGeneration = 0;
+  /** The wipe `stopAppDbSync` is running, which a start must wait out. */
+  let clearing: Promise<void> | null = null;
 
   function syncService(): SyncService | null {
     return service;
@@ -97,13 +99,18 @@ export function setupAppDbSync(config: AppDbSyncConfig): AppDbSync {
   /** Scope the worker to the domains the open view needs. Safe to call again to re-scope. */
   async function activateSyncDomains(domains: ActiveDomain[], owner: string): Promise<void> {
     const generation = ++activationGeneration;
+    const previousKeys = new Set(activeSyncDomains.value.map(activationKey));
     activeOwner = owner;
     activeSyncDomains.value = domains;
     // A newly activated domain has not been tried by THIS screen yet, so a failure recorded while
     // another screen held it is stale evidence. Clearing here means the first pass either succeeds
     // (stays clear) or fails and records fresh — rather than a just-opened screen inheriting a
-    // banner, or `manualRefresh` throwing on someone else's failure.
-    for (const domain of domains) clearDomainErrors(domain.name);
+    // banner, or `manualRefresh` throwing on someone else's failure. A domain already active with
+    // the same args keeps its failure: the worker does not re-run it, so the failure still stands
+    // (the inventory area re-activates its unchanged set on every move between its pages).
+    for (const domain of domains) {
+      if (!previousKeys.has(activationKey(domain))) clearDomainErrors(domain.name);
+    }
     const current = syncService();
     if (!current) {
       // No worker (a failed start, or a test double that never spawned one). The view is still
@@ -184,6 +191,19 @@ export function setupAppDbSync(config: AppDbSyncConfig): AppDbSync {
 
   function startAppDbSync(onSynced?: () => void): Promise<void> {
     if (starting) return starting;
+    // A worker started mid-wipe reads the old session's once-per-login markers, skips the seed, and
+    // the wipe then empties the tables behind it. An embedded login hits this: `updateToken` makes
+    // `isAuthenticated` true at once, so App.vue starts the sync while `postLogin` is still clearing.
+    if (clearing) {
+      const waiting: Promise<void> = clearing.then(() => {
+        // A stop since then dropped this start; a later start is not this one's to make.
+        if (starting !== waiting) return;
+        starting = null;
+        return startAppDbSync(onSynced);
+      });
+      starting = waiting;
+      return waiting;
+    }
     const generation = ++startGeneration;
 
     const factory = config.createSyncService ?? defaultCreateSyncService;
@@ -218,6 +238,9 @@ export function setupAppDbSync(config: AppDbSyncConfig): AppDbSync {
       },
     }) as SyncService;
     service = attemptService;
+    // A screen that activated before the service existed (a deep link lands before App.vue starts
+    // the sync) must not lose its set; the service holds it until its worker is up.
+    if (activeSyncDomains.value.length) void attemptService.setDomains(activeSyncDomains.value);
 
     let succeeded = false;
     const readiness = attemptService
@@ -253,7 +276,13 @@ export function setupAppDbSync(config: AppDbSyncConfig): AppDbSync {
     starting = null;
     bootstrapState.running = false;
     clearSeedTables();
-    await clearDatabaseTables(config.db.raw()).catch(() => {});
+    // Chained so a start waiting on `clearing` also waits out an earlier wipe still running.
+    const clear: Promise<void> = (clearing ?? Promise.resolve())
+      .then(() => clearDatabaseTables(config.db.raw()))
+      .catch(() => {});
+    clearing = clear;
+    await clear;
+    if (clearing === clear) clearing = null;
   }
 
   async function whenReady(): Promise<void> {
@@ -302,13 +331,14 @@ export function setupAppDbSync(config: AppDbSyncConfig): AppDbSync {
     await service.syncDomainNow(domain);
   }
 
+  /** "Refresh all": every active domain, including the login seed set, not just the screen's. */
   async function resyncReferenceData(): Promise<void> {
     await clearSyncMarkers();
     await whenReady();
     if (!service) {
       throw new Error(bootstrapState.errors.__start ?? "The reference-cache service is unavailable.");
     }
-    await service.syncNow();
+    await service.syncAll();
   }
 
   return {

@@ -7,6 +7,30 @@
 
 import type { SyncDomain } from "../types";
 
+/** Status-card data for one domain: its declared label and sync class. */
+export interface CatalogItem {
+  name: string;
+  table?: string;
+  label: string;
+  syncClass: "A" | "B" | "C";
+}
+
+/**
+ * The catalog of a list of domains, in their order.
+ *
+ * The worker's `catalog()` builds from what it registered. An app that keeps that list in a module
+ * of its own can build the same catalog on the main thread from it, without waiting on a worker that
+ * may not be up, or may have failed to start.
+ */
+export function catalogFrom(domains: readonly SyncDomain[]): CatalogItem[] {
+  return domains.map((domain) => ({
+    name: domain.name,
+    ...(domain.table ? { table: domain.table } : {}),
+    label: domain.label,
+    syncClass: domain.syncClass,
+  }));
+}
+
 const registry = new Map<string, SyncDomain>();
 
 export function registerSyncDomain(domain: SyncDomain): SyncDomain {

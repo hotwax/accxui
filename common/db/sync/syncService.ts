@@ -52,8 +52,10 @@ export interface SyncService {
   start: () => Promise<void>;
   /** Change the activated domain set without respawning the worker. */
   setDomains: (domains: ActiveDomain[]) => Promise<void>;
-  /** Force every activated domain to run now. */
+  /** Force the screen-activated domains to run now. */
   syncNow: () => Promise<void>;
+  /** Force every active domain — the login seed set and the screen's — to run now. */
+  syncAll: () => Promise<void>;
   /** Force one domain to re-sync now. */
   syncDomainNow: (domain: string) => Promise<number>;
   /** After a successful mutation: refetch that record by PK and upsert it into the cache. */
@@ -80,6 +82,11 @@ export const serviceState = reactive({
    * Last completed pass per domain, epoch ms, taken from the `at` the worker stamps at the end of
    * the pass. Distinct from `lastSyncAt`, which is global: a screen asking "has MY domain been
    * fetched for this shop yet" cannot tell that from a timestamp some other domain moved.
+   *
+   * Only full passes of the domain's CURRENT activation count. An entry is removed when the screen
+   * that activated the domain leaves or re-scopes it (shop A to shop B), a pass that finishes for a
+   * screen that already left is ignored, a single-record refetch does not count, and `stop()` clears
+   * the lot. So a value always means "fetched for whatever holds this domain now".
    */
   syncedAt: {} as Record<string, number>,
   written: {} as Record<string, number>,
@@ -185,6 +192,12 @@ export function createSyncService(opts: SyncServiceOptions): SyncService {
   let tokenWatch: ReturnType<typeof setInterval> | null = null;
   let lastToken = "";
   let starting: Promise<void> | null = null;
+  /**
+   * The screen's domain set, held until the worker exists. A view that activates during boot (a
+   * deep link) runs before the Comlink handle does; dropping its set there left that screen
+   * polling nothing for the whole visit.
+   */
+  let viewDomains: ActiveDomain[] | null = null;
   // Bumped on every start()/stop() so a terminated attempt's late worker message (queued before
   // teardown, delivered after) is ignored rather than mutating state past that teardown.
   let startGeneration = 0;
@@ -210,18 +223,19 @@ export function createSyncService(opts: SyncServiceOptions): SyncService {
     }
     if (data.type === "sync-end" && data.domain) {
       serviceState.written[String(data.domain)] = data.written ?? 0;
-      serviceState.syncedAt[String(data.domain)] = data.at ?? Date.now();
+      if (data.current !== false) serviceState.syncedAt[String(data.domain)] = data.at ?? Date.now();
       serviceState.lastSyncAt = Date.now();
       // A successful full snapshot verifies the whole domain and therefore every scoped row.
       clearDomainErrors(String(data.domain));
     } else if (data.type === "refetch-end" && data.domain) {
       serviceState.written[String(data.domain)] = data.written ?? 0;
-      serviceState.syncedAt[String(data.domain)] = data.at ?? Date.now();
       // A targeted read verifies only its own PK scope. A legacy message without scope cannot
       // safely prove that some other failed scope recovered, so it clears nothing.
       if (typeof data.scope === "string" && data.scope) {
         clearScopeError(String(data.domain), data.scope);
       }
+    } else if (data.type === "activations-reset" && Array.isArray(data.domains)) {
+      for (const domain of data.domains) delete serviceState.syncedAt[String(domain)];
     } else if (data.type === "sync-error" && data.domain) {
       const scope = typeof data.scope === "string" && data.scope ? data.scope : undefined;
       recordSyncError(String(data.domain), String(data.message ?? "failed"), scope);
@@ -250,6 +264,9 @@ export function createSyncService(opts: SyncServiceOptions): SyncService {
 
       publisher = createTokenPublisher();
       lastToken = commonUtil.getToken() || "";
+
+      // Before start(): the worker handles calls in order, so its first pass already covers them.
+      if (viewDomains) await api.setDomains(viewDomains);
 
       await api.start({
         maargUrl: commonUtil.getMaargURL(),
@@ -282,13 +299,27 @@ export function createSyncService(opts: SyncServiceOptions): SyncService {
     if (publisher) { publisher.close(); publisher = null; }
     if (terminate) { terminate(); terminate = null; } // kills the worker + its timer
     harness = null;
+    viewDomains = null;
     serviceState.running = false;
+    // The next login's passes, not this session's, decide what has been fetched.
+    for (const domain of Object.keys(serviceState.syncedAt)) delete serviceState.syncedAt[domain];
   }
 
   return {
     start,
-    setDomains: async (domains) => { if (harness) await harness.setDomains(domains); },
-    syncNow: async () => { if (harness) await harness.syncNow(); },
+    setDomains: async (domains) => {
+      viewDomains = domains;
+      if (harness) await harness.setDomains(domains);
+    },
+    syncNow: async () => {
+      // Wait out a start in flight: its handle is not usable yet, and the refresh must not vanish.
+      if (!harness && starting) await starting.catch(() => undefined);
+      if (harness) await harness.syncNow();
+    },
+    syncAll: async () => {
+      if (!harness && starting) await starting.catch(() => undefined);
+      if (harness) await harness.syncAll();
+    },
     syncDomainNow: async (domain) => (harness ? harness.syncDomainNow(domain) : 0),
     refetchOne: async (domain, pk) => (harness ? harness.refetchOne({ domain, pk }) : 0),
     catalog: async () => (harness ? harness.catalog() : []),

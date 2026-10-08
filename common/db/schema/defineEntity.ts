@@ -23,6 +23,13 @@ export interface EntityDefinition {
   indexes?: string[];
   /** Stored-field name → source field to read from when the API names it differently. */
   rename?: Record<string, string>;
+  /**
+   * Stand-in values for primary-key members the server may legitimately omit. Without one, a row
+   * missing ANY key member is dropped as unkeyable; with one, the member is stored as this value.
+   * Use only where absence is a real state (a document attached to no feed), never to paper over a
+   * wrong field name.
+   */
+  keyDefaults?: Record<string, string | number>;
 }
 
 export interface Entity {
@@ -35,6 +42,7 @@ export interface Entity {
   fieldNames: string[];
   indexes: string[];
   rename?: Record<string, string>;
+  keyDefaults?: Record<string, string | number>;
   /** The derived Dexie `stores()` string. */
   schema: string;
 }
@@ -74,6 +82,12 @@ export function defineEntity(def: EntityDefinition): Entity {
         `[db] defineEntity: primary-key field "${field}" is not declared in \`fields\`. ` +
         "A key member that is never stored cannot be satisfied.",
       );
+    }
+  }
+
+  for (const field of Object.keys(def.keyDefaults ?? {})) {
+    if(!seenPkFields.has(field)) {
+      throw new Error(`[db] defineEntity: \`keyDefaults\` names "${field}", which is not a primary-key field.`);
     }
   }
 
@@ -124,6 +138,7 @@ export function defineEntity(def: EntityDefinition): Entity {
     fieldNames: Object.keys(def.fields),
     indexes: [...indexes],
     ...(def.rename ? { rename: def.rename } : {}),
+    ...(def.keyDefaults ? { keyDefaults: def.keyDefaults } : {}),
     schema: [keyPath, ...indexes].join(", "),
   };
 }

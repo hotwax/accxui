@@ -82,34 +82,102 @@ export interface DbClient {
   raw(): BaseDB;
 }
 
-/** Build a Dexie Collection for the given options. */
-function buildQuery(tableRef: Table<any, DbKey>, options: QueryOptions = {}) {
-  let collection: any;
+/** Dexie reports a compound index as `[a+b]`; tolerate whitespace in a hand-written one. */
+function normalizeIndexName(name: string): string {
+  return name.replace(/\s+/g, "");
+}
 
-  if (options.scope) {
-    collection = tableRef.where(options.scope.field).equals(options.scope.value as any);
-  } else if (options.equals && Object.keys(options.equals).length > 0) {
-    const [firstKey, firstVal] = Object.entries(options.equals)[0];
-    collection = tableRef.where(firstKey).equals(firstVal as any);
-  } else if (options.dateField) {
-    if (options.since !== undefined && options.until !== undefined) {
-      collection = tableRef.where(options.dateField).between(options.since, options.until, true, true);
-    } else if (options.since !== undefined) {
-      collection = tableRef.where(options.dateField).aboveOrEqual(options.since);
-    } else if (options.until !== undefined) {
-      collection = tableRef.where(options.dateField).belowOrEqual(options.until);
+function hasIndex(tableRef: Table<any, DbKey>, path: string): boolean {
+  const schema: any = tableRef.schema ?? {};
+  if (normalizeIndexName(schema.primKey?.name ?? "") === path) return true;
+  return (schema.indexes ?? []).some((index: any) => normalizeIndexName(index?.name ?? "") === path);
+}
+
+function dateOf(row: Record<string, unknown>, dateField: string): number | undefined {
+  const value = row?.[dateField];
+  return typeof value === "number" ? value : undefined;
+}
+
+/**
+ * Run a query and return its rows.
+ *
+ * `scope` and `equals` are ONE set of equalities — `scope` is simply the first of them — and every
+ * one of them holds on the result. The read resolves through the widest declared index that covers
+ * them (`[scope+...equals+dateField]`, then `[scope+...equals]`, then the first indexed field), and
+ * whatever the index could not absorb is applied in memory.
+ *
+ * `dateField` ORDERS the result, newest first unless `order: "asc"`; `since`/`until` bound it. This is
+ * the "latest N" read every monitoring screen makes, so a `dateField` that did not sort would hand
+ * them the oldest rows instead.
+ */
+async function runQuery(
+  tableRef: Table<any, DbKey>,
+  options: QueryOptions = {},
+): Promise<any[]> {
+  const { scope, dateField, since, until, filter, limit } = options;
+  const equalities: Array<[string, unknown]> = [
+    ...(scope ? [[scope.field, scope.value] as [string, unknown]] : []),
+    ...Object.entries(options.equals ?? {}).filter(([field]) => field !== scope?.field),
+  ];
+  const fields = equalities.map(([field]) => field);
+  const values = equalities.map(([, value]) => value);
+  const lower = since ?? -Infinity;
+  const upper = until ?? Infinity;
+
+  let rows: any[];
+  let remaining = equalities;
+  /** The index delivered rows ascending by `dateField`, already inside since/until. */
+  let dateOrdered = false;
+
+  const withDate = dateField ? `[${[...fields, dateField].join("+")}]` : "";
+  const compound = `[${fields.join("+")}]`;
+
+  if (dateField && fields.length && hasIndex(tableRef, withDate)) {
+    rows = await tableRef.where(withDate).between([...values, lower], [...values, upper], true, true).toArray();
+    remaining = [];
+    dateOrdered = true;
+  } else if (fields.length > 1 && hasIndex(tableRef, compound)) {
+    rows = await tableRef.where(compound).equals(values as any).toArray();
+    remaining = [];
+  } else if (fields.length) {
+    const seek = fields.findIndex((field) => hasIndex(tableRef, field));
+    if (seek >= 0) {
+      rows = await tableRef.where(fields[seek]).equals(values[seek] as any).toArray();
+      remaining = equalities.filter((_, index) => index !== seek);
     } else {
-      collection = tableRef.toCollection();
+      rows = await tableRef.toArray();
     }
+  } else if (dateField && hasIndex(tableRef, dateField)) {
+    rows = since !== undefined || until !== undefined
+      ? await tableRef.where(dateField).between(lower, upper, true, true).toArray()
+      : await tableRef.orderBy(dateField).toArray();
+    dateOrdered = true;
   } else {
-    collection = tableRef.toCollection();
+    rows = await tableRef.toArray();
   }
 
-  if (options.order === "desc") collection = collection.reverse();
-  if (options.filter) collection = collection.filter(options.filter);
-  if (options.limit && options.limit > 0) collection = collection.limit(options.limit);
+  if (remaining.length) {
+    rows = rows.filter((row) => remaining.every(([field, value]) => row?.[field] === value));
+  }
+  if (dateField && !dateOrdered && (since !== undefined || until !== undefined)) {
+    rows = rows.filter((row) => {
+      const at = dateOf(row, dateField);
+      return at !== undefined && at >= lower && at <= upper;
+    });
+  }
+  if (filter) rows = rows.filter(filter);
 
-  return collection;
+  const order = options.order ?? (dateField ? "desc" : "asc");
+  if (dateField) {
+    if (!dateOrdered) {
+      rows = [...rows].sort((a, b) => (dateOf(a, dateField) ?? 0) - (dateOf(b, dateField) ?? 0));
+    }
+    if (order === "desc") rows = [...rows].reverse();
+  } else if (order === "desc") {
+    rows = [...rows].reverse();
+  }
+
+  return limit && limit > 0 ? rows.slice(0, limit) : rows;
 }
 
 /**
@@ -177,16 +245,16 @@ export function dbClient(
             return (await dexieTable()).toArray();
           },
           async query(options = {}) {
-            return buildQuery(await dexieTable(), options).toArray();
+            return runQuery(await dexieTable(), options);
           },
           async first(options = {}) {
-            const rows = await buildQuery(await dexieTable(), { ...options, limit: 1 }).toArray();
+            const rows = await runQuery(await dexieTable(), { ...options, limit: 1 });
             return rows[0];
           },
           async count(options) {
             const tableRef = await dexieTable();
             if (!options || Object.keys(options).length === 0) return tableRef.count();
-            return buildQuery(tableRef, options).count();
+            return (await runQuery(tableRef, options)).length;
           },
 
           async put(record) {
@@ -207,7 +275,7 @@ export function dbClient(
             await (await dexieTable()).clear();
           },
           live(options = {}) {
-            return liveQuery(async () => buildQuery(await dexieTable(), options).toArray()) as any;
+            return liveQuery(async () => runQuery(await dexieTable(), options)) as any;
           },
 
           async upsertMany(rawRows) {

@@ -35,7 +35,9 @@ const COERCE: Record<FieldKind, (value: unknown) => unknown> = {
   text: toText,
   count: toCount,
   date: toMillis,
-  structured: (value) => (Array.isArray(value) && value.length === 0 ? undefined : value ?? undefined),
+  // Passed through as-is. An empty array stays `[]`: a stored row IS what screens read, and a list
+  // field that disappears when it is empty is read as `undefined.length` by every caller.
+  structured: (value) => value ?? undefined,
 };
 
 /**
@@ -60,6 +62,12 @@ export function projectRow(
     const source = raw?.[field] !== undefined ? field : entity.rename?.[field] ?? field;
     const value = COERCE[kind](raw?.[source]);
     if (value !== undefined) row[field] = value;
+  }
+
+  // A key member the server legitimately leaves empty takes its declared stand-in, so the row is
+  // kept rather than dropped as unkeyable.
+  for (const [field, fallback] of Object.entries(entity.keyDefaults ?? {})) {
+    if (row[field] === undefined) row[field] = fallback;
   }
 
   for (const field of entity.primaryKeyFields) {
@@ -113,7 +121,9 @@ export function entityKeyOf(row: Record<string, unknown>, entity: Entity): DbKey
 
   for (const field of entity.primaryKeyFields) {
     const value = row?.[field];
-    if (value === undefined || value === null || value === "") return undefined;
+    if (value === undefined || value === null) return undefined;
+    // "" is a real key value only for a member that declares it as its stand-in.
+    if (value === "" && entity.keyDefaults?.[field] !== "") return undefined;
     values.push(typeof value === "number" ? value : String(value));
   }
 

@@ -153,19 +153,20 @@ export function defineSnapshotDomain(
 
       if (config.byPk) {
         const target = config.byPk(pk);
-        try {
-          const resp = await workerGet(ctx, target.url, target.params);
-          const raw = config.byPkRecordKey ? resp?.[config.byPkRecordKey] : resp;
-          if (raw) {
-            return await entityOps.upsertMany([raw]);
-          } else {
-            const key = entityKeyOf(pk, projection);
-            if (key !== undefined) await entityOps.remove(key);
-            return 0;
-          }
-        } catch (error) {
-          console.warn(`[db] ${config.name}: failed to refetch by PK:`, error);
+        // No catch: the mutation that asked for this has already committed, so a failed read must
+        // reject. Resolving 0 lets the screen report success while its row stays stale.
+        const resp = await workerGet(ctx, target.url, target.params);
+        const envelope = config.byPkRecordKey && resp && typeof resp === "object"
+          ? resp[config.byPkRecordKey]
+          : resp;
+        // A single-record GET may answer with the object itself or a one-item list.
+        const raw = Array.isArray(envelope) ? envelope[0] : envelope;
+        if (raw && typeof raw === "object") {
+          return await entityOps.upsertMany([raw]);
         }
+        // The record is gone server-side; drop it so the table keeps no ghost.
+        const key = entityKeyOf(pk, projection);
+        if (key !== undefined) await entityOps.remove(key);
         return 0;
       } else if (config.refetchScope) {
         const scopeConfig = config.refetchScope(pk);

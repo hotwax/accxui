@@ -4,6 +4,7 @@ const harnessStub = vi.hoisted(() => ({
   start: vi.fn(async () => {}),
   setDomains: vi.fn(async () => {}),
   syncNow: vi.fn(async () => {}),
+  syncAll: vi.fn(async () => {}),
   syncDomainNow: vi.fn(async () => 3),
   refetchOne: vi.fn(async () => 1),
   domains: vi.fn(async () => []),
@@ -27,6 +28,7 @@ vi.mock("../db/sync/channels", () => ({
 }));
 
 import { setupAppDbSync } from "../db/sync/setupAppDbSync";
+import { cacheScopeKey } from "../db/sync/reconciliation";
 import { createSyncService, __resetErrorState, serviceState } from "../db/sync/syncService";
 import type { AppDb } from "../db/schema/defineAppDb";
 
@@ -97,6 +99,21 @@ describe("app db sync error surfacing", () => {
     expect(serviceState.errors.carrier).toBe("first");
   });
 
+  it("clears a failed mutation refetch once that record refetches successfully", async () => {
+    const sync = await start();
+    const pk = { enumId: "X" };
+    harnessStub.refetchOne.mockImplementationOnce(async () => {
+      // The worker reports the failure before its Comlink promise rejects.
+      post({ type: "sync-error", domain: "enum", scope: cacheScopeKey(pk), message: "boom" });
+      throw new Error("boom");
+    });
+
+    await expect(sync.refreshAfterMutation("enum", pk)).rejects.toThrow();
+    post({ type: "refetch-end", domain: "enum", scope: cacheScopeKey(pk), written: 1 });
+
+    expect(serviceState.errors.enum).toBeUndefined();
+  });
+
   it("clears the whole domain when a full snapshot succeeds", async () => {
     await start();
 
@@ -150,13 +167,46 @@ describe("serviceState.syncedAt", () => {
     expect(serviceState.syncedAt.shopifyTransferSync).toBe(2_000);
   });
 
-  it("advances the timestamp on a targeted refetch", async () => {
+  // A screen waiting on syncedAt asks whether ITS set was fetched; one re-read record says nothing.
+  it("does not count a targeted refetch as a pass", async () => {
     const sync = setupAppDbSync({ db: fakeAppDb(), createSyncService });
     await sync.startAppDbSync();
 
     post({ type: "refetch-end", domain: "serviceJob", written: 1, scope: "jobName=x", at: 5_000 });
 
-    expect(serviceState.syncedAt.serviceJob).toBe(5_000);
+    expect(serviceState.syncedAt.serviceJob).toBeUndefined();
+  });
+
+  // Shop A's pass finishing after the screen moved to shop B must not mark B as fetched.
+  it("ignores a pass for an activation that is no longer current", async () => {
+    const sync = setupAppDbSync({ db: fakeAppDb(), createSyncService });
+    await sync.startAppDbSync();
+
+    post({ type: "sync-end", domain: "syncRun", written: 1, at: 1_000, current: false });
+
+    expect(serviceState.syncedAt.syncRun).toBeUndefined();
+  });
+
+  it("forgets a domain the worker reset when its screen left or re-scoped", async () => {
+    const sync = setupAppDbSync({ db: fakeAppDb(), createSyncService });
+    await sync.startAppDbSync();
+    post({ type: "sync-end", domain: "syncRun", written: 1, at: 1_000 });
+    post({ type: "sync-end", domain: "facility", written: 1, at: 1_000 });
+
+    post({ type: "activations-reset", domains: ["syncRun"] });
+
+    expect(serviceState.syncedAt.syncRun).toBeUndefined();
+    expect(serviceState.syncedAt.facility).toBe(1_000);
+  });
+
+  it("clears every domain when sync stops, so the next login starts unfetched", async () => {
+    const sync = setupAppDbSync({ db: fakeAppDb(), createSyncService });
+    await sync.startAppDbSync();
+    post({ type: "sync-end", domain: "syncRun", written: 1, at: 1_000 });
+
+    await sync.stopAppDbSync();
+
+    expect(serviceState.syncedAt).toEqual({});
   });
 });
 
@@ -414,11 +464,133 @@ describe("syncDomainsError", () => {
     expect(sync.syncDomainsError.value).toBe("");
   });
 
+  // The inventory area re-activates its unchanged set on every move between its pages; the worker
+  // does not re-run those domains, so their failure still stands and must stay on the badge.
+  it("keeps the failure of a domain re-activated with the same args", async () => {
+    const sync = await started();
+    const domains = [{ name: "inventoryRows", args: { shopId: "1" } }];
+    await sync.activateSyncDomains(domains, "areaOwner");
+    post({ type: "sync-error", domain: "inventoryRows", message: "boom" });
+
+    await sync.activateSyncDomains([{ name: "inventoryRows", args: { shopId: "1" } }], "areaOwner");
+
+    expect(sync.syncDomainsError.value).toBe("boom");
+  });
+
+  it("clears the failure when the domain is re-activated with different args", async () => {
+    const sync = await started();
+    await sync.activateSyncDomains([{ name: "inventoryRows", args: { shopId: "1" } }], "areaOwner");
+    post({ type: "sync-error", domain: "inventoryRows", message: "boom" });
+
+    await sync.activateSyncDomains([{ name: "inventoryRows", args: { shopId: "2" } }], "areaOwner");
+
+    expect(sync.syncDomainsError.value).toBe("");
+  });
+
   it("forwards syncNow to the worker", async () => {
     const sync = await started();
 
     await sync.syncNow();
 
     expect(harnessStub.syncNow).toHaveBeenCalled();
+  });
+});
+
+describe("activation and refresh routing", () => {
+  beforeEach(() => {
+    __resetErrorState();
+    harnessStub.setDomains.mockClear();
+    harnessStub.syncAll.mockClear();
+    harnessStub.syncNow.mockClear();
+  });
+
+  it("hands the worker a screen's activation made before the sync started", async () => {
+    const sync = setupAppDbSync({ db: fakeAppDb(), createSyncService });
+    await sync.activateSyncDomains([{ name: "inventoryEvent", args: { shopId: "S" } }], "deepLink:1");
+    expect(harnessStub.setDomains).not.toHaveBeenCalled();
+
+    await sync.startAppDbSync();
+
+    expect(harnessStub.setDomains).toHaveBeenCalledWith([{ name: "inventoryEvent", args: { shopId: "S" } }]);
+    await sync.stopAppDbSync();
+  });
+
+  it("routes Refresh all to every active domain, not just the screen's", async () => {
+    const sync = setupAppDbSync({ db: fakeAppDb(), createSyncService });
+    await sync.startAppDbSync();
+
+    await sync.resyncReferenceData();
+
+    expect(harnessStub.syncAll).toHaveBeenCalledTimes(1);
+    expect(harnessStub.syncNow).not.toHaveBeenCalled();
+    await sync.stopAppDbSync();
+  });
+});
+
+/**
+ * Embedded login: `updateToken` makes `isAuthenticated` true at once, so App.vue's watcher starts the
+ * sync while `postLogin`'s wipe is still clearing. A worker started then reads the previous session's
+ * once-per-login markers, skips the seed, and the wipe empties the tables behind it.
+ */
+describe("start during a database wipe", () => {
+  /** A database whose clear stays open until `finishClear` runs. */
+  const slowClearDb = () => {
+    let finishClear!: () => void;
+    const cleared = new Promise<void>((resolve) => { finishClear = resolve; });
+    const base = fakeAppDb().raw() as any;
+    const db = { raw: () => ({ ...base, transaction: async () => cleared }) } as unknown as AppDb;
+    return { db, finishClear };
+  };
+
+  beforeEach(() => {
+    __resetErrorState();
+    workerStub.onmessage = null;
+  });
+
+  it("waits for the wipe to finish before starting the worker", async () => {
+    const { db, finishClear } = slowClearDb();
+    const factory = vi.fn(createSyncService);
+    const sync = setupAppDbSync({ db, createSyncService: factory });
+
+    const stopping = sync.stopAppDbSync();
+    const starting = sync.startAppDbSync();
+    await Promise.resolve();
+    expect(factory).not.toHaveBeenCalled();
+
+    finishClear();
+    await stopping;
+    await starting;
+
+    expect(factory).toHaveBeenCalledTimes(1);
+    expect(sync.syncService()).not.toBeNull();
+  });
+
+  it("starts once when a second start joins the one waiting on the wipe", async () => {
+    const { db, finishClear } = slowClearDb();
+    const factory = vi.fn(createSyncService);
+    const sync = setupAppDbSync({ db, createSyncService: factory });
+
+    const stopping = sync.stopAppDbSync();
+    const fromWatcher = sync.startAppDbSync();
+    const fromPostLogin = sync.startAppDbSync();
+    finishClear();
+    await Promise.all([stopping, fromWatcher, fromPostLogin]);
+
+    expect(factory).toHaveBeenCalledTimes(1);
+  });
+
+  it("drops a waiting start that a later stop superseded", async () => {
+    const { db, finishClear } = slowClearDb();
+    const factory = vi.fn(createSyncService);
+    const sync = setupAppDbSync({ db, createSyncService: factory });
+
+    const firstStop = sync.stopAppDbSync();
+    const starting = sync.startAppDbSync();
+    const secondStop = sync.stopAppDbSync();
+    finishClear();
+    await Promise.all([firstStop, starting, secondStop]);
+
+    expect(factory).not.toHaveBeenCalled();
+    expect(sync.syncService()).toBeNull();
   });
 });

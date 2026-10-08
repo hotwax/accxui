@@ -1,8 +1,8 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("comlink", () => ({ expose: () => {} }));
 
-import { createSyncHarness } from "../db/sync/pollingWorkerHarness";
+import { createSyncHarness, RETRY_WITHOUT_INTERVAL_MS } from "../db/sync/pollingWorkerHarness";
 import { clearSyncRegistry, registerSyncDomain } from "../db/sync/syncRegistry";
 import type { SyncDomain } from "../db/types";
 
@@ -66,10 +66,135 @@ describe("createSyncHarness lifecycle", () => {
     const harness = createSyncHarness(stubDb);
 
     await harness.start({ ...START, domains: [{ name: "a" }] });
-    await harness.syncNow();
+    await harness.syncAll();
 
-    // syncNow forces, so it runs again — the point is the CLOCK was set, checked below.
+    // syncAll forces, so it runs again — the point is the CLOCK was set, checked below.
     expect(a.sync).toHaveBeenCalledTimes(2);
+    harness.stop();
+  });
+
+  it("forces only the screen's domains on syncNow, and every active domain on syncAll", async () => {
+    const seed = domain({ name: "seed" });
+    const live = domain({ name: "live", syncClass: "A", intervalMs: 60_000 });
+    registerSyncDomain(seed); registerSyncDomain(live);
+    const harness = createSyncHarness(stubDb);
+
+    await harness.start({ ...START });
+    harness.setDomains([{ name: "live" }]);
+    await harness.syncNow();
+    expect(seed.sync).toHaveBeenCalledTimes(1);
+    expect(live.sync).toHaveBeenCalledTimes(1);
+
+    await harness.syncAll();
+    expect(seed.sync).toHaveBeenCalledTimes(2);
+    expect(live.sync).toHaveBeenCalledTimes(2);
+    harness.stop();
+  });
+
+  it("keeps the start set active when a screen replaces its domains", async () => {
+    const seed = domain({ name: "seed" });
+    registerSyncDomain(seed);
+    const harness = createSyncHarness(stubDb);
+
+    await harness.start({ ...START });
+    harness.setDomains([]);
+    await harness.syncAll();
+
+    expect(seed.sync).toHaveBeenCalledTimes(2);
+    harness.stop();
+  });
+
+  it("holds a screen's domains set before start and runs them on the first tick", async () => {
+    const live = domain({ name: "live", syncClass: "A", intervalMs: 60_000 });
+    registerSyncDomain(live);
+    const harness = createSyncHarness(stubDb);
+
+    harness.setDomains([{ name: "live" }]);
+    await harness.start({ ...START, domains: [] });
+
+    expect(live.sync).toHaveBeenCalledTimes(1);
+    harness.stop();
+  });
+
+  it("queues a forced pass behind a running scheduled tick instead of dropping it", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    let calls = 0;
+    const live = domain({
+      name: "live",
+      syncClass: "A",
+      intervalMs: 60_000,
+      sync: vi.fn(async () => { calls += 1; if (calls === 1) await gate; return 1; }),
+    });
+    registerSyncDomain(live);
+    const harness = createSyncHarness(stubDb);
+    harness.setDomains([{ name: "live" }]);
+
+    const starting = harness.start({ ...START, domains: [] });
+    await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const forced = harness.syncNow(); // lands while the first tick is still inside `sync`
+    release();
+    await starting;
+    await forced;
+
+    expect(live.sync).toHaveBeenCalledTimes(2);
+    harness.stop();
+  });
+
+  it("widens a queued forced view pass when Refresh all lands behind it", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    let calls = 0;
+    const seed = domain({ name: "seed" });
+    const live = domain({
+      name: "live",
+      syncClass: "A",
+      intervalMs: 60_000,
+      sync: vi.fn(async () => { calls += 1; if (calls === 1) await gate; return 1; }),
+    });
+    registerSyncDomain(seed); registerSyncDomain(live);
+    const harness = createSyncHarness(stubDb);
+    harness.setDomains([{ name: "live" }]);
+
+    const starting = harness.start({ ...START });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const viewPass = harness.syncNow(); // queues a view pass behind the start tick
+    const allPass = harness.syncAll(); // must not resolve against that view-only pass
+    release();
+    await starting;
+    await Promise.all([viewPass, allPass]);
+
+    expect(seed.sync).toHaveBeenCalledTimes(2);
+    expect(live.sync).toHaveBeenCalledTimes(2);
+    harness.stop();
+  });
+
+  it("does not let a forced pass share a running one that picked its domains before setDomains", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    let calls = 0;
+    const first = domain({
+      name: "first",
+      syncClass: "A",
+      intervalMs: 60_000,
+      sync: vi.fn(async () => { calls += 1; if (calls === 1) await gate; return 1; }),
+    });
+    const second = domain({ name: "second", syncClass: "A", intervalMs: 60_000 });
+    registerSyncDomain(first); registerSyncDomain(second);
+    const harness = createSyncHarness(stubDb);
+
+    await harness.start({ ...START, domains: [] });
+    harness.setDomains([{ name: "first" }]);
+    const running = harness.syncNow(); // forced pass over [first], held inside `sync`
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    harness.setDomains([{ name: "second" }]);
+    const later = harness.syncNow();
+    release();
+    await Promise.all([running, later]);
+
+    // Once when activated, once more for the forced pass, which must not settle for the pass over [first].
+    expect(second.sync).toHaveBeenCalledTimes(2);
     harness.stop();
   });
 
@@ -139,6 +264,216 @@ describe("createSyncHarness setDomains", () => {
     await harness.syncNow();
 
     expect(a.sync).toHaveBeenCalledTimes(1);
+    harness.stop();
+  });
+});
+
+describe("createSyncHarness screen activation", () => {
+  beforeEach(() => clearSyncRegistry());
+
+  const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  // After login the seed pass can run for seconds; the screen's own data must not queue behind it.
+  it("runs a newly activated screen domain at once, alongside a running pass", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const seed = domain({ name: "seed" });
+    const live = domain({ name: "live", syncClass: "A", intervalMs: 60_000 });
+    registerSyncDomain(seed); registerSyncDomain(live);
+    const harness = createSyncHarness(stubDb);
+    await harness.start({ ...START });
+    (seed.sync as any).mockImplementation(async () => { await gate; return 1; });
+    const running = harness.syncAll(); // a long pass, held inside seed
+    await tick();
+
+    harness.setDomains([{ name: "live" }]);
+    await tick();
+
+    expect(live.sync).toHaveBeenCalledTimes(1);
+    release();
+    await running;
+    harness.stop();
+  });
+
+  // Screens ask for a refresh right after activating; that must not fetch the same rows twice.
+  it("lets a forced pass wait on the activation run instead of repeating it", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const live = domain({ name: "live", syncClass: "A", intervalMs: 60_000, sync: vi.fn(async () => { await gate; return 1; }) });
+    registerSyncDomain(live);
+    const harness = createSyncHarness(stubDb);
+    await harness.start({ ...START, domains: [] });
+
+    harness.setDomains([{ name: "live" }]);
+    const refresh = harness.syncNow();
+    release();
+    await refresh;
+
+    expect(live.sync).toHaveBeenCalledTimes(1);
+    harness.stop();
+  });
+
+  it("reports an activation run's failure to the forced pass waiting on it", async () => {
+    const live = domain({ name: "live", syncClass: "A", intervalMs: 60_000, sync: vi.fn(async () => { throw new Error("down"); }) });
+    registerSyncDomain(live);
+    const harness = createSyncHarness(stubDb);
+    await harness.start({ ...START, domains: [] });
+
+    harness.setDomains([{ name: "live" }]);
+
+    await expect(harness.syncNow()).rejects.toThrow(/live/);
+    harness.stop();
+  });
+
+  it("does not run an activation the screen dropped before its turn", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const first = domain({ name: "first", syncClass: "A", intervalMs: 60_000, sync: vi.fn(async () => { await gate; return 1; }) });
+    const second = domain({ name: "second", syncClass: "A", intervalMs: 60_000 });
+    registerSyncDomain(first); registerSyncDomain(second);
+    const harness = createSyncHarness(stubDb);
+    await harness.start({ ...START, domains: [] });
+
+    harness.setDomains([{ name: "first" }, { name: "second" }]);
+    harness.setDomains([{ name: "first" }]);
+    release();
+    await tick(); await tick();
+
+    expect(second.sync).not.toHaveBeenCalled();
+    harness.stop();
+  });
+
+  describe("status messages", () => {
+    let posted: Record<string, any>[];
+    beforeEach(() => {
+      posted = [];
+      vi.stubGlobal("self", { postMessage: (msg: Record<string, any>) => posted.push(msg) });
+    });
+    afterEach(() => vi.unstubAllGlobals());
+
+    it("resets a domain whose screen activation was dropped or re-scoped", async () => {
+      registerSyncDomain(domain({ name: "live", syncClass: "A", intervalMs: 60_000 }));
+      const harness = createSyncHarness(stubDb);
+      await harness.start({ ...START, domains: [] });
+      harness.setDomains([{ name: "live", args: { shopId: "A" } }]);
+
+      harness.setDomains([{ name: "live", args: { shopId: "B" } }]);
+
+      expect(posted.filter((m) => m.type === "activations-reset")).toEqual([{ type: "activations-reset", domains: ["live"] }]);
+      harness.stop();
+    });
+
+    it("keeps a domain the start set still holds", async () => {
+      registerSyncDomain(domain({ name: "seed" }));
+      const harness = createSyncHarness(stubDb);
+      await harness.start({ ...START, domains: [{ name: "seed" }] });
+      harness.setDomains([{ name: "seed" }]);
+      await tick();
+
+      harness.setDomains([]);
+
+      expect(posted.some((m) => m.type === "activations-reset")).toBe(false);
+      harness.stop();
+    });
+
+    it("marks a pass that finished after its screen left as not current", async () => {
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => { release = resolve; });
+      registerSyncDomain(domain({ name: "live", syncClass: "A", intervalMs: 60_000, sync: vi.fn(async () => { await gate; return 1; }) }));
+      const harness = createSyncHarness(stubDb);
+      await harness.start({ ...START, domains: [] });
+      harness.setDomains([{ name: "live", args: { shopId: "A" } }]);
+      await tick();
+
+      harness.setDomains([]);
+      release();
+      await tick(); await tick();
+
+      expect(posted.find((m) => m.type === "sync-end" && m.domain === "live")).toMatchObject({ current: false });
+      harness.stop();
+    });
+  });
+});
+
+describe("createSyncHarness retry of a domain with no interval", () => {
+  beforeEach(() => {
+    clearSyncRegistry();
+    vi.useFakeTimers();
+  });
+  afterEach(() => vi.useRealTimers());
+
+  /** A login marker, so a successful seed pass counts as finished. */
+  const markedDb = () => {
+    const db = stubDb();
+    db.syncMeta.get = async (key: string) => (key.startsWith("loginSync:") ? { synced: true } : undefined);
+    return db;
+  };
+
+  // A failing seed domain stays due until it succeeds, but not on every 5s tick.
+  it("waits RETRY_WITHOUT_INTERVAL_MS after a failed pass, then retries", async () => {
+    const seed = domain({ name: "seed", sync: vi.fn(async () => { throw new Error("403"); }) });
+    registerSyncDomain(seed);
+    const harness = createSyncHarness(markedDb);
+    await harness.start({ ...START, domains: [{ name: "seed" }] });
+    expect(seed.sync).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(RETRY_WITHOUT_INTERVAL_MS - 5_000);
+    expect(seed.sync).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(seed.sync).toHaveBeenCalledTimes(2);
+    harness.stop();
+  });
+
+  // The empty-fetch guard refuses a snapshot without writing the login marker: also unfinished.
+  it("waits the same after a pass that did not finish", async () => {
+    const seed = domain({ name: "seed" });
+    registerSyncDomain(seed);
+    const harness = createSyncHarness(stubDb);
+    await harness.start({ ...START, domains: [{ name: "seed" }] });
+
+    await vi.advanceTimersByTimeAsync(RETRY_WITHOUT_INTERVAL_MS - 5_000);
+    expect(seed.sync).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(seed.sync).toHaveBeenCalledTimes(2);
+    harness.stop();
+  });
+
+  it("does not run again once a retry succeeds", async () => {
+    const seed = domain({ name: "seed", sync: vi.fn().mockRejectedValueOnce(new Error("down")).mockResolvedValue(1) });
+    registerSyncDomain(seed);
+    const harness = createSyncHarness(markedDb);
+    await harness.start({ ...START, domains: [{ name: "seed" }] });
+
+    await vi.advanceTimersByTimeAsync(RETRY_WITHOUT_INTERVAL_MS * 3);
+
+    expect(seed.sync).toHaveBeenCalledTimes(2);
+    harness.stop();
+  });
+
+  // "Refresh" in Settings is the user's way out; it must not wait.
+  it("does not hold back a forced pass", async () => {
+    const seed = domain({ name: "seed", sync: vi.fn(async () => { throw new Error("403"); }) });
+    registerSyncDomain(seed);
+    const harness = createSyncHarness(markedDb);
+    await harness.start({ ...START, domains: [{ name: "seed" }] });
+
+    await harness.syncAll().catch(() => undefined);
+
+    expect(seed.sync).toHaveBeenCalledTimes(2);
+    harness.stop();
+  });
+
+  it("leaves a domain with an interval on its own interval", async () => {
+    const live = domain({ name: "live", syncClass: "A", intervalMs: 10_000, sync: vi.fn(async () => { throw new Error("down"); }) });
+    registerSyncDomain(live);
+    const harness = createSyncHarness(markedDb);
+    await harness.start({ ...START, domains: [{ name: "live" }] });
+
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    expect(live.sync).toHaveBeenCalledTimes(2);
     harness.stop();
   });
 });

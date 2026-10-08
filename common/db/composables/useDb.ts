@@ -58,6 +58,12 @@ export function useDb<T = Record<string, any>>(
   let subscription: Subscription | null = null;
 
   function subscribe(currentOptions: QueryOptions) {
+    // A new query (shop A to shop B) must not show the old one's rows, nor claim empty before its
+    // own first emit.
+    if (subscription) {
+      records.value = [];
+      emitted.value = false;
+    }
     subscription?.unsubscribe();
     subscription = null;
 

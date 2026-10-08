@@ -538,6 +538,9 @@ importers:
       axios-cache-adapter:
         specifier: 'catalog:'
         version: 2.7.3(axios@0.21.1)
+      comlink:
+        specifier: 'catalog:'
+        version: 4.4.2
       cron-parser:
         specifier: 'catalog:'
         version: 5.4.0
