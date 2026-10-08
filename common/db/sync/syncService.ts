@@ -91,6 +91,11 @@ export const serviceState = reactive({
   syncedAt: {} as Record<string, number>,
   written: {} as Record<string, number>,
   errors: {} as Record<string, string>,
+  /**
+   * Structured context a failing domain attached to its last domain-level failure, e.g. which part
+   * of a partial pass failed. Present only while that domain has an error; cleared with it.
+   */
+  details: {} as Record<string, unknown>,
 });
 
 /**
@@ -114,6 +119,7 @@ export function __resetErrorState(): void {
   domainErrors.clear();
   scopedDomainErrors.clear();
   for (const key of Object.keys(serviceState.errors)) delete serviceState.errors[key];
+  for (const key of Object.keys(serviceState.details)) delete serviceState.details[key];
 }
 
 function updateVisibleError(domain: string): void {
@@ -164,6 +170,7 @@ export function recordSyncError(domain: string, message: string, scope?: string)
 export function clearDomainErrors(domain: string): void {
   domainErrors.delete(domain);
   scopedDomainErrors.delete(domain);
+  delete serviceState.details[domain];
   updateVisibleError(domain);
 }
 
@@ -239,6 +246,11 @@ export function createSyncService(opts: SyncServiceOptions): SyncService {
     } else if (data.type === "sync-error" && data.domain) {
       const scope = typeof data.scope === "string" && data.scope ? data.scope : undefined;
       recordSyncError(String(data.domain), String(data.message ?? "failed"), scope);
+      // Details describe a whole-domain pass, so only a domain-level failure replaces them.
+      if (!scope) {
+        if (data.details !== undefined) serviceState.details[String(data.domain)] = data.details;
+        else delete serviceState.details[String(data.domain)];
+      }
     }
     opts.onStatus?.(data);
   }

@@ -174,3 +174,41 @@ describe("pageAll requireComplete", () => {
     expect(rows).toHaveLength(1);
   });
 });
+
+/**
+ * A walk the caller has abandoned must stop asking for pages. The transfer sync domain gives up on a
+ * slow segment after a timeout; without the signal it kept requesting page after page of a query
+ * that cost the OMS ~30 seconds each, and threw every result away.
+ */
+describe("pageAll abort", () => {
+  const ctx = { token: "t", maargUrl: "https://x.test/rest/s1/", omsInstance: "demo", now: 0 } as any;
+  /** Two full pages of 2, then an empty one, so an unaborted walk makes three requests. */
+  const twoPages = (onRequest?: () => void) => fetchMock.mockImplementation(async (url: string) => {
+    onRequest?.();
+    const page = Number(new URL(String(url)).searchParams.get("pageIndex"));
+
+    return ok(page < 2 ? [{ id: `${page}-a` }, { id: `${page}-b` }] : []);
+  });
+
+  beforeEach(() => {
+    fetchMock.mockReset();
+  });
+
+  it("requests no further page once its signal is aborted", async () => {
+    const controller = new AbortController();
+    const reason = new Error("timed out");
+    twoPages(() => controller.abort(reason));
+
+    await expect(pageAll({ ctx, url: "sob/x", collectionKey: null, batchSize: 2, signal: controller.signal }))
+      .rejects.toBe(reason);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("walks every page when never aborted", async () => {
+    twoPages();
+
+    await expect(pageAll({ ctx, url: "sob/x", collectionKey: null, batchSize: 2, signal: new AbortController().signal }))
+      .resolves.toHaveLength(4);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+});
