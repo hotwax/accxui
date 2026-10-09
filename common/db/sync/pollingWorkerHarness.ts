@@ -238,7 +238,13 @@ export function createSyncHarness(getDb: (omsInstance: string) => BaseDB): SyncH
   ): Promise<number> {
     return runExclusiveDomainOperation(
       entry.name,
-      () => executeDomain(entry, force, propagateError),
+      () => {
+        // A queued automatic tick may have become fresh while another sync ran.
+        // Recheck this activation's clock; explicit refreshes must still execute.
+        if (!force && !dueDomains([entry], lastRunAt, Date.now(),
+          candidate => effectiveInterval(candidate, getSyncDomain(candidate.name))).length) return Promise.resolve(0);
+        return executeDomain(entry, force, propagateError);
+      },
     );
   }
 

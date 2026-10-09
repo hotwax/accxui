@@ -1,6 +1,4 @@
 import logger from "../core/logger";
-import { initializeApp } from "firebase/app";
-import { getMessaging, getToken, onMessage, isSupported } from "firebase/messaging";
 import { DateTime } from "luxon";
 
 /**
@@ -19,11 +17,13 @@ const initialiseFirebaseApp = async (
   onTokenReceived: (token: string) => Promise<void>,
   onMessageReceived: (payload: any) => void
 ): Promise<FirebaseInitialiseResult> => {
+  const { getMessaging, getToken, onMessage, isSupported } = await import('firebase/messaging');
   if (!await isSupported()) {
     logger.error("Notifications not supported");
     return { status: "unsupported" };
   }
 
+  const { initializeApp } = await import('firebase/app');
   const app = initializeApp(appFirebaseConfig);
   const messaging = getMessaging(app);
   // Only ask when nothing has been decided yet. This always runs after several awaits, so it is

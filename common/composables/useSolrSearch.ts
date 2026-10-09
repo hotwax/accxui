@@ -1,4 +1,5 @@
-import { commonUtil } from "../utils/commonUtil";
+import { hasError as utilHasError, isMoqui as utilIsMoqui } from '../utils/core';
+
 import api from "../core/remoteApi"
 
 const prepareOrderQuery = (params: any) => {
@@ -290,7 +291,7 @@ function normalizeSearchResponse(resp: any): any {
 }
 
 async function runSolrQuery(payload: any): Promise<any> {
-  const isMoqui = commonUtil.isMoqui();
+  const isMoqui = utilIsMoqui();
   if (payload.json && !payload.json.query) payload.json.query = payload.json.params?.q || "*:*";
   const resp = await api({
     url: isMoqui ? "admin/search/query" : "admin/runSolrQuery",
@@ -379,7 +380,7 @@ async function searchProducts(params: { keyword?: string, sort?: string, qf?: st
   }
 
   try {
-    const isMoqui = commonUtil.isMoqui();
+    const isMoqui = utilIsMoqui();
     let resp = await api({
       url: isMoqui ? "admin/search/query" : "admin/runSolrQuery",
       method: "post",
@@ -387,7 +388,7 @@ async function searchProducts(params: { keyword?: string, sort?: string, qf?: st
     }) as any;
     if (isMoqui) resp = normalizeSearchResponse(resp);
 
-    if (resp.status == 200 && !commonUtil.hasError(resp) && resp.data?.response?.numFound > 0) {
+    if (resp.status == 200 && !utilHasError(resp) && resp.data?.response?.numFound > 0) {
 
       const product = resp.data.response.docs
 

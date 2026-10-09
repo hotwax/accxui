@@ -1,4 +1,5 @@
-import { commonUtil } from "../utils/commonUtil";
+import { getMaargURL as utilGetMaargURL, getOmsURL as utilGetOmsURL, getTokenExpiration as utilGetTokenExpiration, hasError as utilHasError, isAppEmbedded as utilIsAppEmbedded, isMoqui as utilIsMoqui, showToast as utilShowToast } from '../utils/core';
+
 import { cookieHelper } from "../helpers/cookieHelper";
 import logger from "../core/logger";
 import { translate } from "../core/i18n";
@@ -21,13 +22,13 @@ const loginOption = ref<LoginOption>({})
 export const omsRef = ref("")
 // Which backend fetchLoginOptions() actually found the entered OMS to be — kept in sync so
 // login() hits the matching URL instead of assuming the static VITE_OMS_TYPE build flag.
-const isMoquiOmsRef = ref(commonUtil.isMoqui())
+const isMoquiOmsRef = ref(utilIsMoqui())
 const token = ref(cookieHelper().get("token") || "")
 const expirationTime = ref(cookieHelper().get("expirationTime") || "")
 
 export function useAuth() {
   const getDuration = (expirationTime?: any) => {
-    const expiry = (expirationTime !== undefined && expirationTime !== null) ? expirationTime : commonUtil.getTokenExpiration();
+    const expiry = (expirationTime !== undefined && expirationTime !== null) ? expirationTime : utilGetTokenExpiration();
     return expiry ? Math.floor(DateTime.fromMillis(Number(expiry)).diffNow().as('seconds')) : undefined;
   }
 
@@ -84,7 +85,7 @@ export function useAuth() {
       isUserVerified = true
     }
 
-    return !isTokenExpired && (commonUtil.isAppEmbedded() || (isOmsVerified && isUserVerified))
+    return !isTokenExpired && (utilIsAppEmbedded() || (isOmsVerified && isUserVerified))
   })
 
   const login = async (username?: string, password?: string, token?: string, expirationTime?: string) => {
@@ -102,11 +103,11 @@ export function useAuth() {
             "USERNAME": username,
             "PASSWORD": password
           },
-          baseURL: isMoquiOmsRef.value ? commonUtil.getMaargURL() : commonUtil.getOmsURL(false)
+          baseURL: isMoquiOmsRef.value ? utilGetMaargURL() : utilGetOmsURL(false)
         });
 
-        if(commonUtil.hasError(resp)) {
-          commonUtil.showToast(translate("Sorry, your username or password is incorrect. Please try again."));
+        if(utilHasError(resp)) {
+          utilShowToast(translate("Sorry, your username or password is incorrect. Please try again."));
           logger.error("error", resp.data._ERROR_MESSAGE_);
           updateUserId("")
           updateToken("", "")
@@ -134,7 +135,7 @@ export function useAuth() {
       // Moqui login returns a non-2xx status (e.g. bad credentials), so axios rejects
       // before `hasError()` can inspect the body - surface that message here instead.
       const loginErrorMessage = err?.response?.data?.errors;
-      commonUtil.showToast(loginErrorMessage ? translate(loginErrorMessage) : translate("Something went wrong while login. Please contact administrator."));
+      utilShowToast(loginErrorMessage ? translate(loginErrorMessage) : translate("Something went wrong while login. Please contact administrator."));
       logger.error("error: ", err.toString());
 
       return Promise.reject(loginErrorMessage ? new Error(loginErrorMessage) : (err instanceof Object ? err : new Error(err)));
@@ -162,11 +163,11 @@ export function useAuth() {
         const payload = isMoquiOmsRef.value ? {
           url: "admin/logout",
           method: "POST",
-          baseURL: commonUtil.getMaargURL()
+          baseURL: utilGetMaargURL()
         } : {
           url: "logout",
           method: "GET",
-          baseURL: commonUtil.getOmsURL(false)
+          baseURL: utilGetOmsURL(false)
         }
 
         let resp = await api(payload) as any;
@@ -181,11 +182,11 @@ export function useAuth() {
       }
     }
 
-    if(!payload?.invalidAppContext && !commonUtil.isAppEmbedded()) {
+    if(!payload?.invalidAppContext && !utilIsAppEmbedded()) {
       updateToken("", "")
       updateUserId("")
     } else {
-      commonUtil.showToast(translate("Session expired. Refreshing..."))
+      utilShowToast(translate("Session expired. Refreshing..."))
     }
 
     // appVersion is deployment config (which build this deployment is pinned to), not session state,
@@ -213,7 +214,7 @@ export function useAuth() {
       localStorage.removeItem("requestedPagePath")
     }
 
-    if (commonUtil.isAppEmbedded()) {
+    if (utilIsAppEmbedded()) {
       const embeddedAppStore = useEmbeddedAppStore();
       redirectionUrl = window.location.origin + '/shopify-login?shop=' + embeddedAppStore.shop + '&host=' + embeddedAppStore.host + '&embedded=1';
       embeddedAppStore.$reset();
@@ -231,14 +232,14 @@ export function useAuth() {
     loginOption.value = {}
     try {
       let resp;
-      let isMoquiOms = commonUtil.isMoqui();
+      let isMoquiOms = utilIsMoqui();
 
       if(isMoquiOms) {
         // App is built strictly for Moqui — no OFBiz endpoint to try first.
         resp = await api({
           url: "admin/checkLoginOptions",
           method: "GET",
-          baseURL: commonUtil.getOmsURL(true)
+          baseURL: utilGetOmsURL(true)
         });
       } else {
         try {
@@ -246,23 +247,23 @@ export function useAuth() {
           resp = await api({
             url: "checkLoginOptions",
             method: "GET",
-            baseURL: commonUtil.getOmsURL(false)
+            baseURL: utilGetOmsURL(false)
           });
-          if(commonUtil.hasError(resp)) throw new Error(resp.data._ERROR_MESSAGE_);
+          if(utilHasError(resp)) throw new Error(resp.data._ERROR_MESSAGE_);
         } catch (ofbizError) {
           //If OFBiz checkLoginOptions faild considering that this is the Moqui only setup and making call to moqui checkLoginOptions
           isMoquiOms = true;
           resp = await api({
             url: "admin/checkLoginOptions",
             method: "GET",
-            baseURL: commonUtil.getOmsURL(true)
+            baseURL: utilGetOmsURL(true)
           });
         }
       }
 
       isMoquiOmsRef.value = isMoquiOms
 
-      if(!commonUtil.hasError(resp)) {
+      if(!utilHasError(resp)) {
         loginOption.value = resp.data
         if (resp.data.maargInstanceUrl) {
           // OFBiz deployment: OFBiz tells the PWA where its Moqui instance is
