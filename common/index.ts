@@ -1,4 +1,5 @@
 import imagePreview from './directives/imagePreview'
+import segmentHeight from './directives/segmentHeight'
 import DxpShopifyImg from "./components/DxpShopifyImg.vue"
 import DxpOmsInstanceFooter from "./components/DxpOmsInstanceFooter.vue"
 import RadioFacetGroup from "./components/RadioFacetGroup.vue"
@@ -43,6 +44,7 @@ export {
   firebaseMessaging,
   i18n,
   imagePreview,
+  segmentHeight,
   initialiseConfig,
   onSessionCleared,
   clearSessionScopedState,
