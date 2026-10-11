@@ -224,7 +224,9 @@ export function createSyncHarness(getDb: (omsInstance: string) => BaseDB): SyncH
       if (effectiveInterval(entry, domain) !== undefined) lastRunAt[clockKey] = Date.now();
       else retryAt[clockKey] = Date.now() + RETRY_WITHOUT_INTERVAL_MS;
       const { isAuth, message } = classifyError(err);
-      post({ type: isAuth ? "auth-error" : "sync-error", domain: entry.name, message });
+      // `details` lets a domain that partly succeeded say which part failed (structured-cloneable data only).
+      const details = (err as any)?.details;
+      post({ type: isAuth ? "auth-error" : "sync-error", domain: entry.name, message, ...(details ? { details } : {}) });
       if (propagateError) throw err;
 
       return 0;

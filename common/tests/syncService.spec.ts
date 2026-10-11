@@ -220,6 +220,28 @@ describe("syncService error state", () => {
     service.stop();
   });
 
+  it("keeps a failing domain's details until that domain next succeeds", async () => {
+    const service = createSyncService({ workerUrl: "/w.js" });
+    await service.start();
+    const details = { failedSegments: { receipt: { message: "slow", retryAt: 1 } }, loadedSegments: ["create"] };
+
+    workerStub.onmessage!({ data: { type: "sync-error", domain: "t", message: "partial", details } } as MessageEvent);
+    expect(serviceState.details.t).toEqual(details);
+
+    // A later failure without details must not leave the earlier details describing it.
+    workerStub.onmessage!({ data: { type: "sync-error", domain: "t", message: "network" } } as MessageEvent);
+    expect(serviceState.details.t).toBeUndefined();
+
+    // A scoped (single-record) failure says nothing about the whole pass, so it leaves details alone.
+    workerStub.onmessage!({ data: { type: "sync-error", domain: "t", message: "partial", details } } as MessageEvent);
+    workerStub.onmessage!({ data: { type: "sync-error", domain: "t", scope: "id=1", message: "one" } } as MessageEvent);
+    expect(serviceState.details.t).toEqual(details);
+
+    workerStub.onmessage!({ data: { type: "sync-end", domain: "t", written: 0 } } as MessageEvent);
+    expect(serviceState.details.t).toBeUndefined();
+    service.stop();
+  });
+
   it("clears a domain's error on its next successful sync", async () => {
     const service = createSyncService({ workerUrl: "/w.js" });
     await service.start();
