@@ -24,6 +24,7 @@ export const omsRef = ref("")
 const isMoquiOmsRef = ref(commonUtil.isMoqui())
 const token = ref(cookieHelper().get("token") || "")
 const expirationTime = ref(cookieHelper().get("expirationTime") || "")
+let explicitlyLoggedOut = false;
 
 export function useAuth() {
   const getDuration = (expirationTime?: any) => {
@@ -33,6 +34,7 @@ export function useAuth() {
 
 
   const updateToken = (newToken: any, newExpirationTime: any) => {
+    if (newToken) explicitlyLoggedOut = false;
     const duration = getDuration(newExpirationTime);
     cookieHelper().set("token", newToken, duration)
     cookieHelper().set("expirationTime", newExpirationTime, duration)
@@ -142,9 +144,14 @@ export function useAuth() {
   }
 
   const logout = async (payload?: any) => {
+    // Late requests after logout must not restart teardown or report a second expiry.
+    // Keep handling invalidation when this tab or an embedded app still has a token.
+    if (payload?.isUserUnauthorised && explicitlyLoggedOut && !token.value && !commonUtil.getToken()) return;
+
     let redirectionUrl = "";
 
     if(!payload?.isUserUnauthorised) {
+      explicitlyLoggedOut = true;
       emitter.emit("presentLoader", {
         message: "Logging out",
         backdropDismiss: false,

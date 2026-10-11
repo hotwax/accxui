@@ -14,12 +14,14 @@ vi.mock("../utils/commonUtil", () => ({
     getOmsURL: () => "https://oms.test/api/",
     getTokenExpiration: () => undefined,
     isAppEmbedded: () => false,
+    getToken: vi.fn(() => ""),
     showToast: vi.fn()
   }
 }));
 
 const { useAuth } = await import("../composables/useAuth");
 const { accxuiConfig } = await import("../core/configRegistry");
+const { commonUtil } = await import("../utils/commonUtil");
 
 describe("logout reads the server's logout response", () => {
   const replace = vi.fn();
@@ -28,7 +30,10 @@ describe("logout reads the server's logout response", () => {
     api.mockReset();
     logger.error.mockReset();
     replace.mockReset();
-    accxuiConfig.value = { ...accxuiConfig.value, router: { replace } };
+    vi.mocked(commonUtil.showToast).mockClear();
+    vi.mocked(commonUtil.getToken).mockReturnValue("");
+    useAuth().clearAuth();
+    accxuiConfig.value = { ...accxuiConfig.value, postLogout: undefined, router: { replace } };
   });
 
   afterEach(() => {
@@ -42,6 +47,47 @@ describe("logout reads the server's logout response", () => {
     await useAuth().logout();
 
     expect(logger.error).not.toHaveBeenCalled();
+    expect(replace).toHaveBeenCalledWith("/login");
+  });
+
+  it("does not repeat logout or announce expiry for a late request after normal logout clears the token", async () => {
+    api.mockResolvedValue({ status: 200, data: {} });
+    const postLogout = vi.fn(async () => {
+      // A Settings loader resumes during reset; remoteApi rejects its unauthenticated
+      // protected request and reports INVALID_APP_CONTEXT through this same call.
+      accxuiConfig.value.postLogout = undefined;
+      await useAuth().logout({ isUserUnauthorised: true, invalidAppContext: true });
+    });
+    accxuiConfig.value.postLogout = postLogout;
+    useAuth().updateToken("active-session", "");
+
+    await useAuth().logout({ isUserUnauthorised: false });
+
+    expect(commonUtil.showToast).not.toHaveBeenCalled();
+    expect(postLogout).toHaveBeenCalledTimes(1);
+    expect(replace).toHaveBeenCalledTimes(1);
+  });
+
+  it("still reports genuine invalidation of an active session", async () => {
+    useAuth().updateToken("active-session", "");
+    await useAuth().logout({ isUserUnauthorised: true, invalidAppContext: true });
+    expect(commonUtil.showToast).toHaveBeenCalledWith("Session expired. Refreshing...");
+    expect(replace).toHaveBeenCalledWith("/login");
+    expect(api).not.toHaveBeenCalled();
+  });
+
+  it("still handles invalidation when the embedded token exists outside the standalone token ref", async () => {
+    vi.mocked(commonUtil.getToken).mockReturnValue("embedded-session");
+    await useAuth().logout({ isUserUnauthorised: true, invalidAppContext: true });
+    expect(commonUtil.showToast).toHaveBeenCalledWith("Session expired. Refreshing...");
+    expect(replace).toHaveBeenCalledWith("/login");
+  });
+
+  it("still handles a missing token when it was not cleared by normal logout", async () => {
+    useAuth().updateToken("active-session", "");
+    useAuth().clearAuth();
+    await useAuth().logout({ isUserUnauthorised: true, invalidAppContext: true });
+    expect(commonUtil.showToast).toHaveBeenCalledWith("Session expired. Refreshing...");
     expect(replace).toHaveBeenCalledWith("/login");
   });
 
