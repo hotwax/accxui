@@ -1,0 +1,49 @@
+ion-content {
+  --padding-bottom: 24px;
+}
+
+ion-list-header {
+  margin-inline: auto;
+  max-width: 720px;
+}
+
+ion-list,
+ion-card {
+  margin-inline: auto;
+  max-width: 720px;
+}
+
+ion-card {
+  margin-top: 16px;
+}
+
+.shared-summary {
+  contain: layout;
+}
+
+::view-transition-old(accx-main-project-PX-1001-summary),
+::view-transition-new(accx-main-project-PX-1001-summary),
+::view-transition-old(accx-main-project-PX-1002-summary),
+::view-transition-new(accx-main-project-PX-1002-summary),
+::view-transition-old(accx-main-project-PX-1003-summary),
+::view-transition-new(accx-main-project-PX-1003-summary),
+::view-transition-old(accx-main-project-PX-1004-summary),
+::view-transition-new(accx-main-project-PX-1004-summary),
+::view-transition-old(accx-main-project-PX-1001-status),
+::view-transition-new(accx-main-project-PX-1001-status),
+::view-transition-old(accx-main-project-PX-1002-status),
+::view-transition-new(accx-main-project-PX-1002-status),
+::view-transition-old(accx-main-project-PX-1003-status),
+::view-transition-new(accx-main-project-PX-1003-status),
+::view-transition-old(accx-main-project-PX-1004-status),
+::view-transition-new(accx-main-project-PX-1004-status) {
+  animation-duration: 260ms;
+  animation-timing-function: cubic-bezier(0.2, 0, 0, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation-duration: 1ms;
+  }
+}

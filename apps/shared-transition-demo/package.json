@@ -1,0 +1,29 @@
+{
+  "name": "shared-transition-demo",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Burner Ionic Vue shared element transition POC",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc && vite build",
+    "preview": "vite preview",
+    "test:unit": "vitest",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@ionic/core": "catalog:",
+    "@ionic/vue": "catalog:",
+    "@ionic/vue-router": "catalog:",
+    "ionicons": "catalog:",
+    "vue": "catalog:",
+    "vue-router": "catalog:"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "catalog:",
+    "typescript": "catalog:",
+    "vite": "catalog:",
+    "vitest": "catalog:",
+    "vue-tsc": "catalog:"
+  }
+}
