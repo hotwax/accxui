@@ -10,6 +10,64 @@ import emitter from "../core/emitter";
 import { accxuiConfig } from "../core/configRegistry";
 import { clearSessionScopedState } from "../core/sessionScope";
 import { getCanonicalPath } from "../utils/appVersionUtil";
+// Request ownership stays in memory. Never include this object in diagnostics.
+export interface AuthSession {
+  token: string;
+  expirationTime: string;
+  oms: string;
+  maarg: string;
+  userId: string;
+}
+
+/* eslint-disable no-restricted-syntax -- These are pure request ownership helpers, not Vue composables. */
+export function readAuthSession(): AuthSession {
+  return {
+    token: commonUtil.getToken() || "",
+    expirationTime: String(commonUtil.getTokenExpiration() || ""),
+    oms: commonUtil.getOmsURL(false) || "",
+    maarg: commonUtil.getMaargURL() || "",
+    userId: cookieHelper().get("userId") || ""
+  };
+}
+
+export function isCurrentAuthSession(session: AuthSession) {
+  const current = readAuthSession();
+
+  return (Object.keys(session) as (keyof AuthSession)[]).every(key => session[key] === current[key]);
+}
+
+let requestSession: AuthSession | undefined;
+let sessionVersion = 0;
+export function getAuthSessionVersion() {
+  const current = readAuthSession();
+  // Initial profile hydration fills userId while parallel permission requests are in flight.
+  // That is still the same token/backend session, not a new login.
+  const fillsUserId = requestSession && !requestSession.userId && current.userId &&
+    requestSession.token === current.token && requestSession.expirationTime === current.expirationTime &&
+    requestSession.oms === current.oms && requestSession.maarg === current.maarg;
+  if(!requestSession || (!isCurrentAuthSession(requestSession) && !fillsUserId)) {
+    sessionVersion++;
+  }
+  requestSession = current;
+
+  return sessionVersion;
+}
+
+export function hasValidSessionToken(session = readAuthSession()) {
+  return Boolean(session.token && Number.isFinite(Number(session.expirationTime)) && Number(session.expirationTime) > Date.now());
+}
+
+export function isSessionBackend(config: { url?: string; baseURL?: string }) {
+  try {
+    const target = new URL(config.url || "", config.baseURL || window.location.origin);
+
+    return [commonUtil.getOmsURL(false), commonUtil.getOmsURL(true), commonUtil.getMaargURL()]
+      .filter(Boolean).some(base => target.origin === new URL(base).origin);
+  } catch {
+    return false;
+  }
+}
+/* eslint-enable no-restricted-syntax */
 
 interface LoginOption {
   loginAuthType?: string,
@@ -24,8 +82,50 @@ export const omsRef = ref("")
 const isMoquiOmsRef = ref(commonUtil.isMoqui())
 const token = ref(cookieHelper().get("token") || "")
 const expirationTime = ref(cookieHelper().get("expirationTime") || "")
+let observedSession: AuthSession;
+let checkingSession = false;
+
+const syncAuthRefs = () => {
+  const session = readAuthSession();
+  token.value = session.token;
+  expirationTime.value = session.expirationTime;
+
+  return session;
+};
+
+// Cookies span localhost ports and hosted subdomains; BroadcastChannel does not.
+// Observe removal/context changes even in an idle tab, without rewriting shared cookies.
+const checkSharedSession = async () => {
+  if(checkingSession || !observedSession || commonUtil.isAppEmbedded()) {return;}
+  if(isCurrentAuthSession(observedSession)) {return;}
+  const previouslyAuthenticated = Boolean(observedSession.token);
+  observedSession = syncAuthRefs();
+  if(previouslyAuthenticated && (!hasValidSessionToken(observedSession) || !useAuth().isAuthenticated.value)) {
+    checkingSession = true;
+    try {
+      await useAuth().logout({ isUserUnauthorised: true, invalidAppContext: true });
+    } finally {
+      checkingSession = false;
+    }
+  }
+};
+
+if(typeof window !== "undefined") {
+  const interval = window.setInterval(() => { void checkSharedSession(); }, 1000);
+  window.addEventListener("focus", checkSharedSession);
+  window.addEventListener("pageshow", checkSharedSession);
+  if(import.meta.hot) {
+    import.meta.hot.dispose(() => {
+      window.clearInterval(interval);
+      window.removeEventListener("focus", checkSharedSession);
+      window.removeEventListener("pageshow", checkSharedSession);
+    });
+  }
+}
 
 export function useAuth() {
+  const session = syncAuthRefs();
+  observedSession ||= session;
   const getDuration = (expirationTime?: any) => {
     const expiry = (expirationTime !== undefined && expirationTime !== null) ? expirationTime : commonUtil.getTokenExpiration();
     return expiry ? Math.floor(DateTime.fromMillis(Number(expiry)).diffNow().as('seconds')) : undefined;
@@ -40,15 +140,18 @@ export function useAuth() {
     cookieHelper().set("maarg", cookieHelper().get("maarg")!, duration)
     token.value = newToken
     expirationTime.value = newExpirationTime
+    observedSession = readAuthSession();
   }
 
   const updateOMS = (oms: any) => {
     cookieHelper().set("oms", oms, getDuration())
     omsRef.value = oms
+    observedSession = readAuthSession();
   }
 
   const updateUserId = (userId: any) => {
     cookieHelper().set("userId", userId, getDuration())
+    observedSession = readAuthSession();
   }
 
   const clearAuth = () => {
@@ -56,8 +159,9 @@ export function useAuth() {
     cookieHelper().remove("expirationTime");
     cookieHelper().remove("maarg");
     cookieHelper().remove("userId");
-    updateToken("", "")
-    updateUserId("")
+    token.value = "";
+    expirationTime.value = "";
+    observedSession = readAuthSession();
   }
 
   const isAuthenticated = computed(() => {
@@ -65,7 +169,7 @@ export function useAuth() {
     let isOmsVerified = false;
     let isUserVerified = false;
 
-    if (!token.value || !expirationTime.value) return false;
+    if(!token.value || !expirationTime.value || !hasValidSessionToken()) {return false;}
 
     const expiry = Number(expirationTime.value);
     if(expiry) {
@@ -90,6 +194,8 @@ export function useAuth() {
   const login = async (username?: string, password?: string, token?: string, expirationTime?: string) => {
     let omsToken = token
     let expiresAt = expirationTime
+    const previousSession = readAuthSession();
+    let loginSession: AuthSession | undefined;
     try {
       if(!omsToken && username && password) {
         const resp = await api({
@@ -108,9 +214,6 @@ export function useAuth() {
         if(commonUtil.hasError(resp)) {
           commonUtil.showToast(translate("Sorry, your username or password is incorrect. Please try again."));
           logger.error("error", resp.data._ERROR_MESSAGE_);
-          updateUserId("")
-          updateToken("", "")
-
           return Promise.reject(new Error(resp.data._ERROR_MESSAGE_));
         }
 
@@ -118,18 +221,26 @@ export function useAuth() {
         expiresAt = resp.data.expirationTime
       }
 
+      if(!isCurrentAuthSession(previousSession)) {throw new Error("STALE_AUTH_REQUEST");}
       updateToken(omsToken, expiresAt)
+      loginSession = readAuthSession();
 
       if(accxuiConfig.value.postLogin) {
         await accxuiConfig.value.postLogin();
       }
     } catch (err: any) {
-      if(err?.message?.includes("INVALID_APP_CONTEXT")) {
-        return;
+      if(err?.message?.includes("INVALID_APP_CONTEXT") || err?.message?.includes("STALE_AUTH_REQUEST")) {
+        return Promise.reject(err);
       }
 
-      updateToken("", "")
-      accxuiConfig.value.current = {}
+      // Profile/permission/setup errors are not evidence that the shared token is invalid.
+      // Keep the app on Login for a retry, while preserving other apps' valid session.
+      const currentSession = readAuthSession();
+      if(loginSession && loginSession.token === currentSession.token &&
+          loginSession.expirationTime === currentSession.expirationTime &&
+          loginSession.oms === currentSession.oms && loginSession.maarg === currentSession.maarg) {
+        accxuiConfig.value.current = {}
+      }
 
       // Moqui login returns a non-2xx status (e.g. bad credentials), so axios rejects
       // before `hasError()` can inspect the body - surface that message here instead.
@@ -143,6 +254,8 @@ export function useAuth() {
 
   const logout = async (payload?: any) => {
     let redirectionUrl = "";
+    const expectedSession = payload?.expectedSession || readAuthSession();
+    if(!isCurrentAuthSession(expectedSession)) {return;}
 
     if(!payload?.isUserUnauthorised) {
       emitter.emit("presentLoader", {
@@ -156,6 +269,12 @@ export function useAuth() {
         } catch (err) {
           logger.error("Error running preLogout hook", err);
         }
+      }
+
+      if(!isCurrentAuthSession(expectedSession)) {
+        emitter.emit("dismissLoader");
+
+        return;
       }
 
       try {
@@ -181,9 +300,13 @@ export function useAuth() {
       }
     }
 
+    if(!isCurrentAuthSession(expectedSession)) {
+      emitter.emit("dismissLoader");
+
+      return;
+    }
     if(!payload?.invalidAppContext && !commonUtil.isAppEmbedded()) {
-      updateToken("", "")
-      updateUserId("")
+      clearAuth()
     } else {
       commonUtil.showToast(translate("Session expired. Refreshing..."))
     }
@@ -193,6 +316,7 @@ export function useAuth() {
     // reset and restore it after, so the router guard and fetchAppVersion keep agreeing across a logout
     // instead of ping-ponging /login <-> /vX.Y.Z/login. Re-resolved on the next login regardless.
     const appVersion = accxuiConfig.value.appVersion
+    const resetSession = readAuthSession();
 
     if(accxuiConfig.value.postLogout) {
       try {
@@ -200,6 +324,13 @@ export function useAuth() {
       } catch (err) {
         logger.error("Error running postLogout hook", err);
       }
+    }
+
+    // A newer login may finish while an app's asynchronous cache cleanup is running.
+    if(!isCurrentAuthSession(resetSession)) {
+      emitter.emit("dismissLoader");
+
+      return;
     }
 
     // Shared composables in common hold module-level tenant data too; sweep them after the app's own hook.

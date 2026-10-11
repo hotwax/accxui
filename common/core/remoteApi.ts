@@ -2,11 +2,18 @@ import axios from 'axios';
 import { StatusCodes } from 'http-status-codes';
 import { setupCache } from 'axios-cache-adapter'
 import qs from "qs"
+import { getAuthSessionVersion, isSessionBackend, readAuthSession, useAuth } from "../composables/useAuth";
 import { commonUtil } from '../utils/commonUtil';
-import { useAuth } from '../composables/useAuth';
+
+const isPublicAuthEndpoint = (url = "") =>
+  /(?:^|\/)(?:login|logout|checkLoginOptions|app-bridge\/login|appVersions)(?:[/?]|$)/.test(url);
 
 const requestInterceptor = async (config: any) => {
+  // Only an opaque version travels in Axios config/errors; credentials stay in memory.
+  config.authSessionVersion ??= getAuthSessionVersion();
+  if(config.authSessionVersion !== getAuthSessionVersion()) {return Promise.reject(new Error("STALE_AUTH_REQUEST"));}
   const token = commonUtil.getToken();
+  config.isSessionRequest = Boolean(token && isSessionBackend(config) && !isPublicAuthEndpoint(config.url));
 
   // The following are the endpoints needs to bypass the auth check and when this calls are made we will assume
   // that we are always relogin with the new credentials present in cookies.
@@ -21,7 +28,6 @@ const requestInterceptor = async (config: any) => {
   const isAnonymousEndpoint = noAuthEndpoints.some((endpoint: string) => config.url.includes(endpoint));
   if (!useAuth().isAuthenticated.value && !isAnonymousEndpoint) {
     await useAuth().logout({ isUserUnauthorised: true, invalidAppContext: true })
-    useAuth().clearAuth()
     return Promise.reject(new Error("INVALID_APP_CONTEXT"));
   }
 
@@ -33,6 +39,10 @@ const requestInterceptor = async (config: any) => {
 }
 
 const responseSuccessInterceptor = (response: any) => {
+  if(response.config?.isSessionRequest && response.config.authSessionVersion !== getAuthSessionVersion()) {
+    return Promise.reject(new Error("STALE_AUTH_REQUEST"));
+  }
+
   // Any status code that lie within the range of 2xx cause this function to trigger
   return response;
 }
@@ -41,8 +51,9 @@ const responseErrorInterceptor = (error: any) => {
   // As we have yet added support for logout on unauthorization hence emitting unauth event only in case of ofbiz app
   if (error?.response) {
     const { status } = error.response;
-    if (status == StatusCodes.UNAUTHORIZED) {
-      useAuth().logout({ isUserUnauthorised: true });
+    if(status == StatusCodes.UNAUTHORIZED && error.config?.isSessionRequest &&
+        error.config.authSessionVersion === getAuthSessionVersion()) {
+      void useAuth().logout({ isUserUnauthorised: true, expectedSession: readAuthSession() });
     }
   }
   // Any status codes that falls outside the range of 2xx cause this function to trigger
@@ -85,8 +96,14 @@ const paramsSerializer = (p: any) => {
   return qs.stringify(params, { arrayFormat: 'repeat' });
 }
 
-axios.interceptors.request.use(requestInterceptor);
-axios.interceptors.response.use(responseSuccessInterceptor, responseErrorInterceptor);
+const requestInterceptorId = axios.interceptors.request.use(requestInterceptor);
+const responseInterceptorId = axios.interceptors.response.use(responseSuccessInterceptor, responseErrorInterceptor);
+if(import.meta.hot) {
+  import.meta.hot.dispose(() => {
+    axios.interceptors.request.eject(requestInterceptorId);
+    axios.interceptors.response.eject(responseInterceptorId);
+  });
+}
 
 const maxAge = import.meta.env.VITE_CACHE_MAX_AGE
   ? parseInt(import.meta.env.VITE_CACHE_MAX_AGE)
@@ -112,6 +129,7 @@ const axiosCache = setupCache({
 const api = async (customConfig: any) => {
   // Prepare configuration
   const config: any = {
+    authSessionVersion: getAuthSessionVersion(),
     url: customConfig.url,
     method: customConfig.method,
     data: customConfig.data,
