@@ -32,7 +32,7 @@ jobs:
     - name: Install pnpm
       uses: pnpm/action-setup@v4
       with:
-        version: 9
+        version: 9.15.9
         run_install: false
 
     - name: Use Node.js 22.x
@@ -42,7 +42,7 @@ jobs:
         cache: 'pnpm'
 
     - name: Install Dependencies
-      run: pnpm install
+      run: pnpm install --frozen-lockfile
 
     - name: Generate .env file
       run: cp .env.example .env
@@ -50,3 +50,22 @@ jobs:
 
     - name: Build
       run: pnpm --filter ${{ matrix.app }} build
+
+  full-workspace-install:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Checkout all current workspace apps
+      run: |
+        for app in available-to-promise bopis company facilities fulfillment inventory-count job-manager launchpad order-manager order-routing preorder products receiving reroute-fulfilment shopify-bopis transfers users; do
+          git clone --depth 1 --branch main "https://github.com/hotwax/$app.git" "apps/$app"
+        done
+    - uses: pnpm/action-setup@v4
+      with:
+        version: 9.15.9
+    - uses: actions/setup-node@v4
+      with:
+        node-version: 22.x
+        cache: 'pnpm'
+    - name: Verify full frozen installation
+      run: pnpm install --frozen-lockfile
