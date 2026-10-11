@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("comlink", () => ({ expose: () => {} }));
 
@@ -23,6 +23,66 @@ function deferred<T = void>() {
   const promise = new Promise<T>((r) => { resolve = r; });
   return { promise, resolve };
 }
+
+describe("queued automatic refreshes", () => {
+  beforeEach(() => { clearSyncRegistry(); vi.useFakeTimers(); });
+  afterEach(() => { vi.clearAllTimers(); vi.useRealTimers(); });
+
+  it.each([false, true])("does not repeat a slow startup refresh (failure: %s), but keeps manual refresh and cadence", async (fails) => {
+    const gate = deferred();
+    const membership = vi.fn(async () => {
+      if (membership.mock.calls.length === 1) {
+        await gate.promise;
+        if (fails) throw new Error('Membership unavailable');
+      }
+      return 1;
+    });
+    const orders = vi.fn(async () => 1);
+    registerSyncDomain({ name: 'membership', label: 'Membership', syncClass: 'A', intervalMs: 30000, sync: membership });
+    registerSyncDomain({ name: 'orders', label: 'Orders', syncClass: 'A', intervalMs: 30000, sync: orders });
+    const harness = createSyncHarness(stubDb);
+    await harness.start({ ...START, domains: [], baseTickMs: 1000 });
+    harness.setDomains([{ name: 'membership' }, { name: 'orders' }]);
+    const initial = harness.syncDomainNow('membership').catch(error => error);
+
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(membership).toHaveBeenCalledOnce();
+    expect(orders).not.toHaveBeenCalled();
+    gate.resolve();
+    const result = await initial;
+    expect(result instanceof Error).toBe(fails);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(membership).toHaveBeenCalledOnce();
+    expect(orders).toHaveBeenCalledOnce();
+
+    await harness.syncDomainNow('membership');
+    expect(membership).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(30000);
+    expect(membership).toHaveBeenCalledTimes(3);
+    harness.stop();
+  });
+
+  it("still runs a queued activation with different scope arguments", async () => {
+    const gate = deferred();
+    const scopes: string[] = [];
+    registerSyncDomain({ name: 'd', label: 'd', syncClass: 'A', intervalMs: 30000,
+      sync: async (_ctx, args: any) => {
+        scopes.push(args.facilityId);
+        if (scopes.length === 1) await gate.promise;
+        return 1;
+      },
+    });
+    const harness = createSyncHarness(stubDb);
+    await harness.start({ ...START, domains: [], baseTickMs: 1000 });
+    harness.setDomains([{ name: 'd', args: { facilityId: 'A' } }, { name: 'd', args: { facilityId: 'B' } }]);
+    const initial = harness.syncDomainNow('d');
+    await vi.advanceTimersByTimeAsync(1000);
+    gate.resolve(); await initial;
+    await vi.advanceTimersByTimeAsync(0);
+    expect(scopes).toEqual(['A', 'B']);
+    harness.stop();
+  });
+});
 
 describe("harness operation ordering", () => {
   beforeEach(() => clearSyncRegistry());

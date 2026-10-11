@@ -56,11 +56,13 @@
 </template>
 
 <script setup lang="ts">
+import { getMaargURL as utilGetMaargURL, getOmsURL as utilGetOmsURL } from '../utils/core';
+import { getCurrentTime as utilGetCurrentTime } from '../utils/date';
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { IonFooter, IonItem, IonLabel, IonNote, IonSelect, IonSelectOption, IonToolbar } from '@ionic/vue';
 import { translate } from '../core/i18n';
 import { accxuiConfig } from '../core/configRegistry';
-import { commonUtil } from '../utils/commonUtil';
+
 
 const HOTWAX_HOST_SUFFIX = '.hotwax.io';
 
@@ -118,7 +120,7 @@ const currentStoreLabel = computed(() => {
 
 const displayInstanceLabel = computed(() => {
   if (props.instanceLabel) return props.instanceLabel;
-  const url = (commonUtil as any)?.getMaargURL?.() || (commonUtil as any)?.getOmsURL?.() || '';
+  const url = utilGetMaargURL() || utilGetOmsURL() || '';
   if (!url) return '';
   const host = url.replace(/^https?:\/\//, '').split('/')[0];
   return host.endsWith(HOTWAX_HOST_SUFFIX) ? host.slice(0, -HOTWAX_HOST_SUFFIX.length) : host;
@@ -153,8 +155,8 @@ function refreshSelectedZoneTime() {
     selectedZoneTime.value = '';
     return;
   }
-  if (commonUtil && typeof commonUtil.getCurrentTime === 'function') {
-    selectedZoneTime.value = commonUtil.getCurrentTime(displayTimeZone.value, 't');
+  if (typeof utilGetCurrentTime === 'function') {
+    selectedZoneTime.value = utilGetCurrentTime(displayTimeZone.value, 't');
   }
 }
 

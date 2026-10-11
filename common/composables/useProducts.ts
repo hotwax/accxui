@@ -1,7 +1,8 @@
+import { hasError as utilHasError } from '../utils/core';
 import { ref } from "vue";
 import logger from "../core/logger";
 import { onSessionCleared } from "../core/sessionScope";
-import { commonUtil } from "../utils/commonUtil";
+
 import { useSolrSearch } from "./useSolrSearch";
 
 /**
@@ -121,7 +122,7 @@ async function getByIds(productIds: Iterable<string>): Promise<ResolvedProduct[]
     const batch = ids.slice(index, index + BATCH_SIZE);
     try {
       const response: any = await useSolrSearch().runSolrQuery(buildProductQuery(batch));
-      if(commonUtil.hasError(response)) {
+      if(utilHasError(response)) {
         logger.error("Product [Solr] - Query returned an error", response?.data);
         continue;
       }

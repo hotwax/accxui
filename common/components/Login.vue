@@ -120,29 +120,14 @@
 </template>
 
 <script setup lang="ts">
-import {
-  IonBadge,
-  IonButton,
-  IonChip,
-  IonContent,
-  IonIcon,
-  IonInput,
-  IonItem,
-  IonLabel,
-  IonList,
-  IonListHeader,
-  IonNote,
-  IonPage,
-  IonSpinner,
-  loadingController,
-  onIonViewWillEnter
-} from "@ionic/vue";
+import { getOMSInstanceName as utilGetOMSInstanceName, isMoqui as utilIsMoqui, showToast as utilShowToast } from '../utils/core';
+import { IonBadge, IonButton, IonChip, IonContent, IonIcon, IonInput, IonItem, IonLabel, IonList, IonListHeader, IonNote, IonPage, IonSpinner, loadingController, onIonViewWillEnter } from "@ionic/vue";
 import { computed, ref } from "vue";
 import Logo from "./Logo.vue";
-import { arrowBackOutline, arrowForwardOutline, warningOutline } from 'ionicons/icons'
+import { arrowBackOutline, arrowForwardOutline, warningOutline } from 'ionicons/icons';
 import { cookieHelper } from "../helpers/cookieHelper";
-import { translate } from "../core/i18n"
-import { commonUtil } from "../utils/commonUtil";
+import { translate } from "../core/i18n";
+
 import { useAuth } from "../composables/useAuth";
 import { accxuiConfig } from "../core/configRegistry";
 import { discoverLocalApiServers, type LocalApiServer, type LocalApiServerSignal } from "../core/localApiServerDiscovery";
@@ -305,7 +290,7 @@ const discoverLocalApiServerOptions = async () => {
 
 const login = async (params?: any) => {
   if((!username.value || !password.value) && !params?.token) {
-    commonUtil.showToast(translate("Please fill in the user details"));
+    utilShowToast(translate("Please fill in the user details"));
     return;
   }
 
@@ -331,7 +316,7 @@ const login = async (params?: any) => {
 
 const setOms = async () => {
   if (!instanceUrl.value) {
-    commonUtil.showToast(translate("Please fill in the OMS"));
+    utilShowToast(translate("Please fill in the OMS"));
     return;
   }
 
@@ -468,7 +453,7 @@ const initialise = async () => {
       clearAuth()
       const { oms, omsRedirectionUrl } = route.query as any
       const isMaarg = maargApps.some(app => host.includes(app));
-      const target = commonUtil.isMoqui() !== isMaarg ? omsRedirectionUrl : oms;
+      const target = utilIsMoqui() !== isMaarg ? omsRedirectionUrl : oms;
       updateOMS(target);
       accxuiConfig.value.oms = target;
 
@@ -508,7 +493,7 @@ const initialise = async () => {
       return;
     }
 
-    instanceUrl.value = commonUtil.getOMSInstanceName();
+    instanceUrl.value = utilGetOMSInstanceName();
     if (instanceUrl.value) {
       // If the current URL is available in alias show it for consistency
       const currentInstanceUrlAlias = Object.keys(alias).find((key) => alias[key] === instanceUrl.value);

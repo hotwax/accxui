@@ -1,12 +1,12 @@
+import { getMaargURL as utilGetMaargURL, getToken as utilGetToken } from '../utils/core';
 import axios from 'axios';
 import { StatusCodes } from 'http-status-codes';
-import { setupCache } from 'axios-cache-adapter'
 import qs from "qs"
-import { commonUtil } from '../utils/commonUtil';
+
 import { useAuth } from '../composables/useAuth';
 
 const requestInterceptor = async (config: any) => {
-  const token = commonUtil.getToken();
+  const token = utilGetToken();
 
   // The following are the endpoints needs to bypass the auth check and when this calls are made we will assume
   // that we are always relogin with the new credentials present in cookies.
@@ -91,9 +91,10 @@ axios.interceptors.response.use(responseSuccessInterceptor, responseErrorInterce
 const maxAge = import.meta.env.VITE_CACHE_MAX_AGE
   ? parseInt(import.meta.env.VITE_CACHE_MAX_AGE)
   : 0;
-const axiosCache = setupCache({
-  maxAge: maxAge * 1000
-})
+let cacheAdapter: Promise<any> | undefined;
+const getCacheAdapter = () => cacheAdapter ??= import('axios-cache-adapter')
+  .then(({ setupCache }) => setupCache({ maxAge: maxAge * 1000 }).adapter)
+  .catch(error => { cacheAdapter = undefined; throw error; });
 
 /**
  * Generic method to call APIs
@@ -125,9 +126,9 @@ const api = async (customConfig: any) => {
   // if passing responseType in payload then only adding it as responseType
   if (customConfig.responseType) config['responseType'] = customConfig.responseType
 
-  config.baseURL = customConfig.baseURL ? customConfig.baseURL : commonUtil.getMaargURL();
+  config.baseURL = customConfig.baseURL ? customConfig.baseURL : utilGetMaargURL();
 
-  if (customConfig.cache) config.adapter = axiosCache.adapter;
+  if (customConfig.cache) config.adapter = await getCacheAdapter();
 
   return axios(config);
 }

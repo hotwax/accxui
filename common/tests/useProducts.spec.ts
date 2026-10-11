@@ -8,9 +8,7 @@ vi.mock("../composables/useSolrSearch", () => ({
 vi.mock("../core/logger", () => ({
   default: { error: vi.fn(), warn: vi.fn(), info: vi.fn() },
 }));
-vi.mock("../utils/commonUtil", () => ({
-  commonUtil: { hasError: (response: any) => Boolean(response?.data?.error) },
-}));
+vi.mock('../utils/core', () => ({ hasError: (response: any) => Boolean(response?.data?.error) }));
 
 import { useProducts } from "../composables/useProducts";
 import { clearSessionScopedState } from "../core/sessionScope";

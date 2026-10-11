@@ -16,13 +16,7 @@ const workerStub = vi.hoisted(() => ({ onmessage: null as any }));
 vi.mock("../core/workerFactory", () => ({
   WorkerFactory: { createWorker: () => ({ api: harnessStub, terminate: vi.fn(), worker: workerStub }) },
 }));
-vi.mock("../utils/commonUtil", () => ({
-  commonUtil: {
-    getToken: () => "tok",
-    getMaargURL: () => "https://x.test/",
-    getOMSInstanceName: () => "demo",
-  },
-}));
+vi.mock('../utils/core', () => ({ getToken: () => "tok", getMaargURL: () => "https://x.test/", getOMSInstanceName: () => "demo" }));
 vi.mock("../db/sync/channels", () => ({
   createTokenPublisher: () => ({ publish: vi.fn(), close: vi.fn() }),
 }));
