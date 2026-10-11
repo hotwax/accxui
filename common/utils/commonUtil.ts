@@ -1,13 +1,16 @@
 import { toastController } from "@ionic/vue";
 import { DateTime } from "luxon";
 import { cookieHelper } from "../helpers/cookieHelper";
-import { translate } from "../core/i18n";
+import { currentLocale, translate } from "../core/i18n";
 // Capacitor Plugins import removed for compatibility
 import { saveAs } from 'file-saver';
 import Papa from 'papaparse';
 import Encoding from 'encoding-japanese';
 import { CronExpressionParser as cronParser } from "cron-parser";
 import cronstrue from "cronstrue"
+// Only the languages the apps ship; the full cronstrue build would add about 160 KB to every app.
+import "cronstrue/locales/es"
+import "cronstrue/locales/ja"
 import { useEmbeddedAppStore } from "../store/embeddedApp";
 
 export interface JsonToCsvOption {
@@ -855,9 +858,10 @@ function getRelativeTime(endTime: any) {
   return DateTime.local().plus(timeDiff).toRelative();
 }
 
+/** The schedule in words, in the app's language: "Every 5 minutes", "Cada 5 minutos". */
 function getCronString(cronExpression: any) {
   try {
-    return cronstrue.toString(cronExpression)
+    return cronstrue.toString(cronExpression, { locale: (currentLocale() || "en").split("-")[0] })
   } catch (e) {
     console.info(e)
     return ""
