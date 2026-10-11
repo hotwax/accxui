@@ -15,16 +15,17 @@
 > `~/Documents/GitHub/<app>` checkouts no longer exist. The inventory below is
 > still the 2026-06-16 snapshot. Because an app's `apps/<app>` entry and its
 > main checkout are now the same path, Task 2's duplicate-registration premise
-> no longer applies. Paths under `/private/tmp`, `~/.config/superpowers/worktrees/`,
-> `~/Documents/GitHub/fulfillment-permission-cleanup`, and
-> `apps/shared-transition-demo` no longer exist and remain as historical
-> references.
+> no longer applies. The retired candidate paths in this snapshot remain as
+> historical references, not deletion targets. In particular,
+> `~/.config/superpowers/worktrees/` still contains other worktrees; the missing
+> historical candidate beneath it does not mean the entire root is obsolete.
+> Recheck every individual path before acting.
 
 ---
 
-## Current Inventory Snapshot
+## Historical Inventory Snapshot
 
-Generated on 2026-06-16 from `/Users/adityapatel/Documents/GitHub/ionic-apps/accxui/apps/*`.
+Generated on 2026-06-16 from the then-current `/Users/adityapatel/Documents/GitHub/accxui/apps/*` layout. The wrapper and app paths used by the commands below were updated on 2026-10-12; the inventory counts and cleanup signals remain historical.
 
 | App | Worktrees | Cleanup signal |
 | --- | ---: | --- |
