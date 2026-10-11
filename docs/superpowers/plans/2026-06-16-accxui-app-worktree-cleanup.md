@@ -6,13 +6,25 @@
 
 **Architecture:** Treat cleanup as an audit-first operation. Subagents independently classify worktrees by cleanup class, return exact evidence and proposed commands, and the coordinator performs final removal only after confirming no dirty files, no unpushed commits, and no needed AccxUI app symlink will be broken.
 
-**Tech Stack:** Git worktrees, zsh/bash shell commands, AccxUI pnpm workspace at `/Users/adityapatel/Documents/GitHub/accxui`.
+**Tech Stack:** Git worktrees, zsh/bash shell commands, AccxUI pnpm workspace at `/Users/adityapatel/Documents/GitHub/ionic-apps/accxui`.
+
+
+> **Path update (2026-10-12):** Paths reflect the current layout. The wrapper is
+> `/Users/adityapatel/Documents/GitHub/ionic-apps/accxui`, and each app is its
+> own Git checkout at `apps/<app>`; the separate top-level
+> `~/Documents/GitHub/<app>` checkouts no longer exist. The inventory below is
+> still the 2026-06-16 snapshot. Because an app's `apps/<app>` entry and its
+> main checkout are now the same path, Task 2's duplicate-registration premise
+> no longer applies. Paths under `/private/tmp`, `~/.config/superpowers/worktrees/`,
+> `~/Documents/GitHub/fulfillment-permission-cleanup`, and
+> `apps/shared-transition-demo` no longer exist and remain as historical
+> references.
 
 ---
 
 ## Current Inventory Snapshot
 
-Generated on 2026-06-16 from `/Users/adityapatel/Documents/GitHub/accxui/apps/*`.
+Generated on 2026-06-16 from `/Users/adityapatel/Documents/GitHub/ionic-apps/accxui/apps/*`.
 
 | App | Worktrees | Cleanup signal |
 | --- | ---: | --- |
@@ -37,10 +49,10 @@ Coordinator rule: do not remove any worktree with dirty files, an unpushed branc
 Run:
 
 ```bash
-cd /Users/adityapatel/Documents/GitHub/accxui
+cd /Users/adityapatel/Documents/GitHub/ionic-apps/accxui
 /bin/bash -lc '
 for app in available-to-promise bopis company fulfillment job-manager order-manager order-routing products receiving returns shared-transition-demo; do
-  target=$(cd "/Users/adityapatel/Documents/GitHub/accxui/apps/$app" 2>/dev/null && pwd -P) || continue
+  target=$(cd "/Users/adityapatel/Documents/GitHub/ionic-apps/accxui/apps/$app" 2>/dev/null && pwd -P) || continue
   git -C "$target" rev-parse --is-inside-work-tree >/dev/null 2>&1 || continue
   printf "\nAPP %s target=%s\n" "$app" "$target"
   git -C "$target" worktree list --porcelain
@@ -55,10 +67,10 @@ Expected: every app listed above appears, and worktree paths match this plan or 
 Run:
 
 ```bash
-cd /Users/adityapatel/Documents/GitHub/accxui
+cd /Users/adityapatel/Documents/GitHub/ionic-apps/accxui
 /bin/bash -lc '
 for app in available-to-promise bopis company fulfillment job-manager order-manager order-routing products receiving returns shared-transition-demo; do
-  target=$(cd "/Users/adityapatel/Documents/GitHub/accxui/apps/$app" 2>/dev/null && pwd -P) || continue
+  target=$(cd "/Users/adityapatel/Documents/GitHub/ionic-apps/accxui/apps/$app" 2>/dev/null && pwd -P) || continue
   git -C "$target" rev-parse --is-inside-work-tree >/dev/null 2>&1 || continue
   printf "\nAPP %s target=%s\n" "$app" "$target"
   git -C "$target" worktree list --porcelain | awk '"'"'
@@ -136,28 +148,28 @@ Do not delete anything in the subagent unless the coordinator explicitly asks.
 
 **Owner:** Subagent B
 
-**Scope:** Worktree entries whose path is under `/Users/adityapatel/Documents/GitHub/accxui/apps/` and whose app is also symlinked to a top-level checkout.
+**Scope:** Worktree entries whose path is under `/Users/adityapatel/Documents/GitHub/ionic-apps/accxui/apps/` and whose app is also symlinked to a top-level checkout.
 
 **Candidate paths from snapshot:**
 
-- `/Users/adityapatel/Documents/GitHub/accxui/apps/available-to-promise`
-- `/Users/adityapatel/Documents/GitHub/accxui/apps/bopis`
-- `/Users/adityapatel/Documents/GitHub/accxui/apps/fulfillment`
-- `/Users/adityapatel/Documents/GitHub/accxui/apps/receiving`
+- `/Users/adityapatel/Documents/GitHub/ionic-apps/accxui/apps/available-to-promise`
+- `/Users/adityapatel/Documents/GitHub/ionic-apps/accxui/apps/bopis`
+- `/Users/adityapatel/Documents/GitHub/ionic-apps/accxui/apps/fulfillment`
+- `/Users/adityapatel/Documents/GitHub/ionic-apps/accxui/apps/receiving`
 
 - [ ] **Step 1: Verify symlink identity before recommending cleanup**
 
 Run:
 
 ```bash
-cd /Users/adityapatel/Documents/GitHub/accxui
+cd /Users/adityapatel/Documents/GitHub/ionic-apps/accxui
 for app in available-to-promise bopis fulfillment receiving; do
   printf "\n%s\n" "$app"
   ls -l "apps/$app"
-  printf "logical app path: %s\n" "/Users/adityapatel/Documents/GitHub/accxui/apps/$app"
+  printf "logical app path: %s\n" "/Users/adityapatel/Documents/GitHub/ionic-apps/accxui/apps/$app"
   printf "physical app path: "
-  cd "/Users/adityapatel/Documents/GitHub/accxui/apps/$app" && pwd -P
-  git -C "/Users/adityapatel/Documents/GitHub/accxui/apps/$app" rev-parse --git-dir --git-common-dir
+  cd "/Users/adityapatel/Documents/GitHub/ionic-apps/accxui/apps/$app" && pwd -P
+  git -C "/Users/adityapatel/Documents/GitHub/ionic-apps/accxui/apps/$app" rev-parse --git-dir --git-common-dir
 done
 ```
 
@@ -168,10 +180,10 @@ Expected: determine whether the `accxui/apps/<app>` worktree entry is a real ind
 Run from the top-level app repo for each candidate:
 
 ```bash
-git -C /Users/adityapatel/Documents/GitHub/available-to-promise worktree prune --dry-run --verbose
-git -C /Users/adityapatel/Documents/GitHub/bopis worktree prune --dry-run --verbose
-git -C /Users/adityapatel/Documents/GitHub/fulfillment worktree prune --dry-run --verbose
-git -C /Users/adityapatel/Documents/GitHub/receiving worktree prune --dry-run --verbose
+git -C /Users/adityapatel/Documents/GitHub/ionic-apps/accxui/apps/available-to-promise worktree prune --dry-run --verbose
+git -C /Users/adityapatel/Documents/GitHub/ionic-apps/accxui/apps/bopis worktree prune --dry-run --verbose
+git -C /Users/adityapatel/Documents/GitHub/ionic-apps/accxui/apps/fulfillment worktree prune --dry-run --verbose
+git -C /Users/adityapatel/Documents/GitHub/ionic-apps/accxui/apps/receiving worktree prune --dry-run --verbose
 ```
 
 Expected: if Git says it would prune entries, report them. If Git does not, do not force removal without coordinator review.
@@ -231,24 +243,24 @@ Return:
 
 **Candidate paths from snapshot:**
 
-- `/Users/adityapatel/Documents/GitHub/available-to-promise`
-- `/Users/adityapatel/Documents/GitHub/bopis`
-- `/Users/adityapatel/Documents/GitHub/company`
-- `/Users/adityapatel/Documents/GitHub/fulfillment`
-- `/Users/adityapatel/Documents/GitHub/job-manager`
-- `/Users/adityapatel/Documents/GitHub/order-manager`
-- `/Users/adityapatel/Documents/GitHub/order-routing`
-- `/Users/adityapatel/Documents/GitHub/products`
-- `/Users/adityapatel/Documents/GitHub/receiving`
-- `/Users/adityapatel/Documents/GitHub/returns`
+- `/Users/adityapatel/Documents/GitHub/ionic-apps/accxui/apps/available-to-promise`
+- `/Users/adityapatel/Documents/GitHub/ionic-apps/accxui/apps/bopis`
+- `/Users/adityapatel/Documents/GitHub/ionic-apps/accxui/apps/company`
+- `/Users/adityapatel/Documents/GitHub/ionic-apps/accxui/apps/fulfillment`
+- `/Users/adityapatel/Documents/GitHub/ionic-apps/accxui/apps/job-manager`
+- `/Users/adityapatel/Documents/GitHub/ionic-apps/accxui/apps/order-manager`
+- `/Users/adityapatel/Documents/GitHub/ionic-apps/accxui/apps/order-routing`
+- `/Users/adityapatel/Documents/GitHub/ionic-apps/accxui/apps/products`
+- `/Users/adityapatel/Documents/GitHub/ionic-apps/accxui/apps/receiving`
+- `/Users/adityapatel/Documents/GitHub/ionic-apps/accxui/apps/returns`
 
 - [ ] **Step 1: Summarize uncommitted work without modifying it**
 
 Run for each path:
 
 ```bash
-git -C /Users/adityapatel/Documents/GitHub/job-manager status --short --branch
-git -C /Users/adityapatel/Documents/GitHub/job-manager diff --stat
+git -C /Users/adityapatel/Documents/GitHub/ionic-apps/accxui/apps/job-manager status --short --branch
+git -C /Users/adityapatel/Documents/GitHub/ionic-apps/accxui/apps/job-manager diff --stat
 ```
 
 Expected: produce a short human-readable summary of dirty files and branch purpose. Do not run formatters, installs, or builds.
@@ -284,8 +296,8 @@ For safe removals, use `git worktree remove` from the owning repo, not `rm -rf`.
 Example:
 
 ```bash
-git -C /Users/adityapatel/Documents/GitHub/company worktree remove /private/tmp/codex-favicon-standard-prs/company
-git -C /Users/adityapatel/Documents/GitHub/company worktree remove /private/tmp/codex-icon-prs/company
+git -C /Users/adityapatel/Documents/GitHub/ionic-apps/accxui/apps/company worktree remove /private/tmp/codex-favicon-standard-prs/company
+git -C /Users/adityapatel/Documents/GitHub/ionic-apps/accxui/apps/company worktree remove /private/tmp/codex-icon-prs/company
 ```
 
 Expected: user or coordinator confirms commands are limited to clean, irrelevant worktrees.
@@ -300,7 +312,7 @@ Run:
 
 ```bash
 for repo in available-to-promise bopis company fulfillment job-manager order-routing receiving; do
-  git -C "/Users/adityapatel/Documents/GitHub/$repo" worktree prune --verbose
+  git -C "/Users/adityapatel/Documents/GitHub/ionic-apps/accxui/apps/$repo" worktree prune --verbose
 done
 ```
 
@@ -311,9 +323,9 @@ Expected: Git removes stale administrative entries only.
 Run:
 
 ```bash
-cd /Users/adityapatel/Documents/GitHub/accxui
+cd /Users/adityapatel/Documents/GitHub/ionic-apps/accxui
 for app in available-to-promise bopis company fulfillment job-manager order-manager order-routing products receiving returns shared-transition-demo; do
-  target=$(cd "/Users/adityapatel/Documents/GitHub/accxui/apps/$app" 2>/dev/null && pwd -P) || continue
+  target=$(cd "/Users/adityapatel/Documents/GitHub/ionic-apps/accxui/apps/$app" 2>/dev/null && pwd -P) || continue
   git -C "$target" rev-parse --is-inside-work-tree >/dev/null 2>&1 || continue
   count=$(git -C "$target" worktree list --porcelain | awk 'BEGIN{c=0} /^worktree /{c++} END{print c}')
   printf "%s\t%s\n" "$count" "$app"
@@ -326,17 +338,17 @@ Expected target outcome: temp PR worktrees removed; real active checkouts retain
 
 Keep by default:
 
-- `/Users/adityapatel/Documents/GitHub/available-to-promise`
-- `/Users/adityapatel/Documents/GitHub/bopis`
-- `/Users/adityapatel/Documents/GitHub/company`
-- `/Users/adityapatel/Documents/GitHub/fulfillment`
-- `/Users/adityapatel/Documents/GitHub/job-manager`
-- `/Users/adityapatel/Documents/GitHub/order-manager`
-- `/Users/adityapatel/Documents/GitHub/order-routing`
-- `/Users/adityapatel/Documents/GitHub/products`
-- `/Users/adityapatel/Documents/GitHub/receiving`
-- `/Users/adityapatel/Documents/GitHub/returns`
-- `/Users/adityapatel/Documents/GitHub/accxui/apps/shared-transition-demo`
+- `/Users/adityapatel/Documents/GitHub/ionic-apps/accxui/apps/available-to-promise`
+- `/Users/adityapatel/Documents/GitHub/ionic-apps/accxui/apps/bopis`
+- `/Users/adityapatel/Documents/GitHub/ionic-apps/accxui/apps/company`
+- `/Users/adityapatel/Documents/GitHub/ionic-apps/accxui/apps/fulfillment`
+- `/Users/adityapatel/Documents/GitHub/ionic-apps/accxui/apps/job-manager`
+- `/Users/adityapatel/Documents/GitHub/ionic-apps/accxui/apps/order-manager`
+- `/Users/adityapatel/Documents/GitHub/ionic-apps/accxui/apps/order-routing`
+- `/Users/adityapatel/Documents/GitHub/ionic-apps/accxui/apps/products`
+- `/Users/adityapatel/Documents/GitHub/ionic-apps/accxui/apps/receiving`
+- `/Users/adityapatel/Documents/GitHub/ionic-apps/accxui/apps/returns`
+- `/Users/adityapatel/Documents/GitHub/ionic-apps/accxui/apps/shared-transition-demo`
 
 Likely cleanup after verification:
 
@@ -349,10 +361,10 @@ Likely cleanup after verification:
 
 Requires careful review before removal:
 
-- `/Users/adityapatel/Documents/GitHub/accxui/apps/available-to-promise`
-- `/Users/adityapatel/Documents/GitHub/accxui/apps/bopis`
-- `/Users/adityapatel/Documents/GitHub/accxui/apps/fulfillment`
-- `/Users/adityapatel/Documents/GitHub/accxui/apps/receiving`
+- `/Users/adityapatel/Documents/GitHub/ionic-apps/accxui/apps/available-to-promise`
+- `/Users/adityapatel/Documents/GitHub/ionic-apps/accxui/apps/bopis`
+- `/Users/adityapatel/Documents/GitHub/ionic-apps/accxui/apps/fulfillment`
+- `/Users/adityapatel/Documents/GitHub/ionic-apps/accxui/apps/receiving`
 - `/Users/adityapatel/.config/superpowers/worktrees/product-store-settings-prs/fulfillment-codex/fulfillment-action-permissions-main`
 - `/Users/adityapatel/Documents/GitHub/fulfillment-permission-cleanup`
 
@@ -363,4 +375,4 @@ Requires careful review before removal:
 - Never remove a worktree with commits ahead of upstream.
 - Never remove `accxui/apps/<app>` symlinks as part of worktree metadata cleanup.
 - Treat detached worktrees as user-owned until their physical path, dirty state, and branch provenance are understood.
-- After cleanup, confirm `pnpm-workspace.yaml` still resolves the app packages from `/Users/adityapatel/Documents/GitHub/accxui`.
+- After cleanup, confirm `pnpm-workspace.yaml` still resolves the app packages from `/Users/adityapatel/Documents/GitHub/ionic-apps/accxui`.

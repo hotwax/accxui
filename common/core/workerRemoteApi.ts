@@ -180,16 +180,22 @@ export async function pageAll(options: {
   maxPages?: number;
   /** Identifies the domain (and parent, for a fan-out) in errors/warnings. Defaults to `url`. */
   label?: string;
+  /**
+   * Stops the walk before its next page. A caller that gives up waiting (a timeout) must abort, or
+   * the abandoned walk keeps requesting pages whose results nobody will read.
+   */
+  signal?: AbortSignal;
 }): Promise<any[]> {
   const {
     ctx, url, collectionKey, strictCollection = false, params = {},
     batchSize = 250, unpaged = false, keyOf, maxPages = 40, label = url,
-    requireComplete = false,
+    requireComplete = false, signal,
   } = options;
   if (unpaged || batchSize === 0) {
     // Single request, but still ask for a full page: Moqui defaults to 20 rows when no page
     // size is given, which silently truncates a snapshot to its first 20 records.
     const singlePageSize = batchSize || 250;
+    if (signal?.aborted) throw signal.reason ?? new Error(`[sync] ${label}: aborted`);
     const resp = await workerGet(ctx, url, { ...params, pageSize: singlePageSize, viewSize: singlePageSize });
     if (strictCollection) assertCollectionShape(resp, collectionKey, label);
     const rows = unwrapCollection(resp, collectionKey);
@@ -200,6 +206,7 @@ export async function pageAll(options: {
   let pageIndex = 0;
 
   while (pageIndex < maxPages) {
+    if (signal?.aborted) throw signal.reason ?? new Error(`[sync] ${label}: aborted`);
     const pageParams = {
       ...params,
       pageIndex,

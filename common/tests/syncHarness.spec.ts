@@ -351,6 +351,21 @@ describe("createSyncHarness screen activation", () => {
     });
     afterEach(() => vi.unstubAllGlobals());
 
+    it("forwards the structured details a domain attaches to its failure", async () => {
+      const failure = Object.assign(new Error("2 of 5 lists could not be loaded"), {
+        details: { failedSegments: { receipt: { message: "slow", retryAt: 60_000 } }, loadedSegments: ["create"] },
+      });
+      registerSyncDomain(domain({ name: "partial", syncClass: "A", intervalMs: 15_000, sync: vi.fn(async () => { throw failure; }) }));
+      const harness = createSyncHarness(stubDb);
+
+      await harness.start({ ...START, domains: [{ name: "partial" }] });
+
+      expect(posted.find((m) => m.type === "sync-error" && m.domain === "partial")).toEqual({
+        type: "sync-error", domain: "partial", message: "2 of 5 lists could not be loaded", details: failure.details,
+      });
+      harness.stop();
+    });
+
     it("resets a domain whose screen activation was dropped or re-scoped", async () => {
       registerSyncDomain(domain({ name: "live", syncClass: "A", intervalMs: 60_000 }));
       const harness = createSyncHarness(stubDb);
