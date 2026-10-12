@@ -1,4 +1,4 @@
-import { computed, reactive, ref, type ComputedRef, type Ref } from "vue";
+import { computed, reactive, ref, shallowRef, type ComputedRef, type Ref } from "vue";
 import type { AppDb } from "../schema/defineAppDb";
 import { clearDatabaseTables } from "../storage/baseDb";
 import { clearSeedTables } from "../composables/useSeedData";
@@ -68,8 +68,12 @@ export function setupAppDbSync(config: AppDbSyncConfig): AppDbSync {
    * Module-scoped, not per-caller: there is ONE worker, so there is one active set. Deliberately
    * not exported — nothing outside needs to read it, and three views already define their own local
    * `activeSyncDomains()` builders that an export of this name would shadow.
+   *
+   * Shallow, because the set is handed to the worker as is: a deep ref turns each `args` into a
+   * reactive proxy, which `postMessage` cannot clone, so a screen activated before the sync started
+   * failed the whole start. It is only ever replaced, never mutated in place.
    */
-  const activeSyncDomains = ref<ActiveDomain[]>([]);
+  const activeSyncDomains = shallowRef<ActiveDomain[]>([]);
   const syncDomainsReady = ref(false);
   /** The screen that currently holds the worker. Task 3 uses this to reject a late teardown. */
   let activeOwner: string | null = null;
