@@ -32,6 +32,7 @@ describe("commonUtil local instance URLs", () => {
 
   it.each([
     ["127.0.0.1:8080", "http://127.0.0.1:8080/rest/s1/", "127.0.0.1:8080"],
+    ["127.0.0.2:8080", "http://127.0.0.2:8080/rest/s1/", "127.0.0.2:8080"],
     ["[::1]:8080", "http://[::1]:8080/rest/s1/", "[::1]:8080"],
     ["https://localhost:8443/", "https://localhost:8443/rest/s1/", "localhost:8443"],
   ])("preserves the loopback address %s", (address, apiUrl, instanceName) => {

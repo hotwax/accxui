@@ -365,8 +365,11 @@ const telecomCode = {
   "ZW": "+263"
 } as any;
 
+const isLoopbackHost = (hostname: string) =>
+  hostname === "localhost" || hostname === "[::1]" || /^127(?:\.\d+){3}$/.test(hostname);
+
 const normalizeInstanceAddress = (address: string) => address.trim()
-  .replace(/^(localhost|127\.0\.0\.1|\[::1\])(?=[:/]|$)/, 'http://$1');
+  .replace(/^(localhost|\[::1\]|127(?:\.\d+){3})(?=[:/]|$)/, 'http://$1');
 
 const getMaargURL = () => {
   const maarg = getEmbeddedAppStoreSafe().maarg || cookieHelper().get("maarg")
@@ -818,7 +821,7 @@ const getOMSInstanceName = () => {
   const instanceUrl = getOmsURL();
   if (!instanceUrl) return "";
   const { hostname, host } = new URL(instanceUrl);
-  return ["localhost", "127.0.0.1", "[::1]"].includes(hostname) ? host : hostname.split(".")[0];
+  return isLoopbackHost(hostname) ? host : hostname.split(".")[0];
 };
 
 const sortSequence = (sequence: Array<any>, sortOnField = "sequenceNum") => {
