@@ -9,6 +9,7 @@ import Encoding from 'encoding-japanese';
 import { CronExpressionParser as cronParser } from "cron-parser";
 import cronstrue from "cronstrue"
 import { useEmbeddedAppStore } from "../store/embeddedApp";
+import { getVersionedPathInfo } from "./appVersionUtil";
 
 export interface JsonToCsvOption {
   parse?: object | null;
@@ -365,8 +366,11 @@ const telecomCode = {
   "ZW": "+263"
 } as any;
 
-const getMaargURL = () => {
-  const maarg = getEmbeddedAppStoreSafe().maarg || cookieHelper().get("maarg")
+// `maargInstance` lets a caller resolve a URL for an instance that isn't (yet) the session's own —
+// the embedded flow needs this to reach a shop's Maarg from VITE_SHOPIFY_SHOP_CONFIG before login
+// has populated the store.
+const getMaargURL = (maargInstance?: string) => {
+  const maarg = maargInstance || getEmbeddedAppStoreSafe().maarg || cookieHelper().get("maarg")
   let maargURL = ""
   if (maarg) {
     maargURL = maarg.startsWith('http') ? maarg.includes('/rest/s1') ? maarg : `${maarg}/rest/s1/` : `https://${maarg}.hotwax.io/rest/s1/`;
@@ -379,6 +383,7 @@ const getMaargBaseURL = () => {
 }
 
 const getOmsURL = (isMoquiOnly = isMoqui()) => {
+  console.log('getEmbeddedAppStoreSafe().oms', getEmbeddedAppStoreSafe().oms)
   const oms = getEmbeddedAppStoreSafe().oms || cookieHelper().get("oms")
   // VITE_OMS_TYPE=MOQUI → use Moqui REST paths (/rest/s1/)
   // VITE_OMS_TYPE unset  → use OFBiz paths (/api/)  [default, backward-compatible]
@@ -410,8 +415,60 @@ const getTokenExpiration = () => {
   return getEmbeddedAppStoreSafe().getTokenExpiration || cookieHelper().get("expirationTime")
 }
 
+// "Is this page running inside Shopify right now?"
+//
+// Deliberately NOT derived from the App Bridge instance: that object is rebuilt on every page load,
+// and a persisted copy is both method-less and outlives the real session — which used to leave every
+// later standalone visit on the same origin permanently reporting as embedded.
+//
+// Being in a frame is the one signal that cannot survive a reload, so it gates everything. Shopify's
+// launch params identify the entry page; once client-side navigation has dropped them, the shop/host
+// captured in the store carries the rest of the session.
 const isAppEmbedded = () => {
-  return !!getEmbeddedAppStoreSafe().shopifyAppBridge
+  if (typeof window === "undefined" || window.top === window.self) return false
+  const store = getEmbeddedAppStoreSafe()
+  if (store.shop && store.host) return true
+  const params = new URLSearchParams(window.location.search)
+  return !!(params.get("host") || params.get("embedded"))
+}
+
+// The version segment this bundle was BUILT as ("" for the unversioned root bootstrap).
+const getBuildVersion = () => {
+  try {
+    return (JSON.parse(import.meta.env.VITE_APP_VERSION_CONFIG || "{}").buildVersion || "") as string
+  } catch (e) {
+    return ""
+  }
+}
+
+// Returns the version named in the URL when the host did not actually serve it, else null.
+//
+// Hosting's catch-all rewrite falls back to the root bootstrap for any path it can't resolve, so a URL
+// carrying an undeployed version silently loads the unversioned bundle instead. That bundle's router
+// base is "/", so the versioned path matches no route and renders a blank outlet — with no address bar
+// to recover from inside Shopify POS. Comparing the URL's version against the version this bundle was
+// built as detects exactly that fall-through.
+const getUndeployedVersion = () => {
+  if (typeof window === "undefined") return null
+  console.log('getVersionedPathInfo', getVersionedPathInfo(window.location.pathname))
+  const { version } = getVersionedPathInfo(window.location.pathname)
+  if (!version || version === getBuildVersion()) return null
+  return version
+}
+
+// Embedded sessions must always re-enter through /shopify-login: it is the only route that rebuilds
+// App Bridge, and every other landing spot leaves the session with a bridge that no longer exists.
+// `version` defaults to the version segment currently being served so a versioned deployment isn't
+// silently dropped to root; pass one explicitly to move to a different version.
+const getEmbeddedAppEntryUrl = (version?: string) => {
+  const store = getEmbeddedAppStoreSafe()
+  const params = new URLSearchParams(window.location.search)
+  // Pre-login the launch params are all we have; mid-session they're gone and the store holds them.
+  const shop = params.get("shop") || store.shop || ""
+  const host = params.get("host") || store.host || ""
+  const segment = version !== undefined ? version : (getVersionedPathInfo(window.location.pathname).version || "")
+  const query = new URLSearchParams({ shop, host, embedded: "1" })
+  return `${window.location.origin}${segment ? `/${segment}` : ""}/shopify-login?${query.toString()}`
 }
 
 const statusColor = {
@@ -984,11 +1041,14 @@ export const commonUtil = {
   getDateTimeWithOrdinalSuffix,
   getDateWithOrdinalSuffix,
   getFacilityChipLabel,
+  getBuildVersion,
+  getEmbeddedAppEntryUrl,
   getFeature,
   getFeatures,
   getIdentificationId,
   getMaargBaseURL,
   getMaargURL,
+  getUndeployedVersion,
   getNextExecutionTime,
   getOMSInstanceName,
   getOmsURL,
