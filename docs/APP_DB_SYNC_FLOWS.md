@@ -29,7 +29,7 @@ Bare framework file names live under `common/db/` in `schema/`, `storage/`, `see
 | [F-MUT](#f-mut--mutation-write-through) | Mutation write-through (`refreshAfterMutation`) |
 | [F-CONC](#f-conc--worker-concurrency-queues) | Worker concurrency queues |
 | [F-ACT](#f-act--per-view-class-a-activation) | Per-view class-A activation (Company) |
-| [F-READ](#f-read--read-paths) | Read paths (`useDb`, `useSeedData`, `useDbStatus`) |
+| [F-READ](#f-read--read-paths) | Read paths (`useLiveEntity`, `useSeedData`, `useDbStatus`) |
 | [F-ERR](#f-err--error-and-status-propagation) | Error and status propagation |
 | [F-TOK](#f-tok--token-freshness) | Token freshness |
 | [F-TEAR](#f-tear--logout-instance-switch-teardown) | Logout, instance switch, teardown |
@@ -173,7 +173,7 @@ declared version (a rollback) both count as mismatches.
 The check is memoised per database name; the open is not, so a connection closed later is reopened.
 
 **Why the gate runs in Dexie's global zone.** Live queries call `ensureDbReady` from inside their
-querier (`dbClient.live`, `useSeedData`, `useDbStatus`), where Dexie refuses writes. Dexie also carries
+querier (`dbClient.live`, `dbClient.liveRead`), where Dexie refuses writes. Dexie also carries
 a live query's zone into nearby native continuations. So when a live query was the database's first
 use, the check failed with `ReadOnlyError` and never wrote the marker, and the database was rebuilt
 on every load. `ensureDbReady` is therefore not an `async` function. It returns a chain of Dexie
@@ -249,7 +249,8 @@ flowchart TD
 ```
 
 Company additionally rebinds the resolver inside the worker realm, because its hand-written domains
-reach the DB through `companyDb.entity(...)` which resolves via `raw()`:
+reach the DB through `companyDb.entity(...)`, whose client resolves the database through the
+registered resolver on every call:
 
 ```ts
 // apps/company/src/workers/appSync.worker.ts
@@ -300,7 +301,7 @@ it. A stop that lands during the wait drops the waiting start.
 ```mermaid
 flowchart TD
     PL["store/user.ts postLogin"] --> ST["await stopAppDbSync()<br/>(errors logged, never thrown)"]
-    ST --> ST1["stop any sync the isAuthenticated watcher already started<br/>clearSeedTables(); clearDatabaseTables() keeps schemaVersion<br/>(same steps as logout, F-TEAR)"]
+    ST --> ST1["stop any sync the isAuthenticated watcher already started<br/>clearSeedTables(); client.clearAllTables() keeps schemaVersion<br/>(same steps as logout, F-TEAR)"]
     ST1 --> PR["fetch profile, permissions<br/>(Order Manager: also product stores and preference)"]
     PR --> SA["void startAppDbSync()  — the sequence below"]
 ```
@@ -324,13 +325,13 @@ sequenceDiagram
     U->>SAS: startAppDbSync()
     Note over SAS: idempotent — a second call returns the same promise<br/>(kept after success, cleared only on failure)
     Note over SAS: generation is bumped on every start and stop
-    SAS->>SS: createSyncService({ workerUrl, db: appDb.raw(), onStatus })
+    SAS->>SS: createSyncService({ workerUrl, db: appDb.client(), onStatus })
     opt a screen already activated (deep link before the sync started)
         SAS->>SS: setDomains(activeSyncDomains) — held as viewDomains, no worker yet
     end
     SAS->>SS: start()
     Note over SS: idempotent too — its own starting promise and startGeneration
-    SS->>DB: ensureDbReady(db) — version gate
+    SS->>DB: db.ready() — ensureDbReady, the version gate (db = the app's DbClient)
     Note over SS,DB: runs BEFORE the worker exists, so the worker cannot race it
     SS->>SS: generation check (stop() during the shape check aborts here)
     SS->>WF: createWorker(workerUrl)
@@ -344,7 +345,7 @@ sequenceDiagram
     SS->>H: api.start({ maargUrl, token, omsInstance, baseTickMs, domains })
     H->>H: ctx = { maargUrl, token, omsInstance, now }
     H->>H: baseDomains = payload.domains ?? every registered class-B domain
-    H->>DB: ensureDbReady(getDb(omsInstance))
+    H->>DB: dbClient(getDb(omsInstance)).ready() — ensureDbReady
     alt getDb threw (e.g. no OMS instance)
         H-->>SS: postMessage sync-error { domain: "__start" }
         H-->>SS: throw
@@ -449,7 +450,7 @@ flowchart TD
     REG -- yes --> POST1["post sync-start"]
     POST1 --> CALL["domain.sync(ctx, entry.args, { force })"]
     CALL --> OK{"threw?"}
-    OK -- no --> COMP["completed = force<br/>|| effectiveInterval !== undefined<br/>|| hasSyncedThisLogin(db, name)"]
+    OK -- no --> COMP["completed = force<br/>|| effectiveInterval !== undefined<br/>|| client.syncedThisLogin(name)"]
     COMP --> STAMP{"completed?"}
     STAMP -- yes --> S1["lastRunAt[activationKey] = now"]
     STAMP -- no --> S2["leave clock unset; retryAt = now + 30s"]
@@ -499,11 +500,11 @@ Source: `pollingWorkerHarness.ts`, `syncRegistry.ts`.
 
 ```mermaid
 flowchart TD
-    S["domain.sync(ctx, _args, { force })"] --> DB["db = getDb(ctx.omsInstance)"]
+    S["domain.sync(ctx, _args, { force })"] --> DB["db = getDb(ctx.omsInstance)<br/>client = dbClient(db)"]
     DB --> PJ["projection = config.projection ?? getAppDb().entities[table]"]
     PJ --> PJQ{"found?"}
     PJQ -- no --> XP["THROW: no entity projection for table"]
-    PJQ -- yes --> GUARD{"!force && hasSyncedThisLogin(db, name)?"}
+    PJQ -- yes --> GUARD{"!force && client.syncedThisLogin(name)?"}
     GUARD -- yes --> Z0["return 0 — once per login"]
     GUARD -- no --> FO{"config.fanOut?"}
     FO -- yes --> FAN["see F-FAN"]
@@ -511,12 +512,12 @@ flowchart TD
     FAN --> UK
     PA --> UK{"records.length > 0<br/>&& isUnkeyableFetch(records, projection)?"}
     UK -- yes --> W1["warn + return 0<br/>GUARD 1: fetched rows, none keyable — do NOT replace"]
-    UK -- no --> CNT["currentCount = db.table(table).count()"]
+    UK -- no --> CNT["currentCount = client.count(table)"]
     CNT --> EMPT{"!force && records.length === 0 && currentCount > 0?"}
     EMPT -- yes --> W2["warn + return 0<br/>GUARD 2: refuse to wipe a populated table on an empty auto fetch"]
     EMPT -- no --> REPL["defineCachedEntity(db, table, projection)<br/>.snapshotReplace(records, config.scopeOnSync)"]
     REPL --> MARK{"records.length === 0 || written > 0?"}
-    MARK -- yes --> M1["markSyncedThisLogin(db, name)"]
+    MARK -- yes --> M1["client.markSyncedThisLogin(name)"]
     MARK -- no --> M2["leave unmarked — the harness retries after 30s"]
     M1 --> R["return written"]
     M2 --> R
@@ -708,8 +709,8 @@ because screens read the stored row and a list field that vanished when empty wo
 
 ```mermaid
 flowchart TD
-    SR["defineCachedEntity.snapshotReplace(rawRows, scope?)"] --> PR["rows = projectRows(rawRows, entity, Date.now())"]
-    PR --> TX["db.transaction('rw', [table, 'syncMeta'])"]
+    SR["defineCachedEntity.snapshotReplace(rawRows, scope?)<br/>= EntityClient.snapshotReplace"] --> PR["rows = projectRows(rawRows, entity, Date.now())"]
+    PR --> TX["db.transaction('rw', [table])"]
     TX --> EX{"scope given?"}
     EX -- yes --> E1["existingKeys = keys of rows where scope.field === scope.value"]
     EX -- no --> E2["existingKeys = table.toCollection().primaryKeys()"]
@@ -729,7 +730,7 @@ flowchart TD
 `canonicalKey` joins on NUL rather than `|` because `|` occurs in real OFBiz ids, which would make
 `["A","B"]` and the single id `"A|B"` indistinguishable (`projection.ts`).
 
-Source: `projection.ts`, `cachedEntity.ts`.
+Source: `projection.ts`, `dbClient.ts` (`snapshotReplace`), `cachedEntity.ts`.
 
 ---
 
@@ -975,11 +976,11 @@ domain) is its entire policy, and `viewDomains` stays empty.
 
 ```mermaid
 flowchart TD
-    subgraph a["useDb(table, options) — reactive list"]
-      A1["resolve db: getAppDb().raw() or the passed BaseDB"]
+    subgraph a["useLiveEntity(table, options) — reactive list"]
+      A1["resolve client: getAppDb().client(), or the passed DbClient<br/>(a passed BaseDB is wrapped in dbClient)"]
       A1 --> A2["resolvedOptions = computed(options)"]
       A2 --> A3["watch(resolvedOptions, immediate, deep)"]
-      A3 --> A4["unsubscribe previous, then<br/>dbClient(db).entity(table).live(opts).subscribe()"]
+      A3 --> A4["unsubscribe previous, then<br/>client.entity(table).live(opts).subscribe()"]
       A4 --> A5["next: records = rows; emitted = true; error = null"]
       A4 --> A6["error: log, set error, emitted = true"]
       A5 --> A7["hydrated = emitted && (records.length > 0 || !serviceState.running)"]
@@ -989,9 +990,9 @@ flowchart TD
     subgraph b["useSeedData() / seedData — shared live seed tables"]
       B1["getter needs a table: seedTable(table)"]
       B1 --> B2{"entry for dbName/table<br/>in the module map?"}
-      B2 -- "no (first use)" --> B3["rows = shallowRef([]), synced = shallowRef(false)<br/>liveQuery(async () => await readSeedTable(table)).subscribe()<br/>store entry { rows, synced, loaded, subscription }"]
+      B2 -- "no (first use)" --> B3["rows = shallowRef([]), synced = shallowRef(false)<br/>getAppDb().client().liveRead([table, syncMeta], readSeedTable).subscribe()<br/>store entry { rows, synced, loaded, subscription }"]
       B2 -- yes --> B4["reuse it: no new read"]
-      B3 --> RS["readSeedTable: ensureDbReady, then ONE 'r' transaction over<br/>[table, syncMeta]: table.toArray() +<br/>syncMeta.get('loginSync:' + domain) (no seed domain → synced)"]
+      B3 --> RS["liveRead: ensureDbReady once, then ONE 'r' transaction over<br/>[table, syncMeta]; readSeedTable: tx.entity(table).all() +<br/>tx.entity('syncMeta').get('loginSync:' + domain) (no seed domain → synced)"]
       RS --> B5["next: rows.value = rows; synced.value = marker.synced;<br/>loaded settles. Re-emits on a write to the table or to<br/>that one marker: login sync, refreshAfterMutation, resync"]
       B3 --> B6["error: warn, drop the entry<br/>(the next use opens a fresh one)"]
       B4 --> B7["reactive getter: reads rows.value<br/>(tracked by the calling template / computed)<br/>raw id or [] until the first emission"]
@@ -1002,38 +1003,38 @@ flowchart TD
       B7 --> B9["labels: first non-empty of description, enumName,<br/>name, groupName, facilityName, storeName — else the raw id<br/>joins in memory: statesForCountry (GAT_REGIONS), enumsByParentType, ..."]
     end
 
-    subgraph c["useDbStatus(db, catalogSource, actions) — status card"]
+    subgraph c["useDbStatus(client, catalogSource, actions) — status card"]
       C1{"catalogSource is an array?"}
       C1 -- yes --> C2["resolvedCatalog = it; catalogLoaded = true"]
       C1 -- no --> C3["await it (worker catalog over Comlink)"]
       C3 --> C4["on success: items.length ? items : DEFAULT_COMMON_SYNC_CATALOG"]
       C3 --> C5["on failure: DEFAULT_COMMON_SYNC_CATALOG (worker may not be up yet)"]
-      C2 --> C6["liveQuery(computeRows).subscribe()"]
+      C2 --> C6["client.liveRead(statusRead()).subscribe()<br/>(a BaseDB source is wrapped in dbClient)"]
       C4 --> C6
       C5 --> C6
-      C6 --> C7["computeRows: ensureDbReady; read syncMeta;<br/>parse 'domain:' then 'loginSync:' markers;<br/>count() each catalog table"]
+      C6 --> C7["statusRead: ONE 'r' transaction over syncMeta + the<br/>catalog tables client.tableNames() has; parse 'domain:'<br/>then 'loginSync:' markers; count() each table (missing → 0)"]
       C7 --> C8["status = count > 0 ? success<br/>: (syncedAt || syncClass === 'A') ? empty : none"]
-      C6 --> C9["BroadcastChannel(DB_SYNC_CHANNEL).onmessage -> recompute"]
+      C6 --> C9["BroadcastChannel(DB_SYNC_CHANNEL).onmessage -><br/>client.read(statusRead())"]
       C6 --> C10["watch(resolvedCatalog): re-subscribe when it goes empty -> populated"]
       C8 --> C11["refreshDomain -> actions.resyncDomain; refreshAll -> actions.resyncAll"]
     end
 ```
 
-The two live reads differ in lifetime. A `useDb` subscription belongs to the component that opened
+The two live reads differ in lifetime. A `useLiveEntity` subscription belongs to the component that opened
 it and closes on unmount. A `useSeedData` table is opened by whichever caller needs it first, is
 shared by every later caller, and stays open until logout or the login-time clear (`clearSeedTables`
 in F-TEAR). That is at most one subscription per seed table. It re-runs only when that table or its
 own domain's `loginSync:` marker is written, because `get` on one key keeps the other domains'
 markers out of its read set (`useSeedData.ts`).
 
-The seed querier must itself be `async` (`async () => await readSeedTable(table)`). Dexie carries
-its read tracking across the awaits inside `readSeedTable` only for an async querier. A plain arrow
-that returns the promise records no tables, so the query would never re-run.
+The querier `liveRead` builds must itself be `async` (`dbClient.ts`). Dexie carries its read tracking
+across the awaits inside it only for an async querier. A plain arrow that returns the promise records
+no tables, so the query would never re-run.
 
 `seedData` is a plain module-level object, the result of one `useSeedData()` call. Stores import it
 so they can read seed data without calling a composable.
 
-`useDb` reads through `dbClient`'s query rules:
+`useLiveEntity` reads through `dbClient`'s query rules:
 
 - `scope` and `equals` are one set of equalities, and every one holds on the result. They resolve
   through the widest declared index that covers them, and the rest are applied in memory.
@@ -1159,7 +1160,7 @@ flowchart TD
       L6 --> L6b["harness = null; held viewDomains = null"]
       L6b --> L7["serviceState.running = false"]
       L7 --> L8["clearSeedTables()<br/>unsubscribe every useSeedData live table, empty the map"]
-      L8 --> L9["clearDatabaseTables(db.raw())<br/>one rw txn over every table: clear() each data table;<br/>in syncMeta delete every key EXCEPT 'schemaVersion'<br/>errors are logged, never block logout<br/>a start that arrives meanwhile waits for it (F-START)"]
+      L8 --> L9["db.client().clearAllTables()<br/>(clearDatabaseTables)<br/>one rw txn over every table: clear() each data table;<br/>in syncMeta delete every key EXCEPT 'schemaVersion'<br/>errors are logged, never block logout<br/>a start that arrives meanwhile waits for it (F-START)"]
     end
 
     subgraph sw["OMS instance switch"]

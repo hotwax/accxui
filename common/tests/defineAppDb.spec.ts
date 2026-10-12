@@ -123,11 +123,16 @@ describe("defineAppDb", () => {
     expect(placeholderTable).not.toHaveBeenCalled();
   });
 
-  it("throws from raw() until a resolver is registered", () => {
+  it("resolves the signed-in database only once a resolver is registered", () => {
     const bare = defineAppDb({ suffix: "BareDB", schema: ownSchema });
-    expect(() => bare.raw()).toThrow(/no OMS instance resolver/i);
+    expect(() => bare.client().name()).toThrow(/no OMS instance resolver/i);
     bare.setOmsInstanceResolver(() => "demo-oms");
-    expect(bare.raw().name).toBe("demo-oms-BareDB");
+    expect(bare.client().name()).toBe("demo-oms-BareDB");
+  });
+
+  it("offers no raw Dexie handle: every access goes through client() / entity()", () => {
+    const bare = defineAppDb({ suffix: "BareDB", schema: ownSchema });
+    expect("raw" in bare).toBe(false);
   });
 });
 

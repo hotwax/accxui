@@ -3,7 +3,7 @@
 **Audience:** app developers working in `apps/*`.
 **Design of record:** [APP_DB_ARCHITECTURE.md](APP_DB_ARCHITECTURE.md) · diagrams in
 [APP_DB_SYNC_FLOWS.md](APP_DB_SYNC_FLOWS.md).
-**Last updated:** 2026-10-06 — `seedData` plain object for stores, `.withSync()` on seed list getters, `allowedTransitions` scoped to a status flow (§1a); `QueryOptions` combine `scope` + `equals` and `dateField` orders newest first (§1b); `syncNow` vs `syncAll`, held early activations (§5); `keyDefaults` (§2); refetch with no strategy is a no-op (§4); stop on `postLogin` too (§6). 2026-09-30 — `useSeedData` rewritten around one live query per seed table, with synchronous reactive getters and async `get*` getters (§1a); Company's `useSeed.ts` lookups now wrap it. 2026-09-29 — `common/db` split into `schema/`, `storage/`, `seed/`, `composables/`, `sync/` (deep-import paths in §6–§7); view-scoped activation moved onto `setupAppDbSync`; `useDbSync` removed.
+**Last updated:** 2026-10-12 — table names from the schema (`appDb.tables`, §1); two data patterns, `useLiveEntity` (renamed from `useDb`, runtime table check) and `appDb.entity`; table names checked against the app's schema; no raw Dexie handle on an app database (§1, §1b). 2026-10-06 — `seedData` plain object for stores, `.withSync()` on seed list getters, `allowedTransitions` scoped to a status flow (§1a); `QueryOptions` combine `scope` + `equals` and `dateField` orders newest first (§1b); `syncNow` vs `syncAll`, held early activations (§5); `keyDefaults` (§2); refetch with no strategy is a no-op (§4); stop on `postLogin` too (§6). 2026-09-30 — `useSeedData` rewritten around one live query per seed table, with synchronous reactive getters and async `get*` getters (§1a); Company's `useSeed.ts` lookups now wrap it. 2026-09-29 — `common/db` split into `schema/`, `storage/`, `seed/`, `composables/`, `sync/` (deep-import paths in §6–§7); view-scoped activation moved onto `setupAppDbSync`; `useDbSync` removed.
 
 This is the how-to. It answers "I need X on screen — what do I write?", using what Company and Order
 Manager actually do. Read the design doc when you need to know *why*; read this to get work done.
@@ -27,15 +27,53 @@ The rule of thumb: **read from the database, never fetch reference data in a vie
 
 ---
 
-## 1. Choosing a read API
+## 1. Choosing a data API
 
-Three ways in. Pick by what the screen needs.
+App code reaches the database one way — through `dbClient`, with one query shape (`QueryOptions`) —
+in **two patterns, picked by need**:
+
+| You want… | Use | Where it works |
+|---|---|---|
+| Rows that stay current **on screen** (§1b) | `useLiveEntity(table, options?)` | Components and composables, during `setup` |
+| An answer **now**, or a **write** (§1d) | `appDb.entity(table)` — `get`, `getMany`, `all`, `query`, `first`, `count`, `put`, `bulkPut`, `upsertMany`, `snapshotReplace`, `remove`, … | Anywhere: stores, services, async handlers, composables, the worker |
+| Live updates **outside a component** (rare) | `appDb.entity(table).live(options)` — a Dexie `Observable`; you unsubscribe | Anywhere, the worker included |
+
+`appDb` is the app's database object (`companyDb`, `orderManagerDb`). `all()` followed by a JS
+`filter` / `find` is fine.
+
+Two conveniences sit on the same layer and are not separate data paths:
 
 | You need | Use | Shape |
 |---|---|---|
 | A label, option list or joined lookup for seed data | `useSeedData()` in components; `seedData` in stores and utils | `seed.facilityName(id)` in a template or `computed` |
-| A live list or row that re-renders on change | `useDb(table, options?)` | `{ records, first, count, hydrated, error }` |
-| Row counts + last-sync per domain (Settings) | `useDbStatus(db, catalog, actions)` | `{ domains, totalRows, refreshAll, … }` |
+| Row counts + last-sync per domain (Settings) | `useDbStatus(appDb.client(), catalog, actions)` | `{ domains, totalRows, refreshAll, … }` |
+
+**Not for pages or stores** — framework and worker internals:
+
+| You want… | Use | Who uses it |
+|---|---|---|
+| Snapshot reads across several tables; sync login markers | `appDb.client()` — `read`, `liveRead`, `syncedThisLogin`, `markSyncedThisLogin`, `clearSyncedThisLogin` | Framework internals (`useSeedData`, `useDbStatus`, `setupAppDbSync`) and hand-written worker sync domains |
+
+**Name tables through `appDb.tables`.** Every schema carries its table names as a static object —
+`commonSchema.tables`, `companySchema.tables`, and the composed `companyDb.tables` (the seed tables
+the app picked plus its own). It is plain data built when the module loads, with no database
+involved, so it works in the worker and before sign-in:
+
+```ts
+useLiveEntity<any>(companyDb.tables.facilities, () => ({ equals: { facilityTypeId } }));
+await orderManagerDb.entity(orderManagerDb.tables.statuses).all();
+```
+
+A misspelled name is a missing property, so it fails to compile — including in `useLiveEntity`,
+which otherwise takes any string. `appDb.entity(table)` and every table-taking `appDb.client()`
+method also check a literal name against the app's tables, and `useLiveEntity` checks at runtime
+(§1b). For a helper that takes a table, type the parameter as `AppDbTables<typeof companyDb>`.
+
+Rows are not typed from the schema yet: `entity(...)` rows are `Record<string, any>` and
+`useLiveEntity` rows are what you pass it (`<any>` at most call sites). Stronger row typing is
+planned as a separate effort.
+
+There is no raw Dexie handle on an app database: nothing outside `common/db` touches Dexie.
 
 ### 1a. `useSeedData()` — seed lookups
 
@@ -114,7 +152,7 @@ accepts "first read landed and `serviceState.running` is false" (Order Manager's
 must be in hand before you continue, such as code that stamps a looked-up value permanently
 (`buildAddressState` in Order Manager's `BadAddressTaskCard.vue` awaits `getGeos()`). On a fresh
 login they can still resolve `[]`, so they do not tell "not synced yet" from "empty". Use
-`.withSync()` or `useDb`'s `hydrated` for that.
+`.withSync()` or `useLiveEntity`'s `hydrated` for that.
 
 Label getters accept a missing id (`undefined` or `null`) and answer `""`; list getters answer `[]`.
 Countries come from `geoTypeEnumId === "GEOT_COUNTRY"`; a country's states follow its `GAT_REGIONS`
@@ -125,27 +163,28 @@ another, as OMS does for an order with none. Flows reuse status ids, so reading 
 their transitions. Rows come in `transitionSequence` order with `toStatusDescription` added, and
 carry `transitionName` and `conditionExpression`.
 
-### 1b. `useDb()` — reactive reads
+### 1b. `useLiveEntity()` — reactive reads
 
 One entry point, always a list, backed by a Dexie `liveQuery`. Most of Company's read composables
 are built on it; its seed lookups in `useSeed.ts` wrap `useSeedData` instead.
 
-Pick `useSeedData` for read-only seed lookups: labels, dropdown options, names by id. Pick `useDb`
+Pick `useSeedData` for read-only seed lookups: labels, dropdown options, names by id. Pick `useLiveEntity`
 when the screen queries a table (`equals`, `scope`, `filter`, a date range), needs `hydrated` for
-its loading and empty states, or reads one of the app's own tables. Each `useDb` call is its own
+its loading and empty states, or reads one of the app's own tables. Each `useLiveEntity` call is its own
 subscription, closed on unmount; `useSeedData`'s are shared and live for the session.
 
 ```ts
-import { useDb } from "@common/db";
+import { useLiveEntity } from "@common";
+import { companyDb } from "@/db/companyDb";
 
 // Whole table, live.
-const { records, hydrated } = useDb<any>("statuses");
+const { records, hydrated } = useLiveEntity<any>(companyDb.tables.statuses);
 
 // One row: `equals` on the primary key is an index lookup, and `first` is the row.
-const { first: shop, hydrated } = useDb<any>("shopifyShops", () => ({ equals: { shopId: props.id } }));
+const { first: shop, hydrated } = useLiveEntity<any>(companyDb.tables.shopifyShops, () => ({ equals: { shopId: props.id } }));
 
 // A scoped slice.
-const { records } = useDb<any>("productStoreFacilities", { scope: { field: "productStoreId", value: id } });
+const { records } = useLiveEntity<any>(companyDb.tables.productStoreFacilities, { scope: { field: "productStoreId", value: id } });
 ```
 
 Pass a **function** when the options depend on reactive state — it re-subscribes when they change,
@@ -155,8 +194,13 @@ never render under shop B. Pass a plain object when they're static.
 For a single-row read whose id may not be known yet, return `{ filter: () => false }` rather than
 `{}` while it is missing: `{}` reads the whole table, and `first` would be some other row.
 
-`useDb(table, options?)` reads the signed-in app database; `useDb(db, table, options?)` takes an
-explicit Dexie handle.
+`useLiveEntity(table, options?)` reads the signed-in app database through `getAppDb().client()`;
+`useLiveEntity(client, table, options?)` reads another database through its `DbClient` (a raw `BaseDB` is
+still accepted and wrapped).
+
+It is the Vue form of `appDb.entity(table).live(options)`, hence the name. A table the database
+does not have throws at the call — `[db] useLiveEntity: "facilitys" is not a table in
+OMS-CompanyDB.` — rather than surfacing only in `error`. (It was called `useDb` until 2026-10-12.)
 
 `QueryOptions`:
 
@@ -178,7 +222,7 @@ explicit Dexie handle.
 
 ```ts
 const { domains, totalRows, lastSyncedAt, refreshDomain, refreshAll } = useDbStatus(
-  orderManagerDb.raw(),
+  orderManagerDb.client(),
   orderManagerDb.statusCatalog,              // or: async () => catalogFrom(yourRegisteredDomains)
   { resyncDomain, resyncAll: resyncReferenceData },
 );
@@ -186,6 +230,30 @@ const { domains, totalRows, lastSyncedAt, refreshDomain, refreshAll } = useDbSta
 
 Actions are injected rather than imported, because the card must refresh through the same service
 that owns your app's worker.
+
+### 1d. `appDb.entity()` — one-shot reads and writes
+
+For an answer **now**, or a **write**: stores, services, async handlers, cache-first lookups and
+the worker's sync domains. Plain async calls — nothing re-renders afterwards; use `useLiveEntity`
+for that. Every call resolves the signed-in database, so a client held in a module-scope const
+follows an OMS switch.
+
+```ts
+import { companyDb } from "@/db/companyDb";
+
+const shops = companyDb.entity(companyDb.tables.shopifyShops);
+
+const one = await shops.get(shopId);                               // by primary key
+const some = await shops.query({ equals: { productStoreId } });    // same QueryOptions as useLiveEntity
+const all = await shops.all();                                     // then filter / find in JS — fine
+await shops.upsertMany([fetchedRow]);                              // write-through after a fetch
+```
+
+`first`, `count`, `getMany`, `put`, `bulkPut`, `remove`, `snapshotReplace` and the rest are on the same
+`EntityClient`. Writes project through the entity, so pass the server's record as-is. After a
+mutation on the server, reconcile through `refreshAfterMutation` (§4) rather than writing the
+response yourself. For live updates outside a component, `entity(table).live(options)` returns a
+Dexie `Observable` you unsubscribe yourself.
 
 ---
 
@@ -237,6 +305,9 @@ export const companyDb = defineAppDb({
 ```
 
 **4. Give it a domain** so something fills it — §3.
+
+The new table is then on `companyDb.tables` (and `companySchema.tables`) with nothing more to do:
+name it as `companyDb.tables.widgets` wherever you read or write it (§1).
 
 ### Why the version bump is not optional
 
@@ -533,11 +604,29 @@ Deep imports follow the folder layout of `common/db`:
 | Folder | What you import from it | Worker-safe |
 |---|---|---|
 | `@common/db/types` | `DbRow`, `DbKey`, `FieldKind`, `SyncContext`, `SyncDomain` | yes |
-| `@common/db/schema/*` | `defineEntity`, `defineSchema` / `mergeSchemas`, `defineAppDb`, `appDbRegistry` | yes |
-| `@common/db/storage/*` | `baseDb` (`hasSyncedThisLogin`, …), `dbClient` (`EntityClient`), `projection` (`toMillis`, `canonicalKey`, …) | yes |
+| `@common/db/schema/*` | `defineEntity`, `defineSchema` / `mergeSchemas`, `defineAppDb`; `appDbRegistry` is framework-only | yes |
+| `@common/db/storage/*` | `projection` (`toMillis`, `canonicalKey`, …); from `dbClient` / `baseDb`, **types only** (`EntityClient`, `BaseDB`) in app code | yes |
 | `@common/db/seed/*` | `seedSchema` (`commonSchema`), `seedDomains` (`commonDomains`) | yes |
 | `@common/db/sync/*` | `defineSyncDomain`, `defineSnapshotDomain`, `syncRegistry`, `pollingWorkerHarness` | yes, except `syncService` and `setupAppDbSync` |
-| `@common/db/composables/*` | `useDb`, `useSeedData`, `useDbStatus` | **no** — main thread only; import them from the barrel |
+| `@common/db/composables/*` | `useLiveEntity`, `useSeedData`, `useDbStatus` | **no** — main thread only; import them from the barrel |
+
+**App code uses the two patterns, and the build checks it.** Reads and writes go through
+`useLiveEntity` and `appDb.entity(...)`, with table names from `appDb.tables`; there is no raw handle
+on an app database. The `data-access` ESLint plugin (`eslint/plugins/data-access.js`) enforces it
+for `apps/*/src`, and each app's `pnpm build` runs it first — `pnpm lint:data-access`, through the
+dedicated `eslint.data-access.config.js`, so the repo's older lint findings cannot fail a build. The
+main `eslint.config.js` loads the same plugin, so editors show the errors as you type.
+
+| Rule | Rejects |
+|---|---|
+| `data-access/no-direct-db` | `dexie`; value imports of `@common/db/storage/dbClient` / `baseDb`, `@common/db/schema/appDbRegistry`, or low-level names (`dbClient`, `getAppDb`, `ensureDbReady`, `hasSyncedThisLogin`, …) from `@common` / `@common/db`; `appDb.raw()`; `appDb.get()` outside the worker entry and `src/db/**`; `appDb.client()` outside `src/workers/**` and the `useDbStatus` argument |
+| `data-access/table-name-from-schema` | a string-literal table in `appDb.entity("x")` / `useLiveEntity("x")` (also behind `as any`); `--fix` rewrites it to `appDb.tables.x` |
+| `data-access/live-entity-in-setup` | `useLiveEntity` in `src/store`, `src/services`, `src/utils` or `src/workers` |
+
+Type-only imports are fine. The two app-local stores outside the app database — Company's
+`utils/storage.ts` and Order Manager's `services/productDb.ts` — are exempt. New data-access rules
+go in the same plugin, with cases in `common/tests/dataAccessLint.spec.ts`. AI agents get the same
+guidance from the `accxui-data-access` skill (`.agents/skills/accxui-data-access/SKILL.md`).
 
 **`fields` is the whitelist.** Undeclared fields are dropped. Stored rows carry the declared fields
 plus `syncedAt` — nothing else. There is no `raw` copy of the server payload to fall back on.
@@ -553,10 +642,10 @@ which can be keyed; an empty fetch over a populated table on an auto sync), but 
 snapshot pass, pass `requireComplete: true` to `pageAll` (`@common/core/workerRemoteApi`) so a
 truncated walk throws instead of pruning live rows. The factory itself does not set it.
 
-**A hand-written `liveQuery` needs an `async` querier that awaits inside it.** Dexie tracks which
+**Inside `common/db`, a `liveQuery` needs an `async` querier that awaits inside it.** Dexie tracks which
 tables a querier read only across the awaits of an `async` function; a plain arrow that returns a
 promise loses the tracking at its first await, so the query never re-runs when the table changes.
-`useDb` and `useSeedData` already do this.
+`dbClient.live` / `liveRead` already do this; app code never writes a `liveQuery` itself.
 
 **Bump `version` when you touch the schema.** Nothing checks it. §2.
 
@@ -575,7 +664,7 @@ promise loses the tracking at its first await, so the query never re-runs when t
 | Table stays empty, no error | Domain not registered, or the table name differs between domain and schema | Worker entry; copy Company's `domainTables.spec.ts` |
 | Table empty and the status card says "none" | Class-B domain never ran — check `syncMeta` for its `loginSync:` marker | Force via `resyncDomain(name)` |
 | Snapshot wiped rows that still exist server-side | Envelope mis-declared, so the response unwrapped to `[]` | `collectionKey`; add `strictCollection: true` |
-| Rows stop updating after switching OMS instance | A captured Dexie handle instead of the late-binding client | Use `appDb.entity()` / `appDb.client()`, never a stored `raw()` |
+| Rows stop updating after switching OMS instance | A captured Dexie handle instead of the late-binding client | Use `appDb.entity()` / `appDb.client()`, never a stored `BaseDB` handle |
 | Empty state flashes on every load | Rendering off `records.length` instead of `hydrated` | §1b |
 | Old field shape persists after a deploy | `version` not bumped | §2 |
 | Class-A domain polls but writes nothing | Server ignores the cursor param, or `keep` trims everything | Probe the endpoint; log the page size |

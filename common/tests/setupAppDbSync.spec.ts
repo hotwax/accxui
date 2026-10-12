@@ -31,25 +31,29 @@ import { setupAppDbSync } from "../db/sync/setupAppDbSync";
 import { cacheScopeKey } from "../db/sync/reconciliation";
 import { createSyncService, __resetErrorState, serviceState } from "../db/sync/syncService";
 import type { AppDb } from "../db/schema/defineAppDb";
+import { dbClient } from "../db/storage/dbClient";
 
-const fakeAppDb = () => ({
-  raw: () => ({
-    name: "test-db",
-    isOpen: () => true,
-    open: async () => {},
-    close: () => {},
-    getTableNames: () => [],
-    table: () => ({ clear: async () => {} }),
-    transaction: async (_m: any, _t: any, fn: () => Promise<any>) => fn(),
-    syncMeta: {
-      get: async () => ({ key: "dbShapeVersion", version: 2 }),
-      put: async () => {},
-      delete: async () => {},
-      toCollection: () => ({ primaryKeys: async () => [] }),
-      bulkDelete: async () => {},
-    },
-  }),
-}) as unknown as AppDb;
+/** An `AppDb` over a fake handle; `client()` is a real dbClient over it, as `defineAppDb` builds. */
+const appDbOver = (raw: () => any) => ({ raw, client: () => dbClient(raw) }) as unknown as AppDb;
+
+const fakeRaw = () => ({
+  name: "test-db",
+  isOpen: () => true,
+  open: async () => {},
+  close: () => {},
+  getTableNames: () => [],
+  table: () => ({ clear: async () => {} }),
+  transaction: async (_m: any, _t: any, fn: () => Promise<any>) => fn(),
+  syncMeta: {
+    get: async () => ({ key: "dbShapeVersion", version: 2 }),
+    put: async () => {},
+    delete: async () => {},
+    toCollection: () => ({ primaryKeys: async () => [] }),
+    bulkDelete: async () => {},
+  },
+});
+
+const fakeAppDb = () => appDbOver(fakeRaw);
 
 /** Deliver a worker status message the way the real worker does. */
 const post = (data: Record<string, any>) => workerStub.onmessage?.({ data } as MessageEvent);
@@ -537,8 +541,8 @@ describe("start during a database wipe", () => {
   const slowClearDb = () => {
     let finishClear!: () => void;
     const cleared = new Promise<void>((resolve) => { finishClear = resolve; });
-    const base = fakeAppDb().raw() as any;
-    const db = { raw: () => ({ ...base, transaction: async () => cleared }) } as unknown as AppDb;
+    const base = fakeRaw() as any;
+    const db = appDbOver(() => ({ ...base, transaction: async () => cleared }));
     return { db, finishClear };
   };
 

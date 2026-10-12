@@ -31,7 +31,7 @@ calls. This document specifies how that mirror is declared, created, filled and 
 | Domain registration + scheduling rule | `common/db/sync/syncRegistry.ts` |
 | Worker-side sync runtime | `common/db/sync/pollingWorkerHarness.ts` |
 | Main-thread sync lifecycle | `common/db/sync/syncService.ts` + `sync/setupAppDbSync.ts` |
-| Reactive read surface | `common/db/composables/useDb.ts`, `useSeedData.ts`, `useDbStatus.ts` |
+| Reactive read surface | `common/db/composables/useLiveEntity.ts`, `useSeedData.ts`, `useDbStatus.ts` |
 
 ### 1.2 Problem statement
 
@@ -99,7 +99,7 @@ independent state. The worker learns the OMS instance as a `start()` parameter
 
 ### 3.2 The worker-bundle constraint
 
-`common/db/index.ts` is a barrel that re-exports `useDb`, `useDbStatus`, `syncService` and
+`common/db/index.ts` is a barrel that re-exports `useLiveEntity`, `useDbStatus`, `syncService` and
 `setupAppDbSync`, all of which import `vue`. Any module a worker entry reaches must therefore use
 **deep imports**. The modules on that path state the rule in their own headers:
 `schema/defineEntity.ts`, `schema/defineSchema.ts`, `schema/defineAppDb.ts`, `storage/dbClient.ts`,
@@ -149,7 +149,7 @@ graph TB
     end
 
     subgraph read["Read surface (main thread)"]
-        UD["composables/useDb.ts (liveQuery)"]
+        UD["composables/useLiveEntity.ts (liveQuery)"]
         USD["composables/useSeedData.ts (lookups)"]
         UDS["composables/useDbStatus.ts (status card)"]
     end
@@ -232,7 +232,6 @@ vanished when empty would be read as `undefined.length` by every caller.
 
 The returned `Entity` normalizes the key two ways on purpose: `primaryKey` (scalar **or** array, the
 shape Dexie wants) and `primaryKeyFields` (always an array, so callers iterate without a type test).
-
 ### 4.3 Schema composition — `defineSchema.ts`
 
 `defineSchema(map, { seed })` keys entities by **IndexedDB store name**, so `schema.stores` maps 1:1
@@ -274,16 +273,21 @@ deciding by name alone would point the app's table at the wrong endpoint (`defin
 `BaseDB extends Dexie` does three things (`baseDb.ts`): appends `syncMeta: "key"` to the schema
 map, records the combined table-name list, and declares `version(n).stores(...)`.
 
-`defineAppDb(def)` returns an `AppDb` facade:
+`defineAppDb(def)` returns an `AppDb<Tables>` facade, where `Tables` is the table names the app's
+schema declared (inferred through `defineSchema` / `pick` / `mergeSchemas`), so `entity(...)` and
+every table-taking `client()` method reject a name the app does not have at compile time.
+`tables` is the same set as a static object (`companyDb.tables.facilities`), built from the schema
+like `entities` — `AppSchema.tables` exists on every schema and `pick` / `mergeSchemas` carry it.
+`AppDbTables<typeof appDb>` names that set for a helper's parameter:
 
 | Member | Behavior |
 |---|---|
 | `name(oms)` | `` `${oms}-${suffix}` ``; throws on an empty instance (`defineAppDb.ts`). `defineAppDb` itself throws on an empty `suffix` |
 | `get(oms)` | Memoizes one handle; on a different name **closes the previous handle** so a `liveQuery` still holding it stops serving the old tenant (`defineAppDb.ts`) |
 | `setOmsInstanceResolver(fn)` | Registered once per **realm** at boot |
-| `raw()` | `get(resolver())`; throws if no resolver is registered (`defineAppDb.ts`) |
-| `client()` | Returns **one** late-binding `DbClient` built from `raw`, not from a handle |
+| `client()` | Returns **one** late-binding `DbClient<Tables>`, built from an internal resolver — `get(resolver())`, throwing if no resolver is registered — not from a handle |
 | `entity(table)` | `client().entity(table)` |
+| *(no `raw()`)* | Deliberately absent: no raw Dexie handle leaves `defineAppDb`, so every access goes through `client()` / `entity()`. `get(oms)` is for the worker entry only, which hands it to the harness |
 | `schema` / `entities` / `tableNames` / `seedTables` | The composed declaration, read-only |
 | `version` | The declared schema version (default `1`); see *Schema evolution* below |
 | `statusCatalog` | Derived: composed tables ∩ `seedTables` ∩ `commonDomainsByTable` |
@@ -316,14 +320,14 @@ absent marker counts as a mismatch, so installs predating it land on a known sta
 check must not block boot.
 
 **Where the gate sits.** Every read and write reaches `ensureDbReady`: `dbClient` awaits it before
-each operation (`dbClient.ts`), the worker harness on start, the status card on each recompute.
+each operation (`dbClient.ts`), and the worker harness on start.
 So no query runs, and no `liveQuery` subscribes, against an unverified database — which is what
 makes the rebuild safe, since `Dexie.delete` blocks on open connections and by construction there
 are none. The version check is memoised per database name, so it costs one resolved await after the
 first call; the *open* is deliberately not memoised, so a connection closed later (an OMS switch, or
 another tab's `versionchange`) is reopened rather than answered "ready".
 
-**Inside a live query.** `dbClient.live`, `useSeedData` and `useDbStatus` reach the gate from inside
+**Inside a live query.** `dbClient.live` and `dbClient.liveRead` (behind `useSeedData` and `useDbStatus`) reach the gate from inside
 their `liveQuery` querier. Dexie refuses writes there (`ReadOnlyError`), and it echoes a live query's
 zone into native continuations for a few microtasks, so a check written with native awaits failed
 when a live query was the first use, and could drag a caller that awaited it into that zone, where
@@ -342,7 +346,7 @@ checklist for any change under `defineEntity`/`defineSchema` is "did the version
 | Key | Written by | Read by |
 |---|---|---|
 | `schemaVersion` | `ensureDbReady` | `ensureDbReady` |
-| `loginSync:{domain}` | `markSyncedThisLogin` (`baseDb.ts`) | the once-per-login guard; the status card |
+| `loginSync:{domain}` | `dbClient.markSyncedThisLogin` (over `markSyncedThisLogin`, `baseDb.ts`) | the once-per-login guard; the status card |
 | `domain:{domain}` | an app writing its own per-domain stamp | the status card, in preference to `loginSync:` (`useDbStatus.ts`) |
 
 Logout's `clearDatabaseTables` deletes every row except `schemaVersion`. The version check is
@@ -362,12 +366,12 @@ graph LR
     DAD["defineAppDb"]
     REG[("appDbRegistry<br/>activeAppDb")]
     FAC["defineSnapshotDomain<br/>defineCursorDomain"]
-    UD["useDb / useSeedData"]
+    UD["useLiveEntity / useSeedData"]
 
     APPDB -->|calls| DAD -->|setAppDb| REG
     FAC -->|"getAppDb().get(oms)"| REG
     FAC -->|"getAppDb().entities[table]"| REG
-    UD -->|"getAppDb().raw() / .client()"| REG
+    UD -->|"getAppDb().client()"| REG
 ```
 
 Consequences worth stating explicitly:
@@ -392,8 +396,20 @@ cannot write — those two methods throw rather than silently storing the raw se
 |---|---|
 | Reads | `get`, `getMany`, `all`, `query`, `first`, `count` |
 | Writes | `put`, `bulkPut`, `remove`, `bulkRemove`, `clear` |
-| Reactive | `live(options)` returning a Dexie `Observable` |
+| Reactive | `live(options)` returning a Dexie `Observable`; `liveRead(tables, fn)` for a read across several tables |
+| Multi-table, one-shot | `read(tables, fn)` |
+| Login markers | `syncedThisLogin(domain)`, `markSyncedThisLogin(domain)`, `clearSyncedThisLogin(domain)` — the `loginSync:` guard, gated, over the `baseDb` helpers |
+| Lifecycle | `ready()` — the gate on its own, for an ordering guarantee (the worker's start, the service before it spawns the worker); `clearAllTables()` — the logout wipe, over `clearDatabaseTables` |
 | Sync-shaped | `upsertMany`, `snapshotReplace`, `newestCursor`, `rowsMissing` |
+
+`liveRead(tables, fn)` is the live read for a caller that must see several tables at one point, as
+the seed lookups read a table with its `loginSync:` marker. It passes `ensureDbReady` once, then runs
+`fn` in ONE `"r"` transaction over `tables`, and re-emits when any row `fn` read is written. `fn`
+gets a `TxReader` whose `entity(table)` offers the six reads above without the gate: it already
+passed, and awaiting it again inside the transaction could let the transaction commit early. A table
+outside `tables` fails with Dexie's own error. `read(tables, fn)` is the same gate and transaction
+answered once, for a recompute that is not itself live. `name()` gives the database the client
+resolves to.
 
 `runQuery` (`dbClient.ts`) serves `query`, `first`, `count` (when options are given) and `live`.
 Its contract is the one `QueryOptions` documents (`types.ts`):
@@ -418,8 +434,8 @@ is a plain `Table.count()`.
 table actually declares it — checked by name against `tableRef.schema.indexes` — and otherwise falls
 back to reading the scope, narrowing by `equals` in memory and folding with `newestValue`. With
 `equals` but no scope it reads through the first `equals` field when that is indexed, else the whole
-table. `defineCachedEntity.count` and `.newestCursor` (the worker-side counterparts) read the scope
-through its index and narrow by `equals` in memory.
+table. `defineCachedEntity.count` and `.newestCursor` (the worker-side counterparts) are these same
+`EntityClient` reads.
 
 ### 4.7 Projection — `projection.ts`
 
@@ -511,9 +527,12 @@ Two guards protect against wiping a populated table (see flow `F-SNAP`):
    (`defineSnapshotDomain.ts`).
 
 `defineCachedEntity(db, table, entity)` (`sync/cachedEntity.ts`) is the worker-side write
-helper the factories share. Unlike `EntityClient`, it is handed the `Entity` explicitly, so its
-`snapshotReplace` / `upsertMany` always project. Its `snapshotReplace` runs the prune and the write
-inside **one** `rw` transaction over `[table, "syncMeta"]`.
+helper the factories share: a thin wrapper over `dbClient(db, { [table]: entity }).entity(table)`.
+It is handed the domain's `Entity` explicitly, which may differ from the schema's, so its
+`snapshotReplace` / `upsertMany` always project through that. `snapshotReplace` is
+`EntityClient.snapshotReplace`: the prune and the write in **one** `rw` transaction over the table.
+The factories read and write nothing else directly either: the fan-out parent read, the row count
+and the `loginSync:` guard go through `dbClient` too.
 
 #### 4.8.2 `defineCursorDomain` — class A
 
@@ -746,7 +765,8 @@ message and skips it. A later successful `refetch-end` for the same record then 
 #### 4.10.3 App facade — `sync/setupAppDbSync.ts`
 
 What an app actually imports. The app calls it once, in `src/services/appDbSync.ts`, with
-`{ db, getWorkerUrl, createSyncService, onStatus? }`, and re-exports what it returns. That module
+`{ db, getWorkerUrl, createSyncService, onStatus? }`, and re-exports what it returns. It reaches the
+database only through `db.client()`, and hands that client to the service as its `db`. That module
 owns the one service handle, so it also owns the domain set that handle is polling.
 
 **Lifecycle and reconciliation**
@@ -755,10 +775,10 @@ owns the one service handle, so it also owns the domain set that handle is polli
 |---|---|
 | `syncService()` | The live `SyncService`, or `null` before start / after a failed start |
 | `startAppDbSync(onSynced?)` | Idempotent (own `starting` promise plus `startGeneration`); creates the service, hands it any screen set activated before it existed, starts it, records `__start` failures |
-| `stopAppDbSync()` | Stops the service, closes the `useSeedData` live tables (`clearSeedTables`), and **clears every data table** (`setupAppDbSync.ts`) |
+| `stopAppDbSync()` | Stops the service, closes the `useSeedData` live tables (`clearSeedTables`), and **clears every data table** (`db.client().clearAllTables()`) |
 | `refreshAfterMutation(domain, pk)` | `whenReady()` then `service.refetchOne`; any failure is wrapped in `CacheReconciliationError` |
-| `resyncDomain(domain)` | Deletes `loginSync:{domain}` then `syncDomainNow` |
-| `resyncReferenceData()` | "Refresh all": deletes every `domain:` / `loginSync:` marker, then `service.syncAll()` — every active domain, the login seed set included |
+| `resyncDomain(domain)` | Deletes `loginSync:{domain}` (`client.clearSyncedThisLogin`) then `syncDomainNow` |
+| `resyncReferenceData()` | "Refresh all": deletes every `domain:` / `loginSync:` marker (`client.all` / `bulkRemove` on `syncMeta`), then `service.syncAll()` — every active domain, the login seed set included |
 | `syncNow()` | Forces a pass over the **screen set** only. Clears no markers — the cheap "refresh what is on screen" |
 | `bootstrapState` | `reactive` view over `serviceState` (running / written / errors) |
 
@@ -810,23 +830,63 @@ association write: the server change *did* land, only the local reconciliation f
 
 ### 4.11 Read surface
 
+How callers reach IndexedDB, and which access path each read API takes:
+
+```mermaid
+flowchart TB
+    subgraph callers["Callers"]
+      ST["Stores / utils"]
+      VC["Vue components"]
+      AC["App composables"]
+    end
+    subgraph read["Read API (main thread)"]
+      SD["useSeedData() / seedData<br/>shared, session-long"]
+      UD["useLiveEntity(table, opts)<br/>live list, per component"]
+      AE["appDb.entity(table)<br/>async, imperative"]
+      DS["useDbStatus(client, catalog)<br/>Settings status card"]
+    end
+    W["Sync worker<br/>(writes)"]
+    DC["dbClient → EntityClient<br/>get · query · live · upsertMany · snapshotReplace"]
+    BDB["BaseDB (Dexie), resolved per call by the client<br/>ensureDbReady gate · data tables + syncMeta"]
+    IDB[("IndexedDB<br/>{omsInstance}-{suffix}")]
+
+    ST --> SD
+    VC --> SD
+    VC --> UD
+    AC --> UD
+    AC --> AE
+    VC --> DS
+    UD -- "entity(table).live(opts)" --> DC
+    AE --> DC
+    W -- "upsertMany / snapshotReplace" --> DC
+    SD -- "liveRead([table, syncMeta])" --> DC
+    DS -- "liveRead / read([syncMeta, ...tables])" --> DC
+    DC --> BDB --> IDB
+```
+
+Every read API goes through `dbClient`: `useLiveEntity` with `entity(table).live`, `useSeedData` with
+`liveRead`, because it needs the table and its `loginSync:` marker in one transaction (below), and
+`useDbStatus` with `liveRead` over `syncMeta` and the catalog's tables. Every synced write lands
+through `dbClient` in the worker, and the live queries behind the read APIs re-emit on it. The internals of each path are in F-READ
+([APP_DB_SYNC_FLOWS.md](APP_DB_SYNC_FLOWS.md#f-read--read-paths)).
+
 | Composable | Shape | Notes |
 |---|---|---|
-| `useDb(table, options?)` | `{ records, first, count, hydrated, error }` | One entry point, always a list; `first` is a computed, because reading one row through `equals` on the PK is the same index lookup `get()` does. Re-subscribes on any options change (`deep: true`), unsubscribes on unmount. |
+| `useLiveEntity(table, options?)` | `{ records, first, count, hydrated, error }` | One entry point, always a list; `first` is a computed, because reading one row through `equals` on the PK is the same index lookup `get()` does. Re-subscribes on any options change (`deep: true`), unsubscribes on unmount. Reads through `getAppDb().client()`, or a `DbClient` passed first (a `BaseDB` is wrapped). The Vue form of `entity(table).live(options)`; an unknown table throws at the call, naming the table and database. Formerly `useDb`. |
 | `useSeedData()` / `seedData` | reactive getters (no prefix), list getters with `.withSync(...)`, plus a few async `get*` getters | One Dexie `liveQuery` per seed table, keyed by database name and table, opened on first use and kept until logout. All callers share it. Not a Pinia store, and not page-scoped. Detail below. |
-| `useDbStatus(db, catalogSource, actions)` | `{ domains, loaded, catalogLoaded, refreshing, totalRows, oldestSyncedAt, lastSyncedAt, refreshDomain, refreshAll }` | Drives the Settings card off a `liveQuery` over `syncMeta` plus per-table counts, plus a `DB_SYNC_CHANNEL` listener. |
+| `useDbStatus(client, catalogSource, actions)` | `{ domains, loaded, catalogLoaded, refreshing, totalRows, oldestSyncedAt, lastSyncedAt, refreshDomain, refreshAll }` | Drives the Settings card off one `dbClient.liveRead` over `syncMeta` plus the catalog's tables (markers and counts), plus a `DB_SYNC_CHANNEL` listener that recomputes with `dbClient.read`. Takes the app's `DbClient`; a `BaseDB` is still accepted and wrapped. |
 
-`hydrated` (`useDb.ts`) is `emitted && (records.length > 0 || !serviceState.running)` — that is
+`hydrated` (`useLiveEntity.ts`) is `emitted && (records.length > 0 || !serviceState.running)` — that is
 what lets a view distinguish "the seed sync has not finished yet" from "this table is genuinely
 empty", and it is the only reason `serviceState` is reactive.
 
 **`useSeedData` (`composables/useSeedData.ts`).** Each seed table's live query reads, in **one**
 `"r"` transaction, the table's rows *and* its seed domain's `loginSync:{domain}` marker
-(`readSeedTable`; the domain comes from `commonDomainsByTable`, and a table no seed domain fills
+(`readSeedTable`, run through `dbClient.liveRead`; the domain comes from `commonDomainsByTable`, and a table no seed domain fills
 counts as synced). The sync commits a domain's rows before its marker and logout clears both, so a
 read that sees the marker also sees the rows. The query therefore re-emits when the table changes
-— the login sync, a `refreshAfterMutation`, a resync — and when that one marker lands. It calls
-`ensureDbReady` inside the querier (see *Inside a live query*, §4.4), and the querier is itself
+— the login sync, a `refreshAfterMutation`, a resync — and when that one marker lands. `liveRead`
+calls `ensureDbReady` inside its querier (see *Inside a live query*, §4.4), and the querier is itself
 `async`, because Dexie only carries its read tracking across the awaits of an async querier.
 
 Three kinds of getter:
@@ -862,7 +922,7 @@ ids (a transfer order's flow also leaves `ITEM_CREATED`). It returns the transit
 stores, services and utils, which do not call composables. Every getter reads the shared module-level
 tables, so it and `useSeedData()` answer the same.
 
-Company's `useSeed.ts` wrappers still rebuild `hydrated` on top of `useSeedData` with `useDb`'s
+Company's `useSeed.ts` wrappers still rebuild `hydrated` on top of `useSeedData` with `useLiveEntity`'s
 formula (the async getter has resolved, and there are rows or `serviceState.running` is false)
 rather than using `withSync`. `clearSeedTables()` unsubscribes every live table; `stopAppDbSync`
 calls it on logout. The OMS instance cannot change without logout, so there is no per-instance
@@ -870,7 +930,9 @@ eviction.
 
 `useDbStatus` accepts **either** a static `SyncDomainCatalogItem[]` or a function returning the
 worker's registry-derived catalog over Comlink, resolving the async form once and re-subscribing when
-it goes from empty to populated (`useDbStatus.ts`). The per-domain `status` is
+it goes from empty to populated (`useDbStatus.ts`). The transaction opens only over the catalog
+tables the database has (`client.tableNames()`), so a catalog entry naming a missing table counts `0`
+instead of failing the read and blanking the card. The per-domain `status` is
 `count > 0 ? "success" : (syncedAt || syncClass === "A" ? "empty" : "none")`.
 
 ---
@@ -888,7 +950,7 @@ it goes from empty to populated (`useDbStatus.ts`). The per-domain `status` is
 | App-owned sync policy | `src/config/appSyncConfig.ts` |
 | Main-thread facade, including view-scoped activation | `src/services/appDbSync.ts` |
 | Per-view class-A activation call sites | `views/NetSuite.vue`, `NetSuiteSyncMonitor.vue`, `ShopifyProductSync.vue`, `ShopifyInventorySync.vue`, `ShopifyFulfillmentSync.vue`, `ShopifyTransferSync.vue`, `ShopifyTransferSyncDetail.vue`; `composables/useShopify.ts`, `useProductStoreOnboardingInitialLoad.ts`; `services/inventorySyncArea.ts` |
-| Read composables | `src/composables/useSeed.ts` (seed lookups are thin wrappers over `useSeedData`; its own tables stay on `useDb`), `useSystemMessage.ts`, `useAppVersion.ts` |
+| Read composables | `src/composables/useSeed.ts` (seed lookups are thin wrappers over `useSeedData`; its own tables stay on `useLiveEntity`), `useSystemMessage.ts`, `useAppVersion.ts` |
 
 ```ts
 // src/db/companyDb.ts
@@ -949,8 +1011,9 @@ export const orderManagerDb = defineAppDb({
   (`appSync.worker.ts`) — and nothing else. No hand-written domains, no class-A polling.
 - No `setDomains` call sites: the harness's default (`payload.domains` omitted means every registered
   class-B domain) is the entire activation policy.
-- Named re-exports (`orderManagerDbName`, `getOrderManagerDb`, `setOmsInstanceResolver`, `omDb`) keep
-  pre-`defineAppDb` call sites unchanged (`orderManagerDb.ts`).
+- Named re-exports (`orderManagerDbName`, `getOrderManagerDb`, `setOmsInstanceResolver`) keep
+  pre-`defineAppDb` call sites unchanged (`orderManagerDb.ts`); `getOrderManagerDb` is for the worker
+  entry only. Stores and services read through `orderManagerDb.entity(orderManagerDb.tables.…)`.
 - The Settings card uses the **static** `orderManagerDb.statusCatalog`; Company uses the async worker
   catalog.
 - Reads go almost entirely through `useSeedData()` — around 35 files across components, views and
@@ -977,7 +1040,7 @@ No `src/db`, no sync worker. Not a consumer of this framework.
 | View-scoped activation | `activateSyncDomains` / `deactivateSyncDomains` with owners | none |
 | Worker registers OMS resolver | yes | no (not needed) |
 | Status catalog source | async, worker registry | static, `statusCatalog` |
-| Main read surface | `useDb`, plus `useSeedData` behind `useSeed.ts` | `useSeedData` |
+| Main read surface | `useLiveEntity`, plus `useSeedData` behind `useSeed.ts` | `useSeedData` |
 
 ---
 
@@ -1004,7 +1067,7 @@ sequenceDiagram
     W->>DB: projectRows + snapshotReplace (rw txn)
     W-->>SS: postMessage sync-end
     W-->>V: BroadcastChannel domain-synced
-    DB-->>V: liveQuery emits (useDb)
+    DB-->>V: liveQuery emits (useLiveEntity)
 
     Note over V,DB: mutation write-through
     V->>API: POST (ordinary API)
@@ -1032,7 +1095,8 @@ teardown — are in [APP_DB_SYNC_FLOWS.md](APP_DB_SYNC_FLOWS.md).
 - Databases are **per OMS instance**, so a tenant switch cannot read the previous tenant's rows; the
   previous Dexie handle is closed so a live subscription cannot keep serving it
   (`defineAppDb.ts`).
-- Logout clears every data table (`setupAppDbSync.ts`, via `clearDatabaseTables`) and closes the
+- Logout clears every data table (`setupAppDbSync.ts`, via `dbClient.clearAllTables` over
+  `clearDatabaseTables`) and closes the
   in-memory seed tables (`clearSeedTables`), so the next user reads fresh.
 - `CacheReconciliationError` carries the domain and PK as diagnostics only — never credentials or
   response bodies (`sync/reconciliation.ts`).
@@ -1078,29 +1142,29 @@ The framework layer is verified by the following specs under `common/tests/`:
 | `common/db/types.ts` | 78 | `DbRow`, `DbKey`, `FieldKind`, `QueryOptions`, `SyncContext`, `SyncDomain` |
 | **`common/db/schema/`** | | **declaring entities, schemas and the app database** |
 | `common/db/schema/defineEntity.ts` | 144 | entity declaration and validation |
-| `common/db/schema/defineSchema.ts` | 117 | `defineSchema`, `pick`, `extendIndexes`, `mergeSchemas` |
-| `common/db/schema/defineAppDb.ts` | 144 | per-app database facade |
+| `common/db/schema/defineSchema.ts` | 138 | `defineSchema`, `pick`, `extendIndexes`, `mergeSchemas`; table names carried as a type and as `tables` |
+| `common/db/schema/defineAppDb.ts` | 158 | per-app database facade (`AppDb<Tables>`, `tables`, `AppDbTables`) |
 | `common/db/schema/appDbRegistry.ts` | 14 | active-app-db singleton |
 | **`common/db/storage/`** | | **Dexie access and row projection** |
-| `common/db/storage/baseDb.ts` | 212 | `BaseDB`, `ensureDbReady` (open + version gate, global-zone check), `clearDatabaseTables`, login markers |
-| `common/db/storage/dbClient.ts` | 413 | `DbClient` / `EntityClient` |
+| `common/db/storage/baseDb.ts` | 217 | `BaseDB`, `ensureDbReady` (open + version gate, global-zone check), `clearDatabaseTables`, login markers — reached through `dbClient` |
+| `common/db/storage/dbClient.ts` | 517 | `DbClient` / `EntityClient`, `liveRead` / `read` and `TxReader` |
 | `common/db/storage/projection.ts` | 179 | coercion, keying, diffing |
 | **`common/db/seed/`** | | **framework seed tables and their domains** |
 | `common/db/seed/seedSchema.ts` | 337 | `commonSchema`: 29 seed entities |
 | `common/db/seed/seedDomains.ts` | 305 | `commonDomains`: 29 seed class-B domains, `commonDomainsByTable`, `COMMON_TABLE_NAMES` |
 | **`common/db/composables/`** | | **Vue read surface (main thread only)** |
-| `common/db/composables/useDb.ts` | 92 | reactive list read |
-| `common/db/composables/useSeedData.ts` | 427 | live seed lookups, `withSync`, `seedData` |
-| `common/db/composables/useDbStatus.ts` | 218 | status card |
+| `common/db/composables/useLiveEntity.ts` | 129 | reactive list read (`useLiveEntity`, runtime table check) |
+| `common/db/composables/useSeedData.ts` | 422 | live seed lookups, `withSync`, `seedData` |
+| `common/db/composables/useDbStatus.ts` | 219 | status card |
 | **`common/db/sync/`** | | **domains, worker runtime and main-thread lifecycle** |
 | `common/db/sync/defineSyncDomain.ts` | 23 | hand-written domain constructor |
-| `common/db/sync/cachedEntity.ts` | 104 | `defineCachedEntity`, the worker-side write helper both factories share |
+| `common/db/sync/cachedEntity.ts` | 60 | `defineCachedEntity`, the worker-side write helper both factories share, over `dbClient` |
 | `common/db/sync/defineSnapshotDomain.ts` | 207 | class-B factory |
 | `common/db/sync/defineCursorDomain.ts` | 134 | class-A factory |
 | `common/db/sync/syncRegistry.ts` | 104 | registry and scheduling rule |
-| `common/db/sync/pollingWorkerHarness.ts` | 400 | worker runtime: start set / screen set, forced passes, queues |
-| `common/db/sync/syncService.ts` | 322 | main-thread worker lifecycle, `serviceState`, error maps |
-| `common/db/sync/setupAppDbSync.ts` | 333 | app-facing facade, view-scoped activation |
+| `common/db/sync/pollingWorkerHarness.ts` | 482 | worker runtime: start set / screen set, forced passes, queues |
+| `common/db/sync/syncService.ts` | 349 | main-thread worker lifecycle, `serviceState`, error maps |
+| `common/db/sync/setupAppDbSync.ts` | 358 | app-facing facade, view-scoped activation |
 | `common/db/sync/channels.ts` | 44 | `DB_SYNC_CHANNEL` (row-change broadcast) and the token push channel |
 | `common/db/sync/reconciliation.ts` | 52 | `CacheReconciliationError`, `isCacheReconciliationError`, `cacheScopeKey` |
 | `common/core/workerRemoteApi.ts` | 306 | worker fetch, `pageAll`, `pageNewestFirst` |

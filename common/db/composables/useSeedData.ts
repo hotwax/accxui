@@ -19,10 +19,10 @@
  */
 
 import { shallowRef, type ShallowRef } from "vue";
-import { liveQuery, type Subscription } from "dexie";
+import type { Subscription } from "dexie";
 import { getAppDb } from "../schema/appDbRegistry";
 import { commonDomainsByTable } from "../seed/seedDomains";
-import { ensureDbReady } from "../storage/baseDb";
+import type { TxReader } from "../storage/dbClient";
 
 export type Row = Record<string, any>;
 
@@ -61,32 +61,28 @@ const LOGIN_MARKER_PREFIX = "loginSync:";
 
 /**
  * One read of a seed table: its rows and its sync domain's once-per-login marker, in ONE
- * transaction. An empty table alone cannot tell "not synced yet" (a fresh login, before the
+ * transaction (`liveRead` opens it over the table and `syncMeta`). An empty table alone cannot tell "not synced yet" (a fresh login, before the
  * background sync lands) from "genuinely empty". The sync commits a domain's rows before its
  * marker and logout clears both, so a read that sees the marker also sees the rows.
  *
  * `get` on one key keeps the live query scoped to that marker, so the other domains' markers
  * landing during the login sync do not re-read this table.
  */
-async function readSeedTable(table: string): Promise<{ rows: Row[]; synced: boolean }> {
-  const db = getAppDb().raw();
-  await ensureDbReady(db);
+async function readSeedTable(tx: TxReader, table: string): Promise<{ rows: Row[]; synced: boolean }> {
   const domain = commonDomainsByTable[table]?.name;
-  return db.transaction("r", [table, "syncMeta"], async () => {
-    const [rows, marker] = await Promise.all([
-      db.table(table).toArray(),
-      // A table no seed domain fills has nothing to wait for.
-      domain ? db.syncMeta.get(`${LOGIN_MARKER_PREFIX}${domain}`) : { synced: true },
-    ]);
-    return { rows, synced: Boolean(marker?.synced) };
-  });
+  const [rows, marker] = await Promise.all([
+    tx.entity(table).all(),
+    // A table no seed domain fills has nothing to wait for.
+    domain ? tx.entity("syncMeta").get(`${LOGIN_MARKER_PREFIX}${domain}`) : { synced: true },
+  ]);
+  return { rows, synced: Boolean(marker?.synced) };
 }
 
 /** The table's live entry, opening its query on first use. Undefined when no database is signed in. */
 function seedTable(table: string): SeedTable | undefined {
   let key: string;
   try {
-    key = `${getAppDb().raw().name}/${table}`;
+    key = `${getAppDb().client().name()}/${table}`;
   } catch {
     return undefined;
   }
@@ -98,22 +94,21 @@ function seedTable(table: string): SeedTable | undefined {
     let settle!: () => void;
     const loaded = new Promise<void>((resolve) => { settle = resolve; });
 
-    // The querier must itself be `async`: Dexie only carries its read tracking across the awaits in
-    // `readSeedTable` for an async querier. A plain arrow returning the promise loses it at the
-    // first await, records no tables, and so never re-runs when the table changes.
-    const subscription = liveQuery(async () => await readSeedTable(table)).subscribe({
-      next: (read) => {
-        rows.value = read.rows;
-        synced.value = read.synced;
-        settle();
-      },
-      error: (error) => {
-        console.warn(`[seed] Live read of ${table} failed:`, error);
-        // A failed query has closed itself; the next use opens a fresh one.
-        tables.delete(key);
-        settle();
-      },
-    });
+    const subscription = getAppDb().client()
+      .liveRead([table, "syncMeta"], (tx) => readSeedTable(tx, table))
+      .subscribe({
+        next: (read) => {
+          rows.value = read.rows;
+          synced.value = read.synced;
+          settle();
+        },
+        error: (error) => {
+          console.warn(`[seed] Live read of ${table} failed:`, error);
+          // A failed query has closed itself; the next use opens a fresh one.
+          tables.delete(key);
+          settle();
+        },
+      });
 
     entry = { rows, synced, loaded, subscription };
     tables.set(key, entry);

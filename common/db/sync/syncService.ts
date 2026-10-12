@@ -5,8 +5,8 @@
  *   - `pollingService.ts`'s worker lifecycle (spawn via `WorkerFactory`, token push over
  *     BroadcastChannel, status routing, the auth-error hook);
  *   - `appDbBootstrap.ts`'s readiness check: `ensureDbReady` lives on `baseDb.ts` (a database
- *     concern, shared with `clearDatabaseTables`) and this service runs it against the caller's
- *     `BaseDB`, when one is given, before spawning the worker — see `SyncServiceOptions.db`;
+ *     concern, shared with `clearDatabaseTables`) and this service runs it, through the caller's
+ *     `DbClient.ready()`, before spawning the worker — see `SyncServiceOptions.db`;
  *   - Company's `appCacheBootstrap.ts` idempotent once-per-login `start()`: the in-flight
  *     `starting` promise plus a `startGeneration` counter so a terminated attempt's last queued
  *     worker message can never mutate state after teardown.
@@ -23,7 +23,8 @@ import { WorkerFactory } from "../../core/workerFactory";
 import { createTokenPublisher } from "./channels";
 import type { ActiveDomain } from "./syncRegistry";
 import type { CatalogItem, SyncHarness } from "./pollingWorkerHarness";
-import { type BaseDB, ensureDbReady } from "../storage/baseDb";
+import type { BaseDB } from "../storage/baseDb";
+import { type DbClient, dbClient } from "../storage/dbClient";
 
 export interface SyncServiceOptions {
   /** The Web Worker URL or instance (e.g. `new URL('./appSync.worker.ts', import.meta.url)`) */
@@ -37,13 +38,14 @@ export interface SyncServiceOptions {
   /** Called when the worker reports an auth failure; wire to the app's re-auth/logout. */
   onAuthError?: (message: string) => void;
   /**
-   * The app's database, opened and version-checked (`ensureDbReady`) before the worker spawns.
+   * The app's database client, opened and version-checked (`ready()`, over `ensureDbReady`) before
+   * the worker spawns. A `BaseDB` is still accepted, and wrapped.
    *
    * The check is idempotent and every read reaches it anyway, so this is an ORDERING guarantee
    * rather than the only opportunity: doing it here means a rebuild happens while this realm holds
    * the only connection, before the worker opens its own.
    */
-  db?: BaseDB;
+  db?: DbClient | BaseDB;
   /** App-local token-change watcher cadence (default 15s). */
   tokenWatchMs?: number;
 }
@@ -261,9 +263,14 @@ export function createSyncService(opts: SyncServiceOptions): SyncService {
     serviceState.running = true;
 
     const attempt = (async () => {
-      // Runs first, before the worker exists to race it. `ensureDbReady` never throws (it swallows
+      // Runs first, before the worker exists to race it. `ready()` never throws (`ensureDbReady` swallows
       // and warns) — a failed check must never block boot.
-      if (opts.db) await ensureDbReady(opts.db);
+      if (opts.db) {
+        const client = typeof (opts.db as DbClient).ready === "function"
+          ? (opts.db as DbClient)
+          : dbClient(opts.db as BaseDB);
+        await client.ready();
+      }
       if (generation !== startGeneration) return; // terminated (stop()) while the shape check ran
 
       const targetUrl = typeof opts.workerUrl === "string"

@@ -1,6 +1,5 @@
 import { computed, reactive, ref, type ComputedRef, type Ref } from "vue";
 import type { AppDb } from "../schema/defineAppDb";
-import { clearDatabaseTables } from "../storage/baseDb";
 import { clearSeedTables } from "../composables/useSeedData";
 import {
   clearDomainErrors,
@@ -176,13 +175,13 @@ export function setupAppDbSync(config: AppDbSyncConfig): AppDbSync {
 
   async function clearSyncMarkers(): Promise<void> {
     try {
-      const syncMeta = config.db.raw().syncMeta;
-      const keys = await syncMeta.toCollection().primaryKeys();
-      const domainKeys = (keys as string[]).filter(
+      const client = config.db.client();
+      const keys = (await client.all<{ key: string }>("syncMeta")).map((marker) => String(marker.key));
+      const domainKeys = keys.filter(
         (key) => key.startsWith("domain:") || key.startsWith("loginSync:")
       );
       if (domainKeys.length) {
-        await syncMeta.bulkDelete(domainKeys);
+        await client.bulkRemove("syncMeta", domainKeys);
       }
     } catch {
       // Ignore if table unavailable
@@ -210,7 +209,7 @@ export function setupAppDbSync(config: AppDbSyncConfig): AppDbSync {
     const workerUrl = config.getWorkerUrl ? config.getWorkerUrl() : (undefined as any);
     const attemptService = factory({
       workerUrl,
-      db: config.db.raw(),
+      db: config.db.client(),
       /**
        * Error bookkeeping lives in ONE place — `syncService`'s maps, reached through the helpers
        * imported above. This handler routes the same statuses because a caller may supply its own
@@ -278,7 +277,7 @@ export function setupAppDbSync(config: AppDbSyncConfig): AppDbSync {
     clearSeedTables();
     // Chained so a start waiting on `clearing` also waits out an earlier wipe still running.
     const clear: Promise<void> = (clearing ?? Promise.resolve())
-      .then(() => clearDatabaseTables(config.db.raw()))
+      .then(() => config.db.client().clearAllTables())
       .catch(() => {});
     clearing = clear;
     await clear;
@@ -322,7 +321,7 @@ export function setupAppDbSync(config: AppDbSyncConfig): AppDbSync {
 
   async function resyncDomain(domain: string): Promise<void> {
     try {
-      await config.db.raw().syncMeta.delete(`loginSync:${domain}`);
+      await config.db.client().clearSyncedThisLogin(domain);
     } catch {}
     await whenReady();
     if (!service) {

@@ -12,7 +12,8 @@
  */
 
 import { expose } from "comlink";
-import { type BaseDB, ensureDbReady, hasSyncedThisLogin } from "../storage/baseDb";
+import type { BaseDB } from "../storage/baseDb";
+import { dbClient } from "../storage/dbClient";
 import { DB_SYNC_CHANNEL, subscribeToken } from "./channels";
 import { cacheScopeKey } from "./reconciliation";
 import type { SyncContext, SyncDomain } from "../types";
@@ -72,6 +73,8 @@ const DEFAULT_BASE_TICK_MS = 5_000;
 export const RETRY_WITHOUT_INTERVAL_MS = 30_000;
 
 export function createSyncHarness(getDb: (omsInstance: string) => BaseDB): SyncHarness {
+  /** Every database access goes through the instance's client. */
+  const clientFor = (omsInstance: string) => dbClient(getDb(omsInstance));
   let ctx: SyncContext = { maargUrl: "", token: "", omsInstance: "", now: Date.now() };
   /** The set `start()` activated — class B by default. Never replaced by a screen. */
   let baseDomains: ActiveDomain[] = [];
@@ -201,7 +204,7 @@ export function createSyncHarness(getDb: (omsInstance: string) => BaseDB): SyncH
     try {
       const written = await domain.sync(ctx, entry.args, { force });
       const interval = effectiveInterval(entry, domain);
-      const completed = force || interval !== undefined || await hasSyncedThisLogin(getDb(ctx.omsInstance), entry.name);
+      const completed = force || interval !== undefined || await clientFor(ctx.omsInstance).syncedThisLogin(entry.name);
       const at = Date.now();
       if (completed) {
         lastRunAt[clockKey] = at;
@@ -346,7 +349,7 @@ export function createSyncHarness(getDb: (omsInstance: string) => BaseDB): SyncH
       .map((d) => ({ name: d.name }));
     baseTickMs = payload.baseTickMs ?? DEFAULT_BASE_TICK_MS;
     try {
-      await ensureDbReady(getDb(payload.omsInstance));
+      await clientFor(payload.omsInstance).ready();
     } catch (err) {
       const error = new Error(`cache open failed: ${(err as any)?.message ?? err}`, { cause: err });
       post({ type: "sync-error", domain: "__start", message: error.message });

@@ -9,6 +9,7 @@ import stylistic from "@stylistic/eslint-plugin";
 import typescriptEslint from "@typescript-eslint/eslint-plugin";
 import typescriptParser from "@typescript-eslint/parser";
 import globals from "globals";
+import dataAccess, { DATA_ACCESS_EXEMPT, DATA_ACCESS_FILES, dataAccessRules } from "./eslint/plugins/data-access.js";
 
 const localesCache = new Map();
 
@@ -273,5 +274,16 @@ export default [
         }
       ]
     }
+  },
+  /**
+   * One data-access layer: app code reads and writes the app database only through useLiveEntity and
+   * appDb.entity(...). The rules live in `eslint/plugins/data-access.js`; each app's build runs them
+   * on their own through `eslint.data-access.config.js`, and here they surface in editors.
+   */
+  {
+    files: DATA_ACCESS_FILES,
+    ignores: DATA_ACCESS_EXEMPT,
+    plugins: { "data-access": dataAccess },
+    rules: dataAccessRules,
   }
 ];

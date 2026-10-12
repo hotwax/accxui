@@ -16,7 +16,7 @@ export * from "./storage/dbClient";
 export * from "./seed/seedSchema";
 export * from "./seed/seedDomains";
 
-export * from "./composables/useDb";
+export * from "./composables/useLiveEntity";
 export * from "./composables/useDbStatus";
 export * from "./composables/useSeedData";
 

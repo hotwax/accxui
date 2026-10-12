@@ -7,24 +7,21 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  */
 const fixture = vi.hoisted(() => ({ tables: {} as Record<string, any[]> }));
 
-vi.mock("dexie", () => ({
-  liveQuery: (querier: () => Promise<unknown>) => ({
-    subscribe: ({ next }: { next: (value: any) => void }) => {
-      querier().then(next);
-      return { unsubscribe: () => undefined };
-    },
-  }),
-}));
-
-vi.mock("../db/storage/baseDb", () => ({ ensureDbReady: async () => undefined }));
-
 vi.mock("../db/schema/appDbRegistry", () => ({
   getAppDb: () => ({
-    raw: () => ({
-      name: "TestDB",
-      transaction: (_mode: string, _tables: string[], run: () => Promise<unknown>) => run(),
-      table: (table: string) => ({ toArray: async () => fixture.tables[table] || [] }),
-      syncMeta: { get: async () => ({ synced: true }) },
+    client: () => ({
+      name: () => "TestDB",
+      liveRead: (_tables: string[], read: (tx: any) => Promise<unknown>) => ({
+        subscribe: ({ next }: { next: (value: any) => void }) => {
+          read({
+            entity: (table: string) => ({
+              all: async () => fixture.tables[table] || [],
+              get: async () => (table === "syncMeta" ? { synced: true } : undefined),
+            }),
+          }).then(next);
+          return { unsubscribe: () => undefined };
+        },
+      }),
     }),
   }),
 }));

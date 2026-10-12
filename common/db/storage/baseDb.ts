@@ -88,6 +88,11 @@ export async function hasSyncedThisLogin(db: BaseDB, domain: string): Promise<bo
   }
 }
 
+/** Forget that `domain` synced this login, so its next pass re-seeds it. */
+export async function clearSyncedThisLogin(db: BaseDB, domain: string): Promise<void> {
+  await db.syncMeta.delete(`${LOGIN_MARKER_PREFIX}${domain}`);
+}
+
 export async function markSyncedThisLogin(db: BaseDB, domain: string): Promise<void> {
   try {
     await db.syncMeta.put({
@@ -187,14 +192,14 @@ function versionCheckOf(db: BaseDB): Promise<void> {
 /**
  * Make the database usable: open it, and rebuild it if it was built by a different version.
  *
- * Every read and write reaches this — `dbClient` awaits it before each operation, the worker
- * harness on start, and the status card — so no query can run, and no `liveQuery` can subscribe,
- * against a database that has not been verified. That ordering is what makes the rebuild safe:
- * `Dexie.delete` blocks on open connections, and by construction there are none yet.
+ * Every read and write reaches this — `dbClient` awaits it before each operation, and the worker
+ * harness on start — so no query can run, and no `liveQuery` can subscribe, against a database
+ * that has not been verified. That ordering is what makes the rebuild safe: `Dexie.delete` blocks
+ * on open connections, and by construction there are none yet.
  *
- * Live queries call this inside their querier (`dbClient.live`, `useSeedData`, `useDbStatus`), so
- * the open and the check run in the global zone, and the promise returned here is a Dexie promise
- * made in the caller's zone. A querier resumes inside its live query, so the reads that follow are
+ * Live queries call this inside their querier (`dbClient.live`, `dbClient.liveRead`), so the open
+ * and the check run in the global zone, and the promise returned here is a Dexie promise made in
+ * the caller's zone. A querier resumes inside its live query, so the reads that follow are
  * tracked, and any other caller resumes outside it, so its writes are not refused.
  */
 export function ensureDbReady(db: BaseDB): Promise<void> {

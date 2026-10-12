@@ -1,10 +1,10 @@
 import type { BaseDB } from "../storage/baseDb";
-import { hasSyncedThisLogin, markSyncedThisLogin } from "../storage/baseDb";
+import { dbClient } from "../storage/dbClient";
 import { getAppDb } from "../schema/appDbRegistry";
 import type { Entity } from "../schema/defineEntity";
 
 import { canonicalKey, entityKeyOf, isUnkeyableFetch, projectRow } from "../storage/projection";
-import type { DbRow, SyncContext, SyncDomain } from "../types";
+import type { SyncContext, SyncDomain } from "../types";
 import { defineCachedEntity } from "./cachedEntity";
 import { registerSyncDomain } from "./syncRegistry";
 import { pageAll, workerGet } from "../../core/workerRemoteApi";
@@ -57,17 +57,18 @@ export function defineSnapshotDomain(
     syncClass: config.syncClass,
     async sync(ctx: SyncContext, _args?: unknown, options?: { force?: boolean }) {
       const db = resolveDb(ctx.omsInstance);
+      const client = dbClient(db);
       const projection = config.projection ?? getAppDb().entities[config.table];
       if (!projection) {
         throw new Error(`[db] domain "${config.name}": no entity projection found for table "${config.table}".`);
       }
 
-      if (!options?.force && await hasSyncedThisLogin(db, config.name)) return 0;
+      if (!options?.force && await client.syncedThisLogin(config.name)) return 0;
 
       let rawRecords: any[] = [];
 
       if (config.fanOut) {
-        const parentRows = await db.table<DbRow, string>(config.fanOut.parentTable).toArray();
+        const parentRows = await client.all(config.fanOut.parentTable);
         const parentIds = [...new Set(parentRows.map((row: any) => row?.[config.fanOut!.parentKeyField]).filter(Boolean))];
         for (const parentId of parentIds) {
           const url = config.fanOut.urlFor(String(parentId));
@@ -104,7 +105,7 @@ export function defineSnapshotDomain(
       }
 
       // Safety check: avoid wiping a populated table on zero-row fetch during auto sync
-      const currentCount = await db.table(config.table).count();
+      const currentCount = await client.count(config.table);
       if (!options?.force && rawRecords.length === 0 && currentCount > 0) {
         console.warn(`[db] ${config.name}: fetch returned 0 records while cache holds ${currentCount} rows. Refusing to snapshot replace on auto sync.`);
         return 0;
@@ -114,7 +115,7 @@ export function defineSnapshotDomain(
       const fanned = await entityOps.snapshotReplace(rawRecords, config.scopeOnSync);
 
       if (rawRecords.length === 0 || fanned.written > 0) {
-        await markSyncedThisLogin(db, config.name);
+        await client.markSyncedThisLogin(config.name);
       }
 
       return fanned.written;

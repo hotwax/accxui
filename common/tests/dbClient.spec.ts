@@ -133,3 +133,77 @@ describe("dbClient projection", () => {
       .rejects.toThrow(/undeclared/);
   });
 });
+
+describe("dbClient login markers", () => {
+  function markerDb(record?: Record<string, unknown>) {
+    const syncMeta = {
+      get: vi.fn(async (_key: string) => record),
+      put: vi.fn(async (_row: Record<string, unknown>) => undefined),
+    };
+    return { syncMeta, db: { syncMeta } as unknown as BaseDB };
+  }
+
+  it("reads a domain's once-per-login marker", async () => {
+    const { syncMeta, db } = markerDb({ key: "loginSync:status", synced: true });
+
+    expect(await dbClient(db).syncedThisLogin("status")).toBe(true);
+    expect(syncMeta.get).toHaveBeenCalledWith("loginSync:status");
+  });
+
+  it("answers false when the marker is absent", async () => {
+    const { db } = markerDb(undefined);
+
+    expect(await dbClient(db).syncedThisLogin("status")).toBe(false);
+  });
+
+  it("writes the marker for a domain", async () => {
+    const { syncMeta, db } = markerDb();
+
+    await dbClient(db).markSyncedThisLogin("status");
+
+    expect(syncMeta.put).toHaveBeenCalledWith(expect.objectContaining({ key: "loginSync:status", synced: true }));
+  });
+});
+
+describe("dbClient lifecycle", () => {
+  it("drops a domain's login marker", async () => {
+    const syncMeta = { delete: vi.fn(async (_key: string) => undefined) };
+
+    await dbClient({ syncMeta } as unknown as BaseDB).clearSyncedThisLogin("carrier");
+
+    expect(syncMeta.delete).toHaveBeenCalledWith("loginSync:carrier");
+  });
+
+  it("clears every table but keeps the schema version record", async () => {
+    const cleared: string[] = [];
+    const syncMeta = {
+      toCollection: () => ({ primaryKeys: async () => ["schemaVersion", "loginSync:status", "domain:status"] }),
+      bulkDelete: vi.fn(async (_keys: string[]) => undefined),
+    };
+    const db = {
+      name: "OMS-app",
+      syncMeta,
+      getTableNames: () => ["syncMeta", "statuses", "enums"],
+      table: (table: string) => ({ clear: async () => { cleared.push(table); } }),
+      transaction: async (_mode: string, _tables: string[], fn: () => Promise<unknown>) => fn(),
+    } as unknown as BaseDB;
+
+    await dbClient(db).clearAllTables();
+
+    expect(cleared).toEqual(["statuses", "enums"]);
+    expect(syncMeta.bulkDelete).toHaveBeenCalledWith(["loginSync:status", "domain:status"]);
+  });
+});
+
+describe("defineCachedEntity through dbClient", () => {
+  it("projects through the domain's own entity, not the schema's", async () => {
+    const { table, db } = fakeDb();
+    const { defineCachedEntity } = await import("../db/sync/cachedEntity");
+
+    await defineCachedEntity(db, "geoAssocs", geoAssoc).upsertMany([{ geoId: "US", geoIdTo: "CA", extra: "dropped" }]);
+
+    const [written] = table.bulkPut.mock.calls[0][0];
+    expect(written).toMatchObject({ geoId: "US", toGeoId: "CA" }); // the entity's rename applied
+    expect(written.extra).toBeUndefined();
+  });
+});
