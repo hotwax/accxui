@@ -16,7 +16,7 @@
  * pull `vue` into a worker chunk Vite must emit as a single iife.
  */
 
-import { reactive } from "vue";
+import { reactive, toRaw } from "vue";
 import type { Remote } from "comlink";
 import { commonUtil } from "../../utils/commonUtil";
 import { WorkerFactory } from "../../core/workerFactory";
@@ -190,6 +190,20 @@ export function clearScopeError(domain: string, scope: string): void {
 }
 
 /**
+ * A deep plain copy of what goes to the worker. postMessage structured-clones it and throws
+ * DataCloneError on a Vue reactive proxy at any depth — the held set is a `ref`'s value, and a
+ * screen's args are often reactive — which used to kill the whole start on a reload or deep link.
+ */
+function toPlain<T>(value: T): T {
+  const raw = toRaw(value) as unknown;
+  if (Array.isArray(raw)) return raw.map(toPlain) as T;
+  if (raw && typeof raw === "object" && Object.getPrototypeOf(raw) === Object.prototype) {
+    return Object.fromEntries(Object.entries(raw).map(([key, item]) => [key, toPlain(item)])) as T;
+  }
+  return raw as T;
+}
+
+/**
  * Main-thread half of the sync service (framework-wide).
  *
  * Framework-owned so no single app dev can break the dangerous parts:
@@ -346,8 +360,8 @@ export function createSyncService(opts: SyncServiceOptions): SyncService {
   return {
     start,
     setDomains: async (domains) => {
-      viewDomains = domains;
-      if (harness) await harness.setDomains(domains);
+      viewDomains = toPlain(domains);
+      if (harness) await harness.setDomains(viewDomains);
     },
     syncNow: async () => {
       // Wait out a start in flight: its handle is not usable yet, and the refresh must not vanish.

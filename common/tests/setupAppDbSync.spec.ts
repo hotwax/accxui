@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { reactive } from "vue";
 
 const harnessStub = vi.hoisted(() => ({
   start: vi.fn(async () => {}),
@@ -596,5 +597,42 @@ describe("start during a database wipe", () => {
 
     expect(factory).not.toHaveBeenCalled();
     expect(sync.syncService()).toBeNull();
+  });
+});
+
+/**
+ * The worker receives domain sets through postMessage, which structured-clones them and throws
+ * DataCloneError on a Vue reactive proxy. The held set is a `ref`'s value, so a screen that activated
+ * before the sync started (a reload or deep link) used to hand the worker a proxy and kill the start.
+ */
+describe("domain sets cross to the worker as plain data", () => {
+  beforeEach(() => {
+    __resetErrorState();
+    // Copy the way postMessage does, so a proxy fails here as it does in the browser.
+    harnessStub.setDomains.mockReset().mockImplementation(async (domains: unknown) => { structuredClone(domains); });
+  });
+
+  it("starts when a screen activated before the sync started", async () => {
+    const sync = setupAppDbSync({ db: fakeAppDb(), createSyncService });
+    await sync.activateSyncDomains([{ name: "inventoryEvent", args: { shopId: "S" } }], "deepLink:1");
+
+    await sync.startAppDbSync();
+
+    expect(serviceState.errors.__start).toBeUndefined();
+    expect(sync.syncService()).not.toBeNull();
+    expect(harnessStub.setDomains).toHaveBeenCalledWith([{ name: "inventoryEvent", args: { shopId: "S" } }]);
+    await sync.stopAppDbSync();
+  });
+
+  it("accepts reactive args from the screen", async () => {
+    const sync = setupAppDbSync({ db: fakeAppDb(), createSyncService });
+    await sync.startAppDbSync();
+    const args = reactive({ shopId: "S", filters: { statusId: ["A", "B"] } });
+
+    await expect(sync.activateSyncDomains([{ name: "inventoryEvent", args }], "view:1")).resolves.toBeUndefined();
+    expect(harnessStub.setDomains).toHaveBeenLastCalledWith([
+      { name: "inventoryEvent", args: { shopId: "S", filters: { statusId: ["A", "B"] } } },
+    ]);
+    await sync.stopAppDbSync();
   });
 });
