@@ -17,7 +17,7 @@ The root `eslint.config.js` enforces this with core rules (`no-restricted-syntax
 | You want… | Use | Where |
 |---|---|---|
 | Rows that stay current **on screen** | `useLiveEntity<any>(appDb.tables.x, options)` | components, views, composables — during `setup` |
-| An answer **now**, or a **write** | `appDb.entity(appDb.tables.x).get / query / all / first / count / upsertMany / remove …` | anywhere: stores, services, utils, async handlers, composables, workers |
+| An answer **now** | `appDb.entity(appDb.tables.x).get / query / all / first / count` | anywhere: stores, services, utils, async handlers, composables, workers |
 
 ### 1. Live, on screen — `useLiveEntity`
 
@@ -37,7 +37,7 @@ const { records, first, hydrated } = useLiveEntity<any>(
 - It is a composable: never call it in a store, service, util or worker.
 - While an id is unknown, return `{ filter: () => false }`, not `{}` (which reads the whole table).
 
-### 2. One-shot read or write — `appDb.entity`
+### 2. One-shot read — `appDb.entity`
 
 ```ts
 import { companyDb } from "@/db/companyDb";
@@ -47,8 +47,11 @@ const shops = companyDb.entity(companyDb.tables.shopifyShops);
 const one = await shops.get(shopId);                              // by primary key
 const some = await shops.query({ equals: { productStoreId } });   // same QueryOptions
 const all = await shops.all();                                    // then filter/find in JS — fine
-await shops.upsertMany([fetchedRow]);                             // write-through after a fetch
 ```
+
+**Writes belong to sync domains.** `upsertMany` / `snapshotReplace` / `put` / `remove` are called
+only inside a worker sync domain (`src/workers/**`): the domain that fills a table is its one
+writer, so a row has one shape however it arrived. App code never writes the app db.
 
 Nothing re-renders afterwards. For live updates outside a component (rare, stores / services /
 utils only, never setup code or the worker), `appDb.entity(t).live(options)` returns a Dexie
@@ -64,6 +67,26 @@ needed — they work in workers and before sign-in) and list exactly the tables 
 has. A typo is a missing property and fails to compile. **Never** pass a string literal
 (`entity("facilities")`, `useLiveEntity("facilities")`) — the lint rule rejects it
 (there is no autofix; write `appDb.tables.x`).
+
+## Missing a record — `refreshRecord`
+
+A cache-first lookup that misses asks the table's sync domain to fetch and store the record, then
+reads it back. Don't `api()` it and `upsertMany` it yourself.
+
+```ts
+import { refreshRecord } from "@/services/appDbSync";
+
+const logs = companyDb.entity(companyDb.tables.dataManagerLogs);
+const cached = await logs.get(logId);
+if (cached) return cached;
+await refreshRecord("dataManagerLog", { logId });   // the domain's refetchOne, in the worker
+return (await logs.get(logId)) ?? null;
+```
+
+- Takes a **sync domain name** and that record's key. The domain needs a `refetchOne`; a table
+  filled only on request gets a class C domain whose `sync` returns `0`.
+- Waits only for the worker to be open, not its first sync pass. Rejects with the domain's own
+  error (not a `CacheReconciliationError`), or the start error if the sync could not start.
 
 ## After a server write
 
@@ -121,6 +144,7 @@ cache on the same layer, not a separate data path.
 | `activateSyncDomains` without `deactivateSyncDomains` in the file, or in a `.vue` page without `onIonViewDidLeave` | deactivate with the same owner in `onIonViewDidLeave` (not only on unmount) |
 | `deactivateSyncDomains()` with no owner | `deactivateSyncDomains(SYNC_OWNER)` |
 | a string literal table name | `appDb.tables.x` |
+| `upsertMany` / `snapshotReplace` / `put` / `remove` outside `src/workers/**` (not lint-enforced) | `refreshRecord` for a missing record, `mutate` for a server change |
 
 Exempt: an app-local Dexie store outside the app database, switched off in that app's own
 `eslint.config.js` (Company `src/utils/storage.ts`, Order Manager `src/services/productDb.ts`). The app's
