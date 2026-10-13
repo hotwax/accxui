@@ -13,7 +13,7 @@ covers building it.
 
 Real, working references: `apps/company` (own tables + seed tables, class A and B domains) and
 `apps/order-manager` (seed tables only, no own tables). Full guide:
-`docs/APP_DB_DEVELOPER_GUIDE.md` (§2 tables, §3 domains, §4 `mutate`, §5 polling, §6 new app,
+`docs/APP_DB_DEVELOPER_GUIDE.md` (§2 tables, §3 domains, §4 writes, §5 polling, §6 new app,
 §9 folder structure). Below, `appDb` / `appSchema` stand for the app's names (`companyDb`,
 `companySchema`).
 
@@ -113,7 +113,7 @@ appDb.setOmsInstanceResolver(() => "default");        // test fallback; main.ts 
 
 **Every table has exactly one writer: its domain.** Composables, stores and pages never call
 `upsertMany` / `snapshotReplace` / `put` / `remove` on the app db. A screen missing a record calls
-`refreshRecord(domain, pk)`; a server change goes through `mutate`. If no domain fits, add one
+`refreshRecord(domain, pk)`; after a server write, `refreshAfterMutation` / `resyncDomain`. If no domain fits, add one
 (class C if it is fetched only on request) rather than writing from app code.
 
 **Class B, one endpoint:**
@@ -123,7 +123,7 @@ appDb.setOmsInstanceResolver(() => "default");        // test fallback; main.ts 
 import { defineSnapshotDomain } from "@common/db/sync/defineSnapshotDomain";
 
 export const cycleCountDomain = defineSnapshotDomain({
-  name: "cycleCount",                 // what refreshAfterMutation / resyncDomain / mutate name
+  name: "cycleCount",                 // what refreshAfterMutation / resyncDomain / refreshRecord name
   label: "Cycle counts",              // shown on the Settings status card
   syncClass: "B",
   table: "cycleCounts",
@@ -269,7 +269,7 @@ operation passes `systemMessageRemoteId` next to `id`).
 list plus each party's detail, an order plus its identifications), the domain assembles it:
 
 - Write **one** function that fetches and assembles a record, and call it from both `sync` and
-  `refetchOne`. `mutate` and `refreshRecord` reconcile through `refetchOne`, so if it assembles
+  `refetchOne`. `refreshAfterMutation` and `refreshRecord` reconcile through `refetchOne`, so if it assembles
   differently the row loses the other parts after every write. See `organizationDomain.ts`
   (`fetchOrganization` is shared by both).
 - Shape the row with **nested fields** on the entity (`customer: { partyId: "text", … }`,
@@ -323,13 +323,12 @@ exposeWorkerHarness((omsInstance) => {
 
 ```ts
 // src/services/appDbSync.ts
-import { api, commonUtil } from "@common";
 import { createSyncService, setupAppDbSync } from "@common/db";
 import { appDb } from "@/db/appDb";
 import workerUrl from "@/workers/appSync.worker.ts?worker&url";
 
 export const {
-  startAppDbSync, stopAppDbSync, mutate, refreshAfterMutation, refreshRecord, resyncDomain, resyncReferenceData,
+  startAppDbSync, stopAppDbSync, refreshAfterMutation, refreshRecord, resyncDomain, resyncReferenceData,
   syncService, bootstrapState,
   // only with class-A domains:
   activateSyncDomains, deactivateSyncDomains, createSyncDomainOwner, syncDomainsReady, syncDomainsError, syncNow,
@@ -337,8 +336,6 @@ export const {
   db: appDb,
   getWorkerUrl: () => new URL(workerUrl, import.meta.url),
   createSyncService,
-  api,                                                 // mutate sends writes through it
-  isError: (resp) => commonUtil.hasError(resp),
 });
 ```
 
@@ -352,11 +349,10 @@ Every other file imports sync functions from `@/services/appDbSync`, never from 
   Never `api()` it and `upsertMany` it from app code.
 - Labels from seed tables: `useSeedData()` → `seed.facilityName(id)`, `seed.statusDescription(id)`;
   not `useLiveEntity` on the seed table plus a hand-built map.
-- Writes: `await mutate({ url: "oms/cycleCounts", method: "post", data }, { resync: ["cycleCount"] })`.
-  Use `refresh: [["cycleCount", { cycleCountId }]]` only when you know the key (from the request,
-  or from a response shape you've verified). Company's existing writes use the two-call form,
-  `api(...)` then `refreshAfterMutation("cycleCount", { cycleCountId })` or `resyncDomain("cycleCount")`;
-  both reconcile through the domain's refetch path.
+- Writes: `api(...)` from a composable or store, check it landed, then
+  `refreshAfterMutation("cycleCount", { cycleCountId })` (one record, when you know its key from the
+  request or a response shape you've verified) or `resyncDomain("cycleCount")` (the whole domain).
+  Both reconcile through the domain's refetch path.
 - **Class B needs no page code.** It syncs at login (`startAppDbSync`); never activate it from a page.
 - **Class A** is off until a page turns it on: `createSyncDomainOwner` in setup,
   `activateSyncDomains([{ name, intervalMs, args }], owner)` in `onIonViewWillEnter`,
@@ -375,7 +371,7 @@ Every other file imports sync functions from `@/services/appDbSync`, never from 
 | Redeclaring / fetching statuses, facilities, enums… | duplicate data path | `commonSchema.pick` + `useSeedData` |
 | Domain not in `appSyncDomains` | table stays empty, no error | add it; the `domainTables` spec catches it |
 | `api()` or `fetch` inside a domain | fails in the worker | `@common/core/workerRemoteApi` |
-| Writing the POST response into the table | drifts from the server | `mutate(..., { refresh / resync })` |
+| Writing the POST response into the table | drifts from the server | `refreshAfterMutation` / `resyncDomain` after the write |
 | A composable fetching a record and `upsertMany`-ing it | a second writer with its own row shape | `refreshRecord` + a domain `refetchOne` (class C if nothing polls it) |
 | `sync` and `refetchOne` assembling a record differently | the row loses fields after every write | one shared fetch-and-assemble function |
 | A class C domain with no `refetchOne` | `refreshRecord` fails: "domain has no refetchOne" | give it one; its `sync` returns `0` |

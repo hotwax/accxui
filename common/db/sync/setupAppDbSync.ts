@@ -10,43 +10,19 @@ import {
   type SyncService,
 } from "./syncService";
 import { type ActiveDomain, activationKey } from "./syncRegistry";
-import { CacheReconciliationError, cacheScopeKey, isCacheReconciliationError } from "./reconciliation";
+import { CacheReconciliationError, cacheScopeKey } from "./reconciliation";
 
 export interface AppDbSyncConfig {
   db: AppDb;
   getWorkerUrl?: () => URL;
   createSyncService?: typeof defaultCreateSyncService;
   onStatus?: (status: Record<string, any>) => void;
-  /**
-   * The app's HTTP call, used by `mutate` for the write. Injected rather than imported so this
-   * module stays clear of `remoteApi` and its auth chain.
-   */
-  api?: (request: any) => Promise<any>;
-  /**
-   * Whether a response that did not throw is still a failed write — Moqui can answer an error with
-   * a 200. A flagged response is thrown by `mutate` and nothing is reconciled.
-   */
-  isError?: (response: any) => boolean;
 }
-
-/** One record to refetch: a sync domain name and that record's primary key. */
-export type RefreshTarget = [domain: string, pk: Record<string, unknown>];
-
-/**
- * How `mutate` brings the local db up to date after a write. `refresh` refetches single records
- * (see `refreshAfterMutation`), `resync` re-reads whole domains (see `resyncDomain`); give either or
- * both. `none` skips reconciliation, and must say why, so skipping is a visible decision.
- */
-export type Reconcile =
-  | { refresh: RefreshTarget[]; resync?: string[] }
-  | { refresh?: RefreshTarget[]; resync: string[] }
-  | { none: string };
 
 export interface AppDbSync {
   syncService: () => SyncService | null;
   startAppDbSync: (onSynced?: () => void) => Promise<void>;
   stopAppDbSync: () => Promise<void>;
-  /** Prefer `mutate` for new writes: it reconciles as part of the write, so the refresh can't be forgotten. */
   refreshAfterMutation: (domain: string, pk: Record<string, unknown>) => Promise<number>;
   /**
    * Fetch one record into the local db through its domain's `refetchOne`, for a cache-first lookup
@@ -55,17 +31,7 @@ export interface AppDbSync {
    * Resolves with the rows written; read the record back with `appDb.entity(table).get(...)`.
    */
   refreshRecord: (domain: string, pk: Record<string, unknown>) => Promise<number>;
-  /** Prefer `mutate` with `resync` for new writes; call this directly for a refresh not tied to a write. */
   resyncDomain: (domain: string) => Promise<void>;
-  /**
-   * Send a write through the configured `api`, then reconcile the local db before resolving. The
-   * request is passed to `api` unchanged and its response returned. `reconcile` may be a function
-   * of the response, for a key only the server knows (a created record's id).
-   *
-   * A failed write rejects with the write's own error and reconciles nothing. A write that landed
-   * but did not reconcile rejects with `CacheReconciliationError` — do not retry the write.
-   */
-  mutate: <T = any>(request: any, reconcile: Reconcile | ((response: T) => Reconcile)) => Promise<T>;
   resyncReferenceData: () => Promise<void>;
   bootstrapState: typeof bootstrapState;
   activateSyncDomains: (domains: ActiveDomain[], owner: string) => Promise<void>;
@@ -394,76 +360,6 @@ export function setupAppDbSync(config: AppDbSyncConfig): AppDbSync {
     await service.syncDomainNow(domain);
   }
 
-  /** Throws on targets that would silently reconcile nothing. */
-  function assertReconcile(reconcile: Reconcile): void {
-    if ("none" in reconcile) {
-      if (!reconcile.none?.trim()) {
-        throw new Error("[db] mutate: `none` needs a reason saying why this write leaves the local db alone.");
-      }
-      return;
-    }
-    if (!reconcile.refresh?.length && !reconcile.resync?.length) {
-      throw new Error("[db] mutate: nothing to reconcile. List `refresh` or `resync` targets, or `none` with a reason.");
-    }
-  }
-
-  /** Every target runs, so one failure does not leave the others stale; failures are reported together. */
-  async function reconcileAfter(reconcile: Reconcile): Promise<void> {
-    if ("none" in reconcile) return;
-
-    const refreshes = new Map<string, RefreshTarget>();
-    for (const [domain, pk] of reconcile.refresh ?? []) {
-      refreshes.set(`${domain}:${cacheScopeKey(pk)}`, [domain, pk]);
-    }
-    const resyncs = [...new Set(reconcile.resync ?? [])];
-
-    const work: { domain: string; pk: Record<string, unknown>; run: () => Promise<unknown> }[] = [
-      ...[...refreshes.values()].map(([domain, pk]) => ({ domain, pk, run: () => refreshAfterMutation(domain, pk) })),
-      ...resyncs.map((domain) => ({ domain, pk: {}, run: () => resyncDomain(domain) })),
-    ];
-    const results = await Promise.allSettled(work.map((item) => item.run()));
-
-    const failed = work.flatMap((item, index) => {
-      const result = results[index];
-      return result.status === "rejected" ? [{ ...item, reason: result.reason }] : [];
-    });
-    if (!failed.length) return;
-
-    // refreshAfterMutation already wraps its failure; report the underlying cause, not the wrapper.
-    const causes = failed.map(({ reason }) => isCacheReconciliationError(reason) ? reason.cause ?? reason : reason);
-    throw new CacheReconciliationError(
-      failed[0].domain,
-      failed[0].pk,
-      causes.length === 1 ? causes[0] : new AggregateError(causes, "Several reconciliations failed."),
-      [...new Set(failed.map(({ domain }) => domain))],
-    );
-  }
-
-  async function mutate<T = any>(
-    request: any,
-    reconcile: Reconcile | ((response: T) => Reconcile),
-  ): Promise<T> {
-    if (!config.api) {
-      throw new Error("[db] mutate: no `api` was passed to setupAppDbSync.");
-    }
-    // A static target list is checked before the write, so a mistake sends nothing.
-    if (typeof reconcile !== "function") assertReconcile(reconcile);
-
-    const response: T = await config.api(request);
-    if (config.isError?.(response)) throw response;
-
-    // From here the write has landed: any failure is a reconciliation failure, never a retry.
-    let targets: Reconcile;
-    try {
-      targets = typeof reconcile === "function" ? reconcile(response) : reconcile;
-      assertReconcile(targets);
-    } catch (error) {
-      throw new CacheReconciliationError("unknown", {}, error);
-    }
-    await reconcileAfter(targets);
-    return response;
-  }
-
   /** "Refresh all": every active domain, including the login seed set, not just the screen's. */
   async function resyncReferenceData(): Promise<void> {
     await clearSyncMarkers();
@@ -481,7 +377,6 @@ export function setupAppDbSync(config: AppDbSyncConfig): AppDbSync {
     refreshAfterMutation,
     refreshRecord,
     resyncDomain,
-    mutate,
     resyncReferenceData,
     bootstrapState,
     activateSyncDomains,

@@ -260,7 +260,8 @@ await refreshRecord("facility", { facilityId });                       // missin
 `EntityClient`. Writes project through the entity, so pass the server's record as-is. **Writes belong
 to sync domains**: the domain that fills a table is the only thing that writes it, so the row has one
 shape however it arrived. App code reads with `appDb.entity` / `useLiveEntity`, changes server data
-with `mutate` (§4), and fetches a record it is missing with `refreshRecord` (§4). For live updates
+with `api()` then `refreshAfterMutation` / `resyncDomain` (§4), and fetches a record it is missing with
+`refreshRecord` (§4). For live updates
 outside a component, see §1e.
 
 ### 1e. Manual live subscriptions (rare)
@@ -552,11 +553,6 @@ A domain that isn't registered never runs, with no error. Add a test (for exampl
 Mutations go to the server first, then you reconcile the local row. Never write the server's
 response into the table yourself.
 
-> **New code: use [`mutate`](#mutate-the-write-and-its-reconciliation-in-one-call).** It does the
-> write and the reconciliation in one call and makes the reconcile step required. The APPs are
-> moving to it separately; until an APP's `appDbSync.ts` exports `mutate`, wire it there (see the
-> end of that section). The two-call form below is what existing code uses.
-
 ```ts
 import { refreshAfterMutation } from "@/services/appDbSync";
 
@@ -564,33 +560,15 @@ const response = await api({ url: "oms/widgets", method: "post", data: { widgetI
 // ...check the response however your APP does (for example a local `hasError` helper)
 // and only reconcile once the write is known to have landed:
 await refreshAfterMutation("widget", { widgetId });   // domain name + primary key
+// or, when the write touches more than one record of the domain:
+await resyncDomain("widget");                         // re-reads the whole domain
 ```
+
+Both take **sync domain names**, not table names. List every domain the write touches.
 
 `refreshAfterMutation` throws `CacheReconciliationError` when the server change landed but the local
 refresh didn't. **That is not a failed mutation** — it carries `mutationCommitted = true`, so don't
 retry the write. Show "saved, but refresh to see it" and let the user reload.
-
-### `mutate`: the write and its reconciliation in one call
-
-`mutate(request, reconcile)` sends `request` through the `api` passed to `setupAppDbSync`
-(unchanged) and reconciles before it resolves. The reconcile argument is required, so a write cannot
-forget its refresh:
-
-```ts
-import { mutate } from "@/services/appDbSync";
-
-await mutate({ url: `oms/facilities/${facilityId}`, method: "put", data }, { refresh: [["facility", { facilityId }]] });
-await mutate({ url: "oms/carriers", method: "delete", data }, { refresh: [["carrierShipmentMethod", { partyId }]], resync: ["productStoreShipmentCount"] });
-await mutate({ url: "oms/facilities", method: "post", data }, (response) => ({ refresh: [["facility", { facilityId: response.data.facilityId }]] }));
-await mutate({ url: "oms/jobs/run", method: "post", data }, { none: "fires a one-off job; no local table holds it" });
-```
-
-- Duplicate keys and domains are reconciled once. Every target runs even if one fails.
-- A failed write (thrown, or flagged by the configured `isError`) rejects with the write's own error
-  and reconciles nothing.
-- A landed write that did not reconcile rejects with `CacheReconciliationError`, whose
-  `failedDomains` lists every domain that failed. Don't retry the write.
-- Wire it once per app: `setupAppDbSync({ db, …, api, isError: (resp) => commonUtil.hasError(resp) })`.
 
 Which refetch strategy your domain needs:
 
@@ -841,7 +819,7 @@ Deep imports follow the folder layout of `common/db`:
 **App code uses the two patterns, and the build checks it.** Reads go through `useLiveEntity` and
 `appDb.entity(...)`, with table names from `appDb.tables`; there is no raw handle on an app database.
 Writes belong to the table's sync domain: app code calls `refreshRecord` for a missing record and
-`mutate` for a server change. The rules live in the root `eslint.config.js`, built from core rules: imports
+`api()` then `refreshAfterMutation` / `resyncDomain` for a server change. The rules live in the root `eslint.config.js`, built from core rules: imports
 through `@typescript-eslint/no-restricted-imports`, calls through `no-restricted-syntax`. The root
 file also exports `dbConfig`: the local-database rules plus no `api` / `client` imports in `.vue`
 files, with the parsers they need. The APP's
@@ -858,7 +836,7 @@ An "app db" is any identifier ending in `Db` (`appDb`, `companyDb`, …).
 | `no-restricted-syntax` | `appDb.raw()`; a string-literal table in `appDb.entity("x")`, `useLiveEntity("x")`, `appDb.client().get("x")` or `appDb.client().liveRead(["x"])`, and the same on a client held in a variable named `…Client` (`companyClient.count("x")`); also behind `as any` | all of `src/` |
 | `no-restricted-syntax` | `appDb.get(oms)` | outside `src/db/**` and `src/workers/*.worker.ts` |
 | `no-restricted-syntax` | `appDb.client()`, except as the `useDbStatus` argument | outside `src/db/**` and `src/workers/**` |
-| `no-restricted-syntax` | a write: `upsertMany(...)` / `snapshotReplace(...)` on anything, or `put` / `bulkPut` / `remove` / `bulkRemove` / `clear` called on `appDb.entity(...)`. Use `refreshRecord` or `mutate` (§4) | outside `src/db/**` and `src/workers/**` |
+| `no-restricted-syntax` | a write: `upsertMany(...)` / `snapshotReplace(...)` on anything, or `put` / `bulkPut` / `remove` / `bulkRemove` / `clear` called on `appDb.entity(...)`. Use `refreshRecord`, or `refreshAfterMutation` / `resyncDomain` after a server write (§4) | outside `src/db/**` and `src/workers/**` |
 | `no-restricted-syntax` | `useLiveEntity(...)` | outside `.vue` files, `src/components`, `src/views`, `src/composables` |
 | `no-restricted-syntax` | `.live(...)` / `.liveRead(...)`: use `useLiveEntity` | `.vue` files, `src/components`, `src/views`, `src/composables` |
 | `no-restricted-syntax` | `.live(...)` / `.liveRead(...)` at all | `src/workers/**` |

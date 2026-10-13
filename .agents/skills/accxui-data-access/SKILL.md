@@ -1,6 +1,6 @@
 ---
 name: accxui-data-access
-description: How AccxUI app code reads and writes local app data (IndexedDB). Use whenever you read, list, look up, cache, store, upsert or delete server data in any AccxUI app (apps/company, apps/order-manager or a new one), touch useLiveEntity, companyDb / orderManagerDb, appDb.entity, appDb.tables, useSeedData, mutate, refreshAfterMutation or resyncDomain, a worker sync domain, Dexie, liveQuery or IndexedDB, send a POST / PUT / DELETE that changes server data, or fix a data-access lint error (one ending "See docs/APP_DB_DEVELOPER_GUIDE.md §7").
+description: How AccxUI app code reads and writes local app data (IndexedDB). Use whenever you read, list, look up, cache, store, upsert or delete server data in any AccxUI app (apps/company, apps/order-manager or a new one), touch useLiveEntity, companyDb / orderManagerDb, appDb.entity, appDb.tables, useSeedData, refreshAfterMutation, resyncDomain or refreshRecord, a worker sync domain, Dexie, liveQuery or IndexedDB, send a POST / PUT / DELETE that changes server data, or fix a data-access lint error (one ending "See docs/APP_DB_DEVELOPER_GUIDE.md §7").
 ---
 
 # AccxUI data access
@@ -90,37 +90,24 @@ return (await logs.get(logId)) ?? null;
 
 ## After a server write
 
-**New writes use `mutate`** (from `@/services/appDbSync`): it sends the request through `api()` and
-reconciles the local db before it resolves. The reconcile argument is required, so the refresh
-cannot be forgotten. Never write the server's response into the table yourself.
+Send the write with `api()` from a composable or store, check it landed (the app's `hasError`
+check), then reconcile the local db through the table's sync domain. Never write the server's
+response into the table yourself.
 
 ```ts
-await mutate({ url: `oms/serviceJobs/${jobName}`, method: "put", data }, { refresh: [["serviceJob", { jobName }]] });
-await mutate({ url: "oms/facilityGroups", method: "post", data }, { resync: ["facilityGroup"] });     // whole domain
-await mutate({ url: "oms/facilities", method: "post", data }, (resp) => ({ refresh: [["facility", { facilityId: resp.data.facilityId }]] }));
-await mutate({ url: "oms/jobs/run", method: "post", data }, { none: "fires a job; nothing stored locally" });
+import { refreshAfterMutation, resyncDomain } from "@/services/appDbSync";
+
+const response = await api({ url: `oms/serviceJobs/${jobName}`, method: "put", data });
+if (commonUtil.hasError(response)) throw new Error(getResponseErrorMessage(response, "Failed to save the job."));
+await refreshAfterMutation("serviceJob", { jobName });   // re-reads that one record through the domain
+// or, when the write touches more than one record:
+await resyncDomain("facilityGroup");                     // re-snapshots the whole domain
 ```
 
-- `refresh` and `resync` can be combined; list every domain the write touches.
-- A failed write (thrown, or flagged by the app's `isError`) rejects with its own error and
-  reconciles nothing.
-- **Adoption is in progress.** Existing code still uses `api()` + `refreshAfterMutation` /
-  `resyncDomain`; leave it unless you are migrating it. If your app's `appDbSync.ts` does not export
-  `mutate` yet, wire it there first: pass `api` and `isError: (resp) => commonUtil.hasError(resp)` to
-  `setupAppDbSync` and add `mutate` to the exports. Only fall back to the two-call form below when
-  `mutate` cannot express the write.
-
-The two-call form, for existing code:
-
-```ts
-await refreshAfterMutation("serviceJob", { jobName });   // domain name + primary key
-// or, to re-snapshot a whole domain:
-await resyncDomain("facilityGroup");
-```
-
-These take **sync domain names** (strings), not table names. A `CacheReconciliationError` (from
-either form) means the server write succeeded and only the local refresh failed — warn, don't retry
-the write.
+- These take **sync domain names** (strings), not table names. List every domain the write touches.
+- Reconcile only after the write is known to have landed: a failed write reconciles nothing.
+- A `CacheReconciliationError` means the server write succeeded and only the local refresh failed:
+  warn ("saved, refresh to see it"), don't retry the write.
 
 ## Seed lookups
 
@@ -144,7 +131,7 @@ cache on the same layer, not a separate data path.
 | `activateSyncDomains` without `deactivateSyncDomains` in the file, or in a `.vue` page without `onIonViewDidLeave` | deactivate with the same owner in `onIonViewDidLeave` (not only on unmount) |
 | `deactivateSyncDomains()` with no owner | `deactivateSyncDomains(SYNC_OWNER)` |
 | a string literal table name | `appDb.tables.x` |
-| `upsertMany` / `snapshotReplace` anywhere, or `put` / `bulkPut` / `remove` / `bulkRemove` / `clear` on `appDb.entity(...)`, outside `src/workers/**` and `src/db/**` | `refreshRecord` for a missing record, `mutate` for a server change |
+| `upsertMany` / `snapshotReplace` anywhere, or `put` / `bulkPut` / `remove` / `bulkRemove` / `clear` on `appDb.entity(...)`, outside `src/workers/**` and `src/db/**` | `refreshRecord` for a missing record; `refreshAfterMutation` / `resyncDomain` after a server write |
 
 Exempt: an app-local Dexie store outside the app database, switched off in that app's own
 `eslint.config.js` (Company `src/utils/storage.ts`, Order Manager `src/services/productDb.ts`). The app's

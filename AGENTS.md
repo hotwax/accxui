@@ -12,8 +12,8 @@ sync worker. The build's lint (`dbConfig` in `eslint.config.js`) enforces most o
    `appDb.entity(appDb.tables.x).get / query / all` for an answer now. Nothing else.
 2. **Never write the app db from app code.** Each table's sync domain (`src/workers/**`) is its only
    writer. A record the db is missing: `refreshRecord(domain, pk)`, then read it back. A server
-   change: `mutate(request, { refresh / resync })`, or `api()` + `refreshAfterMutation` /
-   `resyncDomain` where the app has not wired `mutate` yet. Never write a response into a table.
+   change: `api()`, then `refreshAfterMutation(domain, pk)` or `resyncDomain(domain)` once the write
+   has landed. Never write a response into a table.
 3. **No Dexie, `dbClient`, `appDb.raw()` / `.get()` in app code; `appDb.client()` only in workers.**
    Table names always from `appDb.tables`, never a string.
 4. **Worker code (`src/db/**`, `src/workers/**`) uses deep imports only** (`@common/db/schema/*`,
