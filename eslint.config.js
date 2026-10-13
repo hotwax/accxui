@@ -13,8 +13,10 @@ import globals from "globals";
 /**
  * Data access: app code reaches the app database (IndexedDB) only through two patterns,
  *   - rows live on screen:       useLiveEntity(appDb.tables.x, options)  (components, views, composables)
- *   - an answer now, or a write: appDb.entity(appDb.tables.x)            (anywhere)
- * with table names always from `appDb.tables`. An "app db" is any identifier ending in `Db`
+ *   - an answer now:             appDb.entity(appDb.tables.x)            (anywhere)
+ * with table names always from `appDb.tables`. Writes belong to the table's sync domain
+ * (`src/workers/**`): app code fetches a missing record with refreshRecord and changes server data
+ * with mutate. An "app db" is any identifier ending in `Db`
  * (`appDb`, `companyDb`, …); a client held in a variable is any identifier ending in `Client`
  * (`companyClient = companyDb.client()`). See docs/APP_DB_DEVELOPER_GUIDE.md §7.
  *
@@ -119,6 +121,23 @@ const DA_WORKER_NO_LIVE = [{
   message: "No live queries in the sync worker: it writes and renders nothing, and nothing would unsubscribe them. Read once with appDb.entity(appDb.tables.x).get / query / all." + DATA_ACCESS_GUIDE,
 }];
 
+/**
+ * Outside `src/workers/**` and `src/db/**`: a table's sync domain is its only writer, so a row has one
+ * shape however it arrived. `upsertMany` / `snapshotReplace` are app-db names, flagged on any receiver
+ * (an entity held in a variable included); the generic `put` / `bulkPut` / `remove` / `bulkRemove` /
+ * `clear` only when called straight on `appDb.entity(...)`, so an app-local Dexie store keeps them.
+ */
+const DA_NO_WRITE = [
+  {
+    selector: "CallExpression[callee.property.name=/^(upsertMany|snapshotReplace)$/]",
+    message: "App code does not write the app db: the table's sync domain is its only writer. For a record the db is missing, call refreshRecord(domain, pk) and read it back; for a server change, use mutate(request, { refresh / resync })." + DATA_ACCESS_GUIDE,
+  },
+  {
+    selector: `CallExpression[callee.property.name=/^(put|bulkPut|remove|bulkRemove|clear)$/][callee.object.callee.property.name='entity'][callee.object.callee.object.name=${APP_DB}]`,
+    message: "App code does not write the app db: the table's sync domain is its only writer. For a record the db is missing, call refreshRecord(domain, pk) and read it back; for a server change, use mutate(request, { refresh / resync })." + DATA_ACCESS_GUIDE,
+  },
+];
+
 /** Elsewhere a manual subscription is allowed, but its handle must be kept so it can be unsubscribed. */
 const LIVE_SUBSCRIBE = "CallExpression[callee.property.name='subscribe'][callee.object.callee.property.name=/^(live|liveRead)$/]";
 const DA_KEEP_SUBSCRIPTION = [{
@@ -196,24 +215,24 @@ function dataAccessBlocks(folder = { vue: [], composables: [], store: [] }) {
       files: ["**/src/**/*.ts", "**/src/**/*.vue"],
       rules: {
         "@typescript-eslint/no-restricted-imports": DATA_ACCESS_IMPORTS,
-        "no-restricted-syntax": syntax(DA_EVERYWHERE, DA_PAGE_SYNC, DA_NO_GET, DA_NO_CLIENT, DA_NO_LIVE_ENTITY, DA_KEEP_SUBSCRIPTION),
+        "no-restricted-syntax": syntax(DA_EVERYWHERE, DA_PAGE_SYNC, DA_NO_GET, DA_NO_CLIENT, DA_NO_WRITE, DA_NO_LIVE_ENTITY, DA_KEEP_SUBSCRIPTION),
       }
     },
     {
       files: ["**/src/components/**/*.ts", "**/src/views/**/*.ts", "**/src/composables/**/*.ts"],
-      rules: { "no-restricted-syntax": syntax(DA_EVERYWHERE, DA_PAGE_SYNC, DA_NO_GET, DA_NO_CLIENT, DA_SETUP_NO_MANUAL_LIVE) }
+      rules: { "no-restricted-syntax": syntax(DA_EVERYWHERE, DA_PAGE_SYNC, DA_NO_GET, DA_NO_CLIENT, DA_NO_WRITE, DA_SETUP_NO_MANUAL_LIVE) }
     },
     {
       files: ["**/src/**/*.vue"],
-      rules: { "no-restricted-syntax": syntax(folder.vue, DA_EVERYWHERE, DA_PAGE_SYNC, DA_NO_GET, DA_NO_CLIENT, DA_SETUP_NO_MANUAL_LIVE, DA_PAGE_LEAVE) }
+      rules: { "no-restricted-syntax": syntax(folder.vue, DA_EVERYWHERE, DA_PAGE_SYNC, DA_NO_GET, DA_NO_CLIENT, DA_NO_WRITE, DA_SETUP_NO_MANUAL_LIVE, DA_PAGE_LEAVE) }
     },
     {
       files: ["**/src/**/composables/*.ts"],
-      rules: { "no-restricted-syntax": syntax(folder.composables, DA_EVERYWHERE, DA_PAGE_SYNC, DA_NO_GET, DA_NO_CLIENT, DA_SETUP_NO_MANUAL_LIVE) }
+      rules: { "no-restricted-syntax": syntax(folder.composables, DA_EVERYWHERE, DA_PAGE_SYNC, DA_NO_GET, DA_NO_CLIENT, DA_NO_WRITE, DA_SETUP_NO_MANUAL_LIVE) }
     },
     {
       files: ["**/src/store/*.ts"],
-      rules: { "no-restricted-syntax": syntax(folder.store, DA_EVERYWHERE, DA_PAGE_SYNC, DA_NO_GET, DA_NO_CLIENT, DA_NO_LIVE_ENTITY, DA_KEEP_SUBSCRIPTION) }
+      rules: { "no-restricted-syntax": syntax(folder.store, DA_EVERYWHERE, DA_PAGE_SYNC, DA_NO_GET, DA_NO_CLIENT, DA_NO_WRITE, DA_NO_LIVE_ENTITY, DA_KEEP_SUBSCRIPTION) }
     },
     {
       files: ["**/src/db/**/*.ts"],

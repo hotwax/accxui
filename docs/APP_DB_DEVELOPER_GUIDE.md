@@ -838,9 +838,10 @@ Deep imports follow the folder layout of `common/db`:
 | `@common/db/sync/*` | `defineSyncDomain`, `defineSnapshotDomain`, `defineCursorDomain`, `syncRegistry`, `pollingWorkerHarness` | yes, except `syncService` and `setupAppDbSync` |
 | `@common/db/composables/*` | `useLiveEntity`, `useSeedData`, `useDbStatus` | **no** — main thread only; import them from the barrel |
 
-**App code uses the two patterns, and the build checks it.** Reads and writes go through
-`useLiveEntity` and `appDb.entity(...)`, with table names from `appDb.tables`; there is no raw handle
-on an app database. The rules live in the root `eslint.config.js`, built from core rules: imports
+**App code uses the two patterns, and the build checks it.** Reads go through `useLiveEntity` and
+`appDb.entity(...)`, with table names from `appDb.tables`; there is no raw handle on an app database.
+Writes belong to the table's sync domain: app code calls `refreshRecord` for a missing record and
+`mutate` for a server change. The rules live in the root `eslint.config.js`, built from core rules: imports
 through `@typescript-eslint/no-restricted-imports`, calls through `no-restricted-syntax`. The root
 file also exports `dbConfig`: the local-database rules plus no `api` / `client` imports in `.vue`
 files, with the parsers they need. The APP's
@@ -857,6 +858,7 @@ An "app db" is any identifier ending in `Db` (`appDb`, `companyDb`, …).
 | `no-restricted-syntax` | `appDb.raw()`; a string-literal table in `appDb.entity("x")`, `useLiveEntity("x")`, `appDb.client().get("x")` or `appDb.client().liveRead(["x"])`, and the same on a client held in a variable named `…Client` (`companyClient.count("x")`); also behind `as any` | all of `src/` |
 | `no-restricted-syntax` | `appDb.get(oms)` | outside `src/db/**` and `src/workers/*.worker.ts` |
 | `no-restricted-syntax` | `appDb.client()`, except as the `useDbStatus` argument | outside `src/db/**` and `src/workers/**` |
+| `no-restricted-syntax` | a write: `upsertMany(...)` / `snapshotReplace(...)` on anything, or `put` / `bulkPut` / `remove` / `bulkRemove` / `clear` called on `appDb.entity(...)`. Use `refreshRecord` or `mutate` (§4) | outside `src/db/**` and `src/workers/**` |
 | `no-restricted-syntax` | `useLiveEntity(...)` | outside `.vue` files, `src/components`, `src/views`, `src/composables` |
 | `no-restricted-syntax` | `.live(...)` / `.liveRead(...)`: use `useLiveEntity` | `.vue` files, `src/components`, `src/views`, `src/composables` |
 | `no-restricted-syntax` | `.live(...)` / `.liveRead(...)` at all | `src/workers/**` |
