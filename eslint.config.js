@@ -126,6 +126,33 @@ const DA_KEEP_SUBSCRIPTION = [{
   message: "Keep the subscription: const sub = appDb.entity(appDb.tables.x).live(options).subscribe(…), then sub.unsubscribe() in the same teardown that runs on logout (as useSeedData does in clearSeedTables). A discarded subscription can never be unsubscribed." + DATA_ACCESS_GUIDE,
 }];
 
+/** Page-level sync: an activation is always retired, and only by its own owner. */
+const DA_PAGE_SYNC = [
+  {
+    selector: "Program:not(:has(CallExpression[callee.name='deactivateSyncDomains'])) CallExpression[callee.name='activateSyncDomains']",
+    message: "activateSyncDomains without a matching deactivateSyncDomains(owner) in this file keeps the worker polling after the page is left. Deactivate with the same owner on leave (onIonViewDidLeave)." + DATA_ACCESS_GUIDE,
+  },
+  {
+    selector: "CallExpression[callee.name='deactivateSyncDomains'][arguments.length=0]",
+    message: "Pass the owner: deactivateSyncDomains(SYNC_OWNER). Without it the call clears whatever page now holds the worker, including the one being entered." + DATA_ACCESS_GUIDE,
+  },
+];
+
+/** A page (.vue) that activates domains retires them when Ionic leaves it. */
+const DA_PAGE_LEAVE = [{
+  selector: "Program:not(:has(CallExpression[callee.name='onIonViewDidLeave'])) CallExpression[callee.name='activateSyncDomains']",
+  message: "This page activates sync domains but has no onIonViewDidLeave. Call deactivateSyncDomains(SYNC_OWNER) there (directly or through the composable's deactivate()), or the domains keep polling after the page is left." + DATA_ACCESS_GUIDE,
+}];
+
+/** No API calls in .vue files: they belong in composables and stores. Shared by the full config and dbConfig. */
+const VUE_NO_API_IMPORTS = ["error", {
+  "paths": [{
+    "name": "@common",
+    "importNames": ["api", "client"],
+    "message": "Direct import of 'api' or 'client' is not allowed in vue files. Please use services or composables instead."
+  }]
+}];
+
 /** The existing per-folder selectors, shared with the data-access blocks that restate them. */
 const VUE_NO_API_SYNTAX = [
   {
@@ -169,44 +196,44 @@ function dataAccessBlocks(folder = { vue: [], composables: [], store: [] }) {
       files: ["**/src/**/*.ts", "**/src/**/*.vue"],
       rules: {
         "@typescript-eslint/no-restricted-imports": DATA_ACCESS_IMPORTS,
-        "no-restricted-syntax": syntax(DA_EVERYWHERE, DA_NO_GET, DA_NO_CLIENT, DA_NO_LIVE_ENTITY, DA_KEEP_SUBSCRIPTION),
+        "no-restricted-syntax": syntax(DA_EVERYWHERE, DA_PAGE_SYNC, DA_NO_GET, DA_NO_CLIENT, DA_NO_LIVE_ENTITY, DA_KEEP_SUBSCRIPTION),
       }
     },
     {
       files: ["**/src/components/**/*.ts", "**/src/views/**/*.ts", "**/src/composables/**/*.ts"],
-      rules: { "no-restricted-syntax": syntax(DA_EVERYWHERE, DA_NO_GET, DA_NO_CLIENT, DA_SETUP_NO_MANUAL_LIVE) }
+      rules: { "no-restricted-syntax": syntax(DA_EVERYWHERE, DA_PAGE_SYNC, DA_NO_GET, DA_NO_CLIENT, DA_SETUP_NO_MANUAL_LIVE) }
     },
     {
       files: ["**/src/**/*.vue"],
-      rules: { "no-restricted-syntax": syntax(folder.vue, DA_EVERYWHERE, DA_NO_GET, DA_NO_CLIENT, DA_SETUP_NO_MANUAL_LIVE) }
+      rules: { "no-restricted-syntax": syntax(folder.vue, DA_EVERYWHERE, DA_PAGE_SYNC, DA_NO_GET, DA_NO_CLIENT, DA_SETUP_NO_MANUAL_LIVE, DA_PAGE_LEAVE) }
     },
     {
       files: ["**/src/**/composables/*.ts"],
-      rules: { "no-restricted-syntax": syntax(folder.composables, DA_EVERYWHERE, DA_NO_GET, DA_NO_CLIENT, DA_SETUP_NO_MANUAL_LIVE) }
+      rules: { "no-restricted-syntax": syntax(folder.composables, DA_EVERYWHERE, DA_PAGE_SYNC, DA_NO_GET, DA_NO_CLIENT, DA_SETUP_NO_MANUAL_LIVE) }
     },
     {
       files: ["**/src/store/*.ts"],
-      rules: { "no-restricted-syntax": syntax(folder.store, DA_EVERYWHERE, DA_NO_GET, DA_NO_CLIENT, DA_NO_LIVE_ENTITY, DA_KEEP_SUBSCRIPTION) }
+      rules: { "no-restricted-syntax": syntax(folder.store, DA_EVERYWHERE, DA_PAGE_SYNC, DA_NO_GET, DA_NO_CLIENT, DA_NO_LIVE_ENTITY, DA_KEEP_SUBSCRIPTION) }
     },
     {
       files: ["**/src/db/**/*.ts"],
-      rules: { "no-restricted-syntax": syntax(DA_EVERYWHERE, DA_NO_LIVE_ENTITY, DA_KEEP_SUBSCRIPTION) }
+      rules: { "no-restricted-syntax": syntax(DA_EVERYWHERE, DA_PAGE_SYNC, DA_NO_LIVE_ENTITY, DA_KEEP_SUBSCRIPTION) }
     },
     {
       files: ["**/src/workers/**/*.ts"],
-      rules: { "no-restricted-syntax": syntax(DA_EVERYWHERE, DA_NO_GET, DA_NO_LIVE_ENTITY, DA_WORKER_NO_LIVE) }
+      rules: { "no-restricted-syntax": syntax(DA_EVERYWHERE, DA_PAGE_SYNC, DA_NO_GET, DA_NO_LIVE_ENTITY, DA_WORKER_NO_LIVE) }
     },
     {
       files: ["**/src/workers/*.worker.ts"],
-      rules: { "no-restricted-syntax": syntax(DA_EVERYWHERE, DA_NO_LIVE_ENTITY, DA_WORKER_NO_LIVE) }
+      rules: { "no-restricted-syntax": syntax(DA_EVERYWHERE, DA_PAGE_SYNC, DA_NO_LIVE_ENTITY, DA_WORKER_NO_LIVE) }
     },
   ];
 }
 
 /**
- * The local-database (IndexedDB) rules, with just the parsers they need: what an app lints with and
- * gates its build on (`eslint src && vite build`) — `import { dbConfig } from "../../eslint.config.js"`.
- * Add further DB rules here. The full default export below includes them too.
+ * The rules an app lints with and gates its build on (`eslint src && vite build`), with just the
+ * parsers they need — `import { dbConfig } from "../../eslint.config.js"`: the local-database
+ * (IndexedDB) rules, plus no API calls in .vue files. The full default export below includes them too.
  */
 export const dbConfig = [
   {
@@ -230,6 +257,12 @@ export const dbConfig = [
     linterOptions: { reportUnusedDisableDirectives: "off" },
   },
   ...dataAccessBlocks(),
+  {
+    // No API calls in pages: `api` / `client` come from composables and stores, not a .vue file. Its own
+    // rule (not no-restricted-syntax), so an app still moving its calls can switch it off alone.
+    files: ["**/src/**/*.vue"],
+    rules: { "no-restricted-imports": VUE_NO_API_IMPORTS },
+  },
 ];
 
 const localesCache = new Map();
@@ -448,13 +481,7 @@ export default [
   {
     files: ["**/*.vue"],
     rules: {
-      "no-restricted-imports": ["error", {
-        "paths": [{
-          "name": "@common",
-          "importNames": ["api", "client"],
-          "message": "Direct import of 'api' or 'client' is not allowed in vue files. Please use services or composables instead."
-        }]
-      }],
+      "no-restricted-imports": VUE_NO_API_IMPORTS,
       "no-restricted-syntax": syntax(VUE_NO_API_SYNTAX)
     }
   },

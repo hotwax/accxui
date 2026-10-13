@@ -126,7 +126,7 @@ const some = await facilities.query({ equals: { facilityTypeId } });
 
 The root `eslint.config.js` rejects any other path in APP code, using core ESLint rules
 (`no-restricted-syntax`, `@typescript-eslint/no-restricted-imports`). The APP's
-`eslint.config.js` spreads the exported `dbConfig` (these DB rules only), and the APP's build
+`eslint.config.js` spreads the exported `dbConfig` (these DB rules, plus no API imports in `.vue` files), and the APP's build
 runs it before `vite build` (`eslint src && vite build`), so a violation fails the build:
 
 | Not allowed | Use instead |
@@ -138,6 +138,8 @@ runs it before `vite build` (`eslint src && vite build`), so a violation fails t
 | `.live()` / `.liveRead()` in setup code | `useLiveEntity`, which owns the subscription |
 | `.live()` / `.liveRead()` in the sync worker | a one-shot `appDb.entity(...)` read |
 | a `.live(...).subscribe(...)` whose result is discarded | keep it and `unsubscribe()` it on logout teardown |
+| `activateSyncDomains` with no `deactivateSyncDomains` in the file, or in a page with no `onIonViewDidLeave` | deactivate with the same owner on leave |
+| `deactivateSyncDomains()` with no owner | `deactivateSyncDomains(SYNC_OWNER)` |
 | `appDb.get(oms)` outside `src/db/**` and the worker entry | `appDb.entity(...)` |
 | `appDb.client()` outside `src/workers/**` and `useDbStatus(...)` | `appDb.entity(...)` |
 

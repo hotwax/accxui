@@ -98,11 +98,14 @@ cache on the same layer, not a separate data path.
 | `.live()` / `.liveRead()` in `.vue`, components, views, composables | `useLiveEntity` (it owns the subscription) |
 | `.live()` / `.liveRead()` in `src/workers/**` | a one-shot `appDb.entity(...).get / query / all` |
 | `x.live(...).subscribe(...);` with the result discarded | keep it; `unsubscribe()` it in the logout teardown |
+| `activateSyncDomains` without `deactivateSyncDomains` in the file, or in a `.vue` page without `onIonViewDidLeave` | deactivate with the same owner in `onIonViewDidLeave` (not only on unmount) |
+| `deactivateSyncDomains()` with no owner | `deactivateSyncDomains(SYNC_OWNER)` |
 | a string literal table name | `appDb.tables.x` |
 
 Exempt: an app-local Dexie store outside the app database, switched off in that app's own
 `eslint.config.js` (Company `src/utils/storage.ts`, Order Manager `src/services/productDb.ts`). The app's
-config spreads `dbConfig` from the root `eslint.config.js`: the local-database rules only.
+config spreads `dbConfig` from the root `eslint.config.js`: the local-database rules, plus no
+`api` / `client` imports from `@common` in `.vue` files.
 
 ## Adding a table
 
@@ -117,4 +120,4 @@ pnpm lint                      # from the app directory; the build (`eslint src 
 ```
 
 Reference: `docs/APP_DB_DEVELOPER_GUIDE.md` (§1 patterns, §7 rules); the rules themselves are in
-the root `eslint.config.js` (the `DA_*` selector lists), tested by `common/tests/dataAccessLint.spec.ts`.
+the root `eslint.config.js` (the `DA_*` selector lists).

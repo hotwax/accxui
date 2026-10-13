@@ -518,8 +518,15 @@ ignore the call, instead of wiping the domains the new view just switched on. Fo
   guard when two routes reuse one component;
 - pass the **same** owner to every `activateSyncDomains` and `deactivateSyncDomains` call on that
   screen;
-- always deactivate in `onIonViewDidLeave`. There is no `onUnmounted` fallback, so a view that
-  forgets leaves its domains polling.
+- always deactivate in `onIonViewDidLeave`, not only in `onUnmounted` / `onBeforeUnmount`: Ionic
+  keeps a page mounted when the user navigates on from it, so an unmount-only teardown leaves its
+  domains polling behind a hidden page;
+- don't re-activate from a `watch` while the page is hidden: gate it on a flag set in `willEnter` and
+  cleared in `didLeave`, or the hidden page takes the worker back from the one on screen.
+
+Lint checks the wiring it can see: a file that activates must also deactivate, a page (`.vue`) that
+activates must register `onIonViewDidLeave`, and `deactivateSyncDomains()` always takes the owner
+(§7). A composable that activates exposes a `deactivate()`, and the page calls it on leave.
 
 **What the screen can read back:**
 
@@ -677,7 +684,8 @@ Deep imports follow the folder layout of `common/db`:
 `useLiveEntity` and `appDb.entity(...)`, with table names from `appDb.tables`; there is no raw handle
 on an app database. The rules live in the root `eslint.config.js`, built from core rules: imports
 through `@typescript-eslint/no-restricted-imports`, calls through `no-restricted-syntax`. The root
-file also exports `dbConfig`: only the local-database rules, with the parsers they need. The APP's
+file also exports `dbConfig`: the local-database rules plus no `api` / `client` imports in `.vue`
+files, with the parsers they need. The APP's
 `eslint.config.js` spreads `dbConfig`, and its build runs that lint first
 (`"build": "eslint src && vite build"`), so a data-access violation fails `pnpm --filter <app> build`.
 Editors show the same errors as you type. Every data-access message ends with "See
@@ -695,14 +703,23 @@ An "app db" is any identifier ending in `Db` (`appDb`, `companyDb`, …).
 | `no-restricted-syntax` | `.live(...)` / `.liveRead(...)`: use `useLiveEntity` | `.vue` files, `src/components`, `src/views`, `src/composables` |
 | `no-restricted-syntax` | `.live(...)` / `.liveRead(...)` at all | `src/workers/**` |
 | `no-restricted-syntax` | a discarded subscription: `x.live(...).subscribe(...);` as a bare statement, or `void …subscribe(...)` | everywhere else (§1e) |
+| `no-restricted-syntax` | `activateSyncDomains(...)` in a file with no `deactivateSyncDomains(...)` | all of `src/` (§5) |
+| `no-restricted-syntax` | `deactivateSyncDomains()` with no owner | all of `src/` (§5) |
+| `no-restricted-syntax` | `activateSyncDomains(...)` in a page with no `onIonViewDidLeave` | `.vue` files (§5) |
+| `no-restricted-imports` | `import { api, client } from "@common"`: API calls belong in composables and stores | `.vue` files |
+
+The `.vue` API rule is a separate rule from the DB selectors, so an APP still moving its page-level
+API calls can switch it off alone in its own `eslint.config.js` (`"no-restricted-imports": "off"` for
+`src/**/*.vue`) until they are moved.
 
 Type-only imports are fine. There is no autofix: write `appDb.tables.x` by hand.
 
 `no-restricted-syntax` is one rule, and flat config replaces its options per file instead of merging
 them. So the root config composes the selector lists: each data-access block restates the
 folder's other selectors (no `api()` in `.vue`, `use*` composable and store names). Add a new
-data-access selector to the `DA_*` lists at the top of `eslint.config.js`, and a case to
-`common/tests/dataAccessLint.spec.ts`, which runs both the full config and `dbConfig`.
+data-access selector to the `DA_*` lists at the top of `eslint.config.js`, and check it by linting a
+sample file from an app folder (`eslint --stdin --stdin-filename src/views/X.vue`). Lint rules have
+no committed spec.
 
 The APP's config, including the exemption for an APP-local Dexie store kept outside the app
 database (for example a product cache):
