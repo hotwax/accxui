@@ -125,8 +125,9 @@ const some = await facilities.query({ equals: { facilityTypeId } });
 ### 2.2 Enforced by lint
 
 The root `eslint.config.js` rejects any other path in APP code, using core ESLint rules
-(`no-restricted-syntax`, `@typescript-eslint/no-restricted-imports`). The APP's own
-`eslint.config.js` spreads the root config, so editors and `pnpm lint` show the errors:
+(`no-restricted-syntax`, `@typescript-eslint/no-restricted-imports`). The APP's
+`eslint.config.js` spreads the exported `dbConfig` (these DB rules only), and the APP's build
+runs it before `vite build` (`eslint src && vite build`), so a violation fails the build:
 
 | Not allowed | Use instead |
 |---|---|

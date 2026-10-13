@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { ESLint } from "eslint";
 import path from "path";
+// @ts-expect-error -- plain JS config module
+import { dbConfig } from "../../eslint.config.js";
 
 /**
  * The data-access rules in the root `eslint.config.js`: app code reaches the app database only
@@ -90,6 +92,20 @@ describe("data-access lint rules", () => {
 
   it("reports each low-level name imported from @common", async () => {
     expect(await dataAccessErrors(COMPOSABLE, 'import { dbClient, getAppDb } from "@common";')).toHaveLength(2);
+  });
+
+  it("dbConfig alone (what the apps lint with) reports the same violations and nothing else", async () => {
+    const appOnly = new ESLint({ cwd: ROOT, overrideConfigFile: true, overrideConfig: dbConfig });
+    for (const [file, code] of invalid) {
+      const source = file.endsWith(".vue") ? `<script setup lang="ts">\n${code}\n</script>\n` : code;
+      const [result] = await appOnly.lintText(source, { filePath: path.join(ROOT, file) });
+      expect(result.messages.map((message) => message.message)).toHaveLength(1);
+      expect(result.messages[0].message).toContain("APP_DB_DEVELOPER_GUIDE");
+    }
+    const [clean] = await appOnly.lintText('export const orderStore = defineStore("order", {});\napi({ url: "x" });', {
+      filePath: path.join(ROOT, STORE),
+    });
+    expect(clean.messages).toEqual([]);
   });
 
   it("keeps the existing per-folder rules on files the data-access blocks also cover", async () => {

@@ -641,13 +641,15 @@ Deep imports follow the folder layout of `common/db`:
 | `@common/db/sync/*` | `defineSyncDomain`, `defineSnapshotDomain`, `defineCursorDomain`, `syncRegistry`, `pollingWorkerHarness` | yes, except `syncService` and `setupAppDbSync` |
 | `@common/db/composables/*` | `useLiveEntity`, `useSeedData`, `useDbStatus` | **no** — main thread only; import them from the barrel |
 
-**App code uses the two patterns, and lint checks it.** Reads and writes go through
+**App code uses the two patterns, and the build checks it.** Reads and writes go through
 `useLiveEntity` and `appDb.entity(...)`, with table names from `appDb.tables`; there is no raw handle
 on an app database. The rules live in the root `eslint.config.js`, built from core rules: imports
-through `@typescript-eslint/no-restricted-imports`, calls through `no-restricted-syntax`. The APP's
-`eslint.config.js` spreads the root config, so editors show the errors as you type and `pnpm lint`
-lists them. Every data-access message ends with "See docs/APP_DB_DEVELOPER_GUIDE.md §7". The build
-does not run lint.
+through `@typescript-eslint/no-restricted-imports`, calls through `no-restricted-syntax`. The root
+file also exports `dbConfig`: only the local-database rules, with the parsers they need. The APP's
+`eslint.config.js` spreads `dbConfig`, and its build runs that lint first
+(`"build": "eslint src && vite build"`), so a data-access violation fails `pnpm --filter <app> build`.
+Editors show the same errors as you type. Every data-access message ends with "See
+docs/APP_DB_DEVELOPER_GUIDE.md §7".
 
 An "app db" is any identifier ending in `Db` (`appDb`, `companyDb`, …).
 
@@ -665,17 +667,17 @@ Type-only imports are fine. There is no autofix: write `appDb.tables.x` by hand.
 them. So the root config composes the selector lists: each data-access block restates the
 folder's other selectors (no `api()` in `.vue`, `use*` composable and store names). Add a new
 data-access selector to the `DA_*` lists at the top of `eslint.config.js`, and a case to
-`common/tests/dataAccessLint.spec.ts`, which runs the real config.
+`common/tests/dataAccessLint.spec.ts`, which runs both the full config and `dbConfig`.
 
-An APP-local Dexie store kept outside the app database (for example a product cache) is exempted in
-the APP's own `eslint.config.js`:
+The APP's config, including the exemption for an APP-local Dexie store kept outside the app
+database (for example a product cache):
 
 ```js
 // apps/<app>/eslint.config.js
-import accxuiConfig from "../../eslint.config.js"
+import { dbConfig } from "../../eslint.config.js"
 
 export default [
-  ...accxuiConfig,
+  ...dbConfig,
   {
     files: ["src/services/productDb.ts"],   // the APP's own Dexie store
     rules: { "@typescript-eslint/no-restricted-imports": "off", "no-restricted-syntax": "off" }
@@ -761,6 +763,7 @@ apps/<app>/
 │   ├── App.vue                          starts the sync when isAuthenticated turns true
 │   ├── store/user.ts                    postLogin / postLogout → stopAppDbSync / startAppDbSync
 │   └── views/Settings.vue               the status card (useDbStatus)
+├── eslint.config.js                     ...dbConfig from the root; the build lints first
 └── tests/db/
     ├── domainTables.spec.ts             every registered domain's table exists in appDb
     └── appSchema.spec.ts                optional: entity keys, indexes, projections
@@ -840,4 +843,4 @@ default `intervalMs` values. Imported by domains and by pages that build their a
 Pages, composables and stores never add files to this structure. They use the two patterns:
 `useLiveEntity(appDb.tables.x, ...)` and `appDb.entity(appDb.tables.x)`, plus `useSeedData` /
 `seedData`, `refreshAfterMutation` and the page-activation functions from `services/appDbSync.ts`.
-The root lint rules check it (§7).
+The APP's build lints it first (§7).

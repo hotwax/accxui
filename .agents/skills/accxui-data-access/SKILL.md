@@ -97,7 +97,8 @@ cache on the same layer, not a separate data path.
 | a string literal table name | `appDb.tables.x` |
 
 Exempt: an app-local Dexie store outside the app database, switched off in that app's own
-`eslint.config.js` (Company `src/utils/storage.ts`, Order Manager `src/services/productDb.ts`).
+`eslint.config.js` (Company `src/utils/storage.ts`, Order Manager `src/services/productDb.ts`). The app's
+config spreads `dbConfig` from the root `eslint.config.js`: the local-database rules only.
 
 ## Adding a table
 
@@ -108,7 +109,7 @@ query it, **bump `version`** in the app db module, and give it a sync domain. It
 ## Check your work
 
 ```bash
-pnpm lint 2>&1 | grep "APP_DB_DEVELOPER_GUIDE"   # from the app directory: data-access errors only
+pnpm lint                      # from the app directory; the build (`eslint src && vite build`) runs it first
 ```
 
 Reference: `docs/APP_DB_DEVELOPER_GUIDE.md` (§1 patterns, §7 rules); the rules themselves are in

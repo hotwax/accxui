@@ -126,6 +126,82 @@ const STORE_NAME_SYNTAX = [
 
 const syntax = (...lists) => ["error", ...lists.flat()];
 
+/**
+ * The data-access blocks. App source is `src/**` of the app being linted, so the patterns hold
+ * whether ESLint runs from the repo root or from an app. Later blocks win for `no-restricted-syntax`,
+ * so the general block comes first and each narrower folder restates the full list it needs —
+ * including `folder`, the per-folder selectors the full config already has there (no `api()` in
+ * `.vue`, `use*` composable and store names), which this block would otherwise override.
+ */
+function dataAccessBlocks(folder = { vue: [], composables: [], store: [] }) {
+  return [
+    {
+      files: ["**/src/**/*.ts", "**/src/**/*.vue"],
+      rules: {
+        "@typescript-eslint/no-restricted-imports": DATA_ACCESS_IMPORTS,
+        "no-restricted-syntax": syntax(DA_EVERYWHERE, DA_NO_GET, DA_NO_CLIENT, DA_NO_LIVE_ENTITY),
+      }
+    },
+    {
+      files: ["**/src/components/**/*.ts", "**/src/views/**/*.ts", "**/src/composables/**/*.ts"],
+      rules: { "no-restricted-syntax": syntax(DA_EVERYWHERE, DA_NO_GET, DA_NO_CLIENT) }
+    },
+    {
+      files: ["**/src/**/*.vue"],
+      rules: { "no-restricted-syntax": syntax(folder.vue, DA_EVERYWHERE, DA_NO_GET, DA_NO_CLIENT) }
+    },
+    {
+      files: ["**/src/**/composables/*.ts"],
+      rules: { "no-restricted-syntax": syntax(folder.composables, DA_EVERYWHERE, DA_NO_GET, DA_NO_CLIENT) }
+    },
+    {
+      files: ["**/src/store/*.ts"],
+      rules: { "no-restricted-syntax": syntax(folder.store, DA_EVERYWHERE, DA_NO_GET, DA_NO_CLIENT, DA_NO_LIVE_ENTITY) }
+    },
+    {
+      files: ["**/src/db/**/*.ts"],
+      rules: { "no-restricted-syntax": syntax(DA_EVERYWHERE, DA_NO_LIVE_ENTITY) }
+    },
+    {
+      files: ["**/src/workers/**/*.ts"],
+      rules: { "no-restricted-syntax": syntax(DA_EVERYWHERE, DA_NO_GET, DA_NO_LIVE_ENTITY) }
+    },
+    {
+      files: ["**/src/workers/*.worker.ts"],
+      rules: { "no-restricted-syntax": syntax(DA_EVERYWHERE, DA_NO_LIVE_ENTITY) }
+    },
+  ];
+}
+
+/**
+ * The local-database (IndexedDB) rules, with just the parsers they need: what an app lints with and
+ * gates its build on (`eslint src && vite build`) — `import { dbConfig } from "../../eslint.config.js"`.
+ * Add further DB rules here. The full default export below includes them too.
+ */
+export const dbConfig = [
+  {
+    ignores: ["**/node_modules/**", "**/dist/**", "**/dev-dist/**", "**/platforms/**", "**/build/**"]
+  },
+  {
+    files: ["**/src/**/*.ts", "**/src/**/*.vue"],
+    languageOptions: {
+      ecmaVersion: "latest",
+      sourceType: "module",
+      parser: vueParser,
+      parserOptions: {
+        parser: typescriptParser,
+        ecmaVersion: "latest",
+        sourceType: "module",
+        extraFileExtensions: [".vue"],
+      },
+    },
+    plugins: { "@typescript-eslint": typescriptEslint },
+    // eslint-disable comments for rules this config does not load are not this config's concern.
+    linterOptions: { reportUnusedDisableDirectives: "off" },
+  },
+  ...dataAccessBlocks(),
+];
+
 const localesCache = new Map();
 
 function getEnKeys(filePath) {
@@ -364,46 +440,5 @@ export default [
       "no-restricted-syntax": syntax(STORE_NAME_SYNTAX)
     }
   },
-  /**
-   * Data access (see the constants at the top). App source is `src/**` of the app being linted, so
-   * the patterns hold whether ESLint runs from the repo root or from an app that spreads this config.
-   * Later blocks win for `no-restricted-syntax`, so the general block comes first and each narrower
-   * folder restates the full list it needs. An app exempts its own non-app-db Dexie store in its
-   * eslint.config.js.
-   */
-  {
-    files: ["**/src/**/*.ts", "**/src/**/*.vue"],
-    rules: {
-      "@typescript-eslint/no-restricted-imports": DATA_ACCESS_IMPORTS,
-      "no-restricted-syntax": syntax(DA_EVERYWHERE, DA_NO_GET, DA_NO_CLIENT, DA_NO_LIVE_ENTITY),
-    }
-  },
-  {
-    files: ["**/src/components/**/*.ts", "**/src/views/**/*.ts", "**/src/composables/**/*.ts"],
-    rules: { "no-restricted-syntax": syntax(DA_EVERYWHERE, DA_NO_GET, DA_NO_CLIENT) }
-  },
-  {
-    files: ["**/src/**/*.vue"],
-    rules: { "no-restricted-syntax": syntax(VUE_NO_API_SYNTAX, DA_EVERYWHERE, DA_NO_GET, DA_NO_CLIENT) }
-  },
-  {
-    files: ["**/src/**/composables/*.ts"],
-    rules: { "no-restricted-syntax": syntax(COMPOSABLE_NAME_SYNTAX, DA_EVERYWHERE, DA_NO_GET, DA_NO_CLIENT) }
-  },
-  {
-    files: ["**/src/store/*.ts"],
-    rules: { "no-restricted-syntax": syntax(STORE_NAME_SYNTAX, DA_EVERYWHERE, DA_NO_GET, DA_NO_CLIENT, DA_NO_LIVE_ENTITY) }
-  },
-  {
-    files: ["**/src/db/**/*.ts"],
-    rules: { "no-restricted-syntax": syntax(DA_EVERYWHERE, DA_NO_LIVE_ENTITY) }
-  },
-  {
-    files: ["**/src/workers/**/*.ts"],
-    rules: { "no-restricted-syntax": syntax(DA_EVERYWHERE, DA_NO_GET, DA_NO_LIVE_ENTITY) }
-  },
-  {
-    files: ["**/src/workers/*.worker.ts"],
-    rules: { "no-restricted-syntax": syntax(DA_EVERYWHERE, DA_NO_LIVE_ENTITY) }
-  }
+  ...dataAccessBlocks({ vue: VUE_NO_API_SYNTAX, composables: COMPOSABLE_NAME_SYNTAX, store: STORE_NAME_SYNTAX })
 ];
