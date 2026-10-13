@@ -94,6 +94,12 @@ export function useAuth() {
     let expiresAt = expirationTime
     try {
       if(!omsToken && username && password) {
+        const loginBaseURL = isMoquiOmsRef.value ? commonUtil.getMaargURL() : commonUtil.getOmsURL(false)
+        // No verified instance to sign in to, e.g. the entered OMS never answered checkLoginOptions.
+        if(!loginBaseURL) {
+          commonUtil.showToast(translate("Unable to reach the OMS. Check the OMS name and try again."));
+          return Promise.reject(new Error("OMS is not verified"));
+        }
         const resp = await api({
           url: isMoquiOmsRef.value ? "admin/login" : "login",
           method: "post",
@@ -104,7 +110,7 @@ export function useAuth() {
             "USERNAME": username,
             "PASSWORD": password
           },
-          baseURL: isMoquiOmsRef.value ? commonUtil.getMaargURL() : commonUtil.getOmsURL(false)
+          baseURL: loginBaseURL
         });
 
         if(commonUtil.hasError(resp)) {
@@ -234,8 +240,12 @@ export function useAuth() {
     emitter.emit("dismissLoader");
   }
 
+  // Resolves true only when the entered OMS answered checkLoginOptions. The maarg cookie is
+  // cleared first: it belongs to whichever OMS was verified last, and keeping it after a
+  // failed check would send the next login to that other instance.
   const fetchLoginOptions = async () => {
     loginOption.value = {}
+    cookieHelper().remove("maarg")
     try {
       let resp;
       let isMoquiOms = commonUtil.isMoqui();
@@ -285,10 +295,12 @@ export function useAuth() {
             : omsVal
           cookieHelper().set("maarg", maargVal, getDuration())
         }
+        return true
       }
     } catch (error) {
       logger.error(error)
     }
+    return false
   };
 
   // Enforce the canonical URL for the resolved appVersion (accxuiConfig, so it's app-agnostic): redirect
