@@ -19,8 +19,8 @@ import {
   markSyncedThisLogin,
 } from "./baseDb";
 import type { DbKey, QueryOptions } from "../types";
-import type { Entity } from "../schema/defineEntity";
-import { diffStaleKeys, entityKeyOf, newestValue, projectRows } from "./projection";
+import { listIndexField, type Entity } from "../schema/defineEntity";
+import { diffStaleKeys, entityKeyOf, newestValue, projectRows, valuesAtPath } from "./projection";
 
 function keysOfRows(rows: Array<Record<string, unknown>>, entity: Entity): DbKey[] {
   const keys: DbKey[] = [];
@@ -218,6 +218,26 @@ function hasIndex(tableRef: Table<any, DbKey>, path: string): boolean {
   return (schema.indexes ?? []).some((index: any) => normalizeIndexName(index?.name ?? "") === path);
 }
 
+/**
+ * The index that answers an equality on `field`: the field's own index, or — for a dotted path
+ * into a list — the multi-value index on its hidden flattened field. Undefined when neither exists.
+ */
+function indexFor(tableRef: Table<any, DbKey>, field: string): string | undefined {
+  if (hasIndex(tableRef, field)) return field;
+  if (field.includes(".") && hasIndex(tableRef, listIndexField(field))) return listIndexField(field);
+  return undefined;
+}
+
+/**
+ * The in-memory form of an equality. A dotted path reads the nested value, and a list (at the
+ * field or anywhere on the path) matches when ANY of its values does — what a multi-value index
+ * returns, so a query answers the same whether or not the index exists.
+ */
+function matchesEquality(row: Record<string, unknown>, field: string, value: unknown): boolean {
+  if (row?.[field] === value) return true;
+  return valuesAtPath(row, field).some((candidate) => candidate === value);
+}
+
 function dateOf(row: Record<string, unknown>, dateField: string): number | undefined {
   const value = row?.[dateField];
   return typeof value === "number" ? value : undefined;
@@ -265,9 +285,9 @@ async function runQuery(
     rows = await tableRef.where(compound).equals(values as any).toArray();
     remaining = [];
   } else if (fields.length) {
-    const seek = fields.findIndex((field) => hasIndex(tableRef, field));
+    const seek = fields.findIndex((field) => indexFor(tableRef, field) !== undefined);
     if (seek >= 0) {
-      rows = await tableRef.where(fields[seek]).equals(values[seek] as any).toArray();
+      rows = await tableRef.where(indexFor(tableRef, fields[seek])!).equals(values[seek] as any).toArray();
       remaining = equalities.filter((_, index) => index !== seek);
     } else {
       rows = await tableRef.toArray();
@@ -282,7 +302,7 @@ async function runQuery(
   }
 
   if (remaining.length) {
-    rows = rows.filter((row) => remaining.every(([field, value]) => row?.[field] === value));
+    rows = rows.filter((row) => remaining.every(([field, value]) => matchesEquality(row, field, value)));
   }
   if (dateField && !dateOrdered && (since !== undefined || until !== undefined)) {
     rows = rows.filter((row) => {

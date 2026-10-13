@@ -319,6 +319,51 @@ widgets: defineEntity({
 `FieldKind` picks the coercion: `text` → trimmed string, `count` → number, `date` → epoch millis
 (accepts millis, numeric string or ISO), `structured` → passed through as-is (an empty array stays `[]`).
 
+**Nested fields.** A field can hold a nested object or a list instead of a scalar, declared in place,
+so a row can carry the shape a screen wants (the way a Pinia store would hold it) rather than the
+server's flat one:
+
+```ts
+shipments: defineEntity({
+  primaryKey: "shipmentId",
+  fields: {
+    shipmentId: "text",
+    statusId: "text",
+    carrier: { partyId: "text", name: "text", createdDate: "date" },        // nested object
+    packages: [{ packageSeqId: "text", weight: "count", trackingCodes: ["text"] }], // list of objects
+    tags: ["text"],                                                          // list of scalars
+  },
+  indexes: [
+    "carrier.partyId",                   // dotted path into an object
+    "[statusId+carrier.partyId]",        // compound indexes may use dotted paths too
+    "*packages.trackingCodes",           // multi-value: matches a row when ANY package has the code
+    "*tags",
+  ],
+  rename: { "carrier.name": "groupName", "packages.weight": "grossWeight" },
+}),
+```
+
+- A nested declaration is a whitelist like the top level: undeclared keys are dropped and every leaf
+  is coerced by its kind (a `date` inside `carrier` becomes millis too). A value of the wrong shape
+  (a string where an object is declared) is left out; a list item of the wrong shape is dropped.
+  `structured` remains the way to store something as-is.
+- `rename` names a nested field by its dotted **stored** path; the value is the source key inside
+  the same parent object. Lists are not part of the path: `packages.weight` renames it on every item.
+- A field inside a list is indexed with `*`. IndexedDB cannot index into an array of objects, so
+  for `*packages.trackingCodes` projection also writes a flattened top-level array,
+  `packages$trackingCodes`, and the index is declared on that. You query the dotted path
+  (`equals: { "packages.trackingCodes": "1Z1" }`) and the client picks that index. The hidden
+  field is on every row you read; ignore it.
+- `equals` / `scope` on a dotted path works without an index too (read in memory). In memory and
+  through a `*` index alike, a list matches when any of its values equals the one asked for.
+- A primary-key field must be a top-level `text`, `count` or `date`. Field names are plain
+  identifiers (no `.` or `$`). Compound indexes cannot include a field inside a list, and
+  `dateField` / cursor fields stay top-level.
+
+Nested fields shape what is **stored**; they do not fetch anything. If the shape comes from several
+APIs, the domain that fills the table assembles each record before it is written (a custom `sync`
+in `defineSyncDomain`, §3).
+
 A row missing **any** primary-key member is dropped as unkeyable. If the server legitimately omits
 a key member (a document attached to no feed), give it a stand-in with `keyDefaults: { feedId: "" }`.
 Each key in `keyDefaults` must be a primary-key field. Use it only where the absence is a real state,
@@ -388,10 +433,13 @@ export const appDb = defineAppDb({
 any other shared schema the APP picks from. Then read the field as usual:
 `appDb.entity(appDb.tables.products).query({ equals: { brandName } })`.
 
-**It merges, never replaces.** Your fields, indexes and renames are added to the entity's own. It
+**It merges, never replaces.** Your fields, indexes and renames are added to the entity's own. A
+nested object (or list of objects) is merged into rather than replaced:
+`fields: { carrier: { email: "text" } }` adds `email` to an existing `carrier`, and
+`rename: { "carrier.email": "emailAddress" }` / `indexes: ["carrier.email"]` can name it. It
 throws at load, naming the table, when you:
 
-- add a field the entity already declares (you cannot change a field's kind),
+- add a field the entity already declares (you cannot change a field's kind), at any depth,
 - rename a field the entity does not declare, or one it already renames,
 - name a table the schema does not have, or add an index `defineEntity` rejects (an undeclared
   field, or the primary key restated).

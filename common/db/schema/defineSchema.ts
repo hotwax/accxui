@@ -9,19 +9,26 @@
  * Imports only `./defineEntity` and `../types`, for the same worker-bundle reason stated there.
  */
 
-import { defineEntity, type Entity } from "./defineEntity";
-import type { FieldKind } from "../types";
+import { defineEntity, isListSpec, isObjectSpec, resolveFieldPath, type Entity } from "./defineEntity";
+import type { FieldSpec, NestedFields } from "../types";
 
 /**
  * What an app adds to an entity it did not declare. Additive only: the primary key, key defaults
  * and every existing field, index and rename stay as declared.
  */
 export interface EntityExtension {
-  /** New stored fields. Naming a field the entity already declares throws. */
-  fields?: Record<string, FieldKind>;
+  /**
+   * New stored fields. Naming a field the entity already declares throws — except a nested object
+   * (or list of objects), whose declaration is merged into: `customer: { email: "text" }` adds
+   * `email` to an existing `customer`.
+   */
+  fields?: NestedFields;
   /** Extra secondary indexes, on the entity's own fields or the ones added here. */
   indexes?: string[];
-  /** Stored-field name → server field name, for any declared field the entity does not rename yet. */
+  /**
+   * Stored-field name → server field name, for any declared field the entity does not rename yet.
+   * A nested field is named by its dotted path, as in `defineEntity`.
+   */
   rename?: Record<string, string>;
 }
 
@@ -61,6 +68,30 @@ export interface AppSchema<Tables extends string = string> {
 /** The table names of a schema type. */
 export type TablesOf<Schema> = Schema extends AppSchema<infer Tables> ? Tables : never;
 
+/**
+ * Add `added` to `base` without replacing anything: a new name is added, and a nested object (or
+ * list of objects) on both sides is merged recursively. Any other overlap throws, naming the path.
+ */
+function mergeFields(table: string, base: NestedFields, added: NestedFields, path: string): NestedFields {
+  const merged: NestedFields = { ...base };
+
+  for (const [field, spec] of Object.entries(added)) {
+    const at = path ? `${path}.${field}` : field;
+    const existing = base[field];
+    if(existing === undefined) {
+      merged[field] = spec;
+    } else if(isObjectSpec(existing) && isObjectSpec(spec)) {
+      merged[field] = mergeFields(table, existing, spec, at);
+    } else if(isListSpec(existing) && isListSpec(spec) && isObjectSpec(existing[0]) && isObjectSpec(spec[0])) {
+      merged[field] = [mergeFields(table, existing[0], spec[0], at)] as FieldSpec;
+    } else {
+      throw new Error(`[db] defineSchema: extendEntities: "${table}" already declares field "${at}".`);
+    }
+  }
+
+  return merged;
+}
+
 function storesOf(entities: Record<string, Entity>): Record<string, string> {
   const stores: Record<string, string> = {};
   for (const [table, entity] of Object.entries(entities)) {
@@ -83,16 +114,10 @@ function build(entities: Record<string, Entity>, seedTables: ReadonlySet<string>
         );
       }
 
-      const addedFields = extension.fields ?? {};
-      for (const field of Object.keys(addedFields)) {
-        if(field in entity.fields) {
-          throw new Error(`[db] defineSchema: extendEntities: "${table}" already declares field "${field}".`);
-        }
-      }
-      const fields = { ...entity.fields, ...addedFields };
+      const fields = mergeFields(table, entity.fields, extension.fields ?? {}, "");
 
       for (const field of Object.keys(extension.rename ?? {})) {
-        if(!(field in fields)) {
+        if(!resolveFieldPath(fields, field)) {
           throw new Error(
             `[db] defineSchema: extendEntities: "${table}" renames "${field}", which is not declared in \`fields\`.`,
           );
