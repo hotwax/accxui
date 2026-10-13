@@ -3,12 +3,13 @@ import { createI18n } from "vue-i18n"
 let i18n: any
 
 export const translate = (key: string, ...args: any[]) => {
-  let message = key;
-  if (i18n?.global?.t) {
-    message = i18n.global.t(key, ...args);
-  }
-  if (args[0] && typeof args[0] === "object" && typeof message === "string" && message.includes("{")) {
-    message = message.replace(/\{(\w+)\}/g, (_, k) => (args[0][k] !== undefined ? String(args[0][k]) : `{${k}}`));
+  const params = args[0];
+  const message = i18n?.global?.t ? i18n.global.t(key, ...args) : key;
+
+  // vue-i18n already interpolates keys it knows. Only fill placeholders ourselves when the key
+  // is missing (message === key), so brace tokens inside parameter values stay literal.
+  if (message === key && params && typeof params === "object" && typeof key === "string" && key.includes("{")) {
+    return key.replace(/\{(\w+)\}/g, (_, k) => (params[k] !== undefined ? String(params[k]) : `{${k}}`));
   }
   return message;
 };

@@ -6,7 +6,8 @@ describe("i18n translate", () => {
   createDxpI18n({
     "en-US": {
       "Welcome, {name}!": "Welcome, {name}!",
-      "Simple label": "Translated Label"
+      "Simple label": "Translated Label",
+      "Failed to login. {error}": "Failed to login. {error}"
     }
   });
 
@@ -15,9 +16,18 @@ describe("i18n translate", () => {
     expect(translate("Welcome, {name}!", { name: "John" })).toBe("Welcome, John!");
   });
 
-  it("interpolates params on missing keys as a fallback", () => {
+  it("does not re-interpolate brace tokens in param values when key exists", () => {
+    expect(translate("Failed to login. {error}", { error: "Invalid {error}" })).toBe(
+      "Failed to login. Invalid {error}"
+    );
+  });
+
+  it("interpolates params on missing keys as a fallback without double-interpolating", () => {
     expect(translate("Failed to login. {error}", { error: "Bad credentials" })).toBe(
       "Failed to login. Bad credentials"
+    );
+    expect(translate("Missing key: {error}", { error: "Invalid {error}" })).toBe(
+      "Missing key: Invalid {error}"
     );
   });
 
@@ -25,9 +35,12 @@ describe("i18n translate", () => {
     expect(translate("Some unconfigured key")).toBe("Some unconfigured key");
   });
 
-  it("safely handles special characters like $ and braces in params", () => {
+  it("safely handles special characters like $, $&, $1, and braces in params", () => {
     expect(translate("Charge amount: {error}", { error: "$100.00 failed" })).toBe(
       "Charge amount: $100.00 failed"
+    );
+    expect(translate("Regex replacement symbols: {error}", { error: "Tokens $& and $1 and $`" })).toBe(
+      "Regex replacement symbols: Tokens $& and $1 and $`"
     );
     expect(translate("Error detail: {error}", { error: "unexpected {token}" })).toBe(
       "Error detail: unexpected {token}"
