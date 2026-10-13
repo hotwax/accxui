@@ -459,6 +459,28 @@ await refreshAfterMutation("widget", { widgetId });   // domain name + primary k
 refresh didn't. **That is not a failed mutation** — it carries `mutationCommitted = true`, so don't
 retry the write. Show "saved, but refresh to see it" and let the user reload.
 
+### `mutate`: the write and its reconciliation in one call
+
+`mutate(request, reconcile)` sends `request` through the `api` passed to `setupAppDbSync`
+(unchanged) and reconciles before it resolves. The reconcile argument is required, so a write cannot
+forget its refresh:
+
+```ts
+import { mutate } from "@/services/appDbSync";
+
+await mutate({ url: `oms/facilities/${facilityId}`, method: "put", data }, { refresh: [["facility", { facilityId }]] });
+await mutate({ url: "oms/carriers", method: "delete", data }, { refresh: [["carrierShipmentMethod", { partyId }]], resync: ["productStoreShipmentCount"] });
+await mutate({ url: "oms/facilities", method: "post", data }, (response) => ({ refresh: [["facility", { facilityId: response.data.facilityId }]] }));
+await mutate({ url: "oms/jobs/run", method: "post", data }, { none: "fires a one-off job; no local table holds it" });
+```
+
+- Duplicate keys and domains are reconciled once. Every target runs even if one fails.
+- A failed write (thrown, or flagged by the configured `isError`) rejects with the write's own error
+  and reconciles nothing.
+- A landed write that did not reconcile rejects with `CacheReconciliationError`, whose
+  `failedDomains` lists every domain that failed. Don't retry the write.
+- Wire it once per app: `setupAppDbSync({ db, …, api, isError: (resp) => commonUtil.hasError(resp) })`.
+
 Which refetch strategy your domain needs:
 
 | Situation | Config |
