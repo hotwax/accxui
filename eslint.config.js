@@ -107,6 +107,25 @@ const DA_NO_LIVE_ENTITY = [{
   message: "useLiveEntity is a Vue composable and only works during setup (components, views, composables). Here use appDb.entity(appDb.tables.x) for a one-shot read." + DATA_ACCESS_GUIDE,
 }];
 
+/** In Vue setup code: useLiveEntity owns the subscription, so no hand-made live query. */
+const DA_SETUP_NO_MANUAL_LIVE = [{
+  selector: "CallExpression[callee.property.name=/^(live|liveRead)$/]",
+  message: "Use useLiveEntity(appDb.tables.x, options) on screen: it subscribes, re-subscribes when the options change and unsubscribes on unmount. A hand-made .live() subscription here has no owner to unsubscribe it." + DATA_ACCESS_GUIDE,
+}];
+
+/** In the sync worker: it writes and renders nothing, so a live query has no consumer. */
+const DA_WORKER_NO_LIVE = [{
+  selector: "CallExpression[callee.property.name=/^(live|liveRead)$/]",
+  message: "No live queries in the sync worker: it writes and renders nothing, and nothing would unsubscribe them. Read once with appDb.entity(appDb.tables.x).get / query / all." + DATA_ACCESS_GUIDE,
+}];
+
+/** Elsewhere a manual subscription is allowed, but its handle must be kept so it can be unsubscribed. */
+const LIVE_SUBSCRIBE = "CallExpression[callee.property.name='subscribe'][callee.object.callee.property.name=/^(live|liveRead)$/]";
+const DA_KEEP_SUBSCRIPTION = [{
+  selector: `ExpressionStatement > ${LIVE_SUBSCRIBE}, UnaryExpression[operator='void'] > ${LIVE_SUBSCRIBE}`,
+  message: "Keep the subscription: const sub = appDb.entity(appDb.tables.x).live(options).subscribe(…), then sub.unsubscribe() in the same teardown that runs on logout (as useSeedData does in clearSeedTables). A discarded subscription can never be unsubscribed." + DATA_ACCESS_GUIDE,
+}];
+
 /** The existing per-folder selectors, shared with the data-access blocks that restate them. */
 const VUE_NO_API_SYNTAX = [
   {
@@ -150,36 +169,36 @@ function dataAccessBlocks(folder = { vue: [], composables: [], store: [] }) {
       files: ["**/src/**/*.ts", "**/src/**/*.vue"],
       rules: {
         "@typescript-eslint/no-restricted-imports": DATA_ACCESS_IMPORTS,
-        "no-restricted-syntax": syntax(DA_EVERYWHERE, DA_NO_GET, DA_NO_CLIENT, DA_NO_LIVE_ENTITY),
+        "no-restricted-syntax": syntax(DA_EVERYWHERE, DA_NO_GET, DA_NO_CLIENT, DA_NO_LIVE_ENTITY, DA_KEEP_SUBSCRIPTION),
       }
     },
     {
       files: ["**/src/components/**/*.ts", "**/src/views/**/*.ts", "**/src/composables/**/*.ts"],
-      rules: { "no-restricted-syntax": syntax(DA_EVERYWHERE, DA_NO_GET, DA_NO_CLIENT) }
+      rules: { "no-restricted-syntax": syntax(DA_EVERYWHERE, DA_NO_GET, DA_NO_CLIENT, DA_SETUP_NO_MANUAL_LIVE) }
     },
     {
       files: ["**/src/**/*.vue"],
-      rules: { "no-restricted-syntax": syntax(folder.vue, DA_EVERYWHERE, DA_NO_GET, DA_NO_CLIENT) }
+      rules: { "no-restricted-syntax": syntax(folder.vue, DA_EVERYWHERE, DA_NO_GET, DA_NO_CLIENT, DA_SETUP_NO_MANUAL_LIVE) }
     },
     {
       files: ["**/src/**/composables/*.ts"],
-      rules: { "no-restricted-syntax": syntax(folder.composables, DA_EVERYWHERE, DA_NO_GET, DA_NO_CLIENT) }
+      rules: { "no-restricted-syntax": syntax(folder.composables, DA_EVERYWHERE, DA_NO_GET, DA_NO_CLIENT, DA_SETUP_NO_MANUAL_LIVE) }
     },
     {
       files: ["**/src/store/*.ts"],
-      rules: { "no-restricted-syntax": syntax(folder.store, DA_EVERYWHERE, DA_NO_GET, DA_NO_CLIENT, DA_NO_LIVE_ENTITY) }
+      rules: { "no-restricted-syntax": syntax(folder.store, DA_EVERYWHERE, DA_NO_GET, DA_NO_CLIENT, DA_NO_LIVE_ENTITY, DA_KEEP_SUBSCRIPTION) }
     },
     {
       files: ["**/src/db/**/*.ts"],
-      rules: { "no-restricted-syntax": syntax(DA_EVERYWHERE, DA_NO_LIVE_ENTITY) }
+      rules: { "no-restricted-syntax": syntax(DA_EVERYWHERE, DA_NO_LIVE_ENTITY, DA_KEEP_SUBSCRIPTION) }
     },
     {
       files: ["**/src/workers/**/*.ts"],
-      rules: { "no-restricted-syntax": syntax(DA_EVERYWHERE, DA_NO_GET, DA_NO_LIVE_ENTITY) }
+      rules: { "no-restricted-syntax": syntax(DA_EVERYWHERE, DA_NO_GET, DA_NO_LIVE_ENTITY, DA_WORKER_NO_LIVE) }
     },
     {
       files: ["**/src/workers/*.worker.ts"],
-      rules: { "no-restricted-syntax": syntax(DA_EVERYWHERE, DA_NO_LIVE_ENTITY) }
+      rules: { "no-restricted-syntax": syntax(DA_EVERYWHERE, DA_NO_LIVE_ENTITY, DA_WORKER_NO_LIVE) }
     },
   ];
 }

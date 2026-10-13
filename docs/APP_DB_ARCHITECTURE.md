@@ -135,6 +135,9 @@ runs it before `vite build` (`eslint src && vite build`), so a violation fails t
 | `dbClient`, `getAppDb`, `ensureDbReady`, `BaseDB` value imports | `appDb.entity(...)` / `useLiveEntity` |
 | a string table name | `appDb.tables.x` |
 | `useLiveEntity` outside `.vue`, `src/components`, `src/views`, `src/composables` | `appDb.entity(...)` |
+| `.live()` / `.liveRead()` in setup code | `useLiveEntity`, which owns the subscription |
+| `.live()` / `.liveRead()` in the sync worker | a one-shot `appDb.entity(...)` read |
+| a `.live(...).subscribe(...)` whose result is discarded | keep it and `unsubscribe()` it on logout teardown |
 | `appDb.get(oms)` outside `src/db/**` and the worker entry | `appDb.entity(...)` |
 | `appDb.client()` outside `src/workers/**` and `useDbStatus(...)` | `appDb.entity(...)` |
 

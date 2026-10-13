@@ -37,7 +37,7 @@ in **two patterns, picked by need**:
 |---|---|---|
 | Rows that stay current **on screen** (§1b) | `useLiveEntity(table, options?)` | Components and composables, during `setup` |
 | An answer **now**, or a **write** (§1d) | `appDb.entity(table)` — `get`, `getMany`, `all`, `query`, `first`, `count`, `put`, `bulkPut`, `upsertMany`, `snapshotReplace`, `remove`, … | Anywhere: stores, services, async handlers, composables, the worker |
-| Live updates **outside a component** (rare) | `appDb.entity(table).live(options)` — a Dexie `Observable`; you unsubscribe | Anywhere, the worker included |
+| Live updates **outside a component** (rare) | `appDb.entity(table).live(options)` — a Dexie `Observable`; keep the subscription and unsubscribe it (§1e) | Stores, services, utils. **Not** setup code (use `useLiveEntity`) and **not** the worker |
 
 `appDb` is the APP's database object (`src/db/appDb.ts`). `all()` followed by a JS
 `filter` / `find` is fine.
@@ -259,8 +259,40 @@ await facilities.upsertMany([fetchedRow]);                              // write
 `first`, `count`, `getMany`, `put`, `bulkPut`, `remove`, `snapshotReplace` and the rest are on the same
 `EntityClient`. Writes project through the entity, so pass the server's record as-is. After a
 mutation on the server, reconcile through `refreshAfterMutation` (§4) rather than writing the
-response yourself. For live updates outside a component, `entity(table).live(options)` returns a
-Dexie `Observable` you unsubscribe yourself.
+response yourself. For live updates outside a component, see §1e.
+
+### 1e. Manual live subscriptions (rare)
+
+`useLiveEntity` owns its subscription: it subscribes, re-subscribes when the options change and
+unsubscribes on unmount. Anything else that calls `.live()` owns its subscription too, and a leaked
+one keeps re-running its query on every write until the page reloads. So:
+
+- **Setup code** (`.vue`, `src/components`, `src/views`, `src/composables`): never call `.live()` or
+  `.liveRead()`. Use `useLiveEntity`.
+- **The sync worker** (`src/workers/**`): no live queries at all. It writes and renders nothing; read
+  once with `appDb.entity(...).get / query / all`.
+- **Stores, services, utils:** allowed, but keep the subscription and unsubscribe it in the same
+  teardown that runs on logout, as `useSeedData` does in `clearSeedTables()`:
+
+```ts
+import { appDb } from "@/db/appDb";
+
+let facilitiesSub: { unsubscribe(): void } | null = null;
+
+export function watchFacilities(onRows: (rows: any[]) => void) {
+  facilitiesSub?.unsubscribe();
+  facilitiesSub = appDb.entity(appDb.tables.facilities).live({}).subscribe({ next: onRows });
+}
+
+/** Call from the logout teardown, next to stopAppDbSync(). */
+export function stopWatchingFacilities() {
+  facilitiesSub?.unsubscribe();
+  facilitiesSub = null;
+}
+```
+
+Lint enforces the first two, and that a subscription's handle is kept (§7). It cannot check that
+`unsubscribe()` is actually called, so that part is for review.
 
 ---
 
@@ -660,6 +692,9 @@ An "app db" is any identifier ending in `Db` (`appDb`, `companyDb`, …).
 | `no-restricted-syntax` | `appDb.get(oms)` | outside `src/db/**` and `src/workers/*.worker.ts` |
 | `no-restricted-syntax` | `appDb.client()`, except as the `useDbStatus` argument | outside `src/db/**` and `src/workers/**` |
 | `no-restricted-syntax` | `useLiveEntity(...)` | outside `.vue` files, `src/components`, `src/views`, `src/composables` |
+| `no-restricted-syntax` | `.live(...)` / `.liveRead(...)`: use `useLiveEntity` | `.vue` files, `src/components`, `src/views`, `src/composables` |
+| `no-restricted-syntax` | `.live(...)` / `.liveRead(...)` at all | `src/workers/**` |
+| `no-restricted-syntax` | a discarded subscription: `x.live(...).subscribe(...);` as a bare statement, or `void …subscribe(...)` | everywhere else (§1e) |
 
 Type-only imports are fine. There is no autofix: write `appDb.tables.x` by hand.
 

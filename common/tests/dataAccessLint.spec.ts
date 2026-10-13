@@ -55,6 +55,11 @@ const valid: Array<[string, string]> = [
   [WORKER_ENTRY, DB_IMPORT + "export const getDb = (oms: string) => appDb.get(oms);"],
   [DB_MODULE, "export const get = (oms: string) => appDb.get(oms);"],
   ["common/db/composables/useLiveEntity.ts", "useLiveEntity<any>(t);"],
+  // A kept subscription outside setup code is fine; unsubscribing it is the caller's teardown.
+  [SERVICE, DB_IMPORT + "export const sub = appDb.entity(appDb.tables.facilities).live({}).subscribe(onRows);"],
+  [STORE, DB_IMPORT + "let sub: any;\nexport function start() { sub = appDb.entity(appDb.tables.facilities).live({}).subscribe(onRows); }"],
+  [SERVICE, DB_IMPORT + "subscriptions.push(appDb.entity(appDb.tables.facilities).live({}).subscribe(onRows));"],
+  [VIEW, "const sub = stream.subscribe(onValue);"],
 ];
 
 const invalid: Array<[string, string]> = [
@@ -74,7 +79,7 @@ const invalid: Array<[string, string]> = [
   [COMPOSABLE, DB_IMPORT + 'useLiveEntity<any>("facilities", opts);'],
   [COMPOSABLE, 'useLiveEntity(client, "facilities");'],
   [WORKER_DOMAIN, DB_IMPORT + 'appDb.client().put("facilities" as any, row);'],
-  [WORKER_DOMAIN, DB_IMPORT + 'appDb.client().liveRead(["facilities", appDb.tables.widgets], fn);'],
+  [WORKER_DOMAIN, DB_IMPORT + 'appDb.client().read(["facilities", appDb.tables.widgets], fn);'],
   [WORKER_DOMAIN, DB_IMPORT + 'const appClient = appDb.client();\nappClient.count("organizations");'],
   [WORKER_DOMAIN, DB_IMPORT + 'const appClient = appDb.client();\nappClient.put("facilities" as any, row);'],
   [WORKER_DOMAIN, DB_IMPORT + 'const appClient = appDb.client();\nappClient.read(["facilities", appDb.tables.widgets], fn);'],
@@ -85,6 +90,18 @@ const invalid: Array<[string, string]> = [
   ["apps/app/src/router/guards.ts", "useLiveEntity<any>(t);"],
   ["apps/app/src/main.ts", "useLiveEntity<any>(t);"],
   [DB_MODULE, "useLiveEntity<any>(t);"],
+  // Setup code: useLiveEntity owns the subscription.
+  [COMPOSABLE, DB_IMPORT + "const sub = appDb.entity(appDb.tables.facilities).live({}).subscribe(onRows);"],
+  [VIEW, DB_IMPORT + "const rows$ = appDb.entity(appDb.tables.facilities).live({});"],
+  ["apps/app/src/components/FacilityList.ts", DB_IMPORT + "const facilities = appDb.entity(appDb.tables.facilities);\nfacilities.live({});"],
+  // Worker: no live queries at all.
+  [WORKER_DOMAIN, DB_IMPORT + "const sub = appDb.entity(appDb.tables.facilities).live({}).subscribe(onRows);"],
+  [WORKER_DOMAIN, DB_IMPORT + "const appClient = appDb.client();\nappClient.liveRead([appDb.tables.widgets], fn);"],
+  [WORKER_ENTRY, DB_IMPORT + "appDb.entity(appDb.tables.facilities).live({});"],
+  // Elsewhere: a discarded subscription can never be unsubscribed.
+  [SERVICE, DB_IMPORT + "appDb.entity(appDb.tables.facilities).live({}).subscribe(onRows);"],
+  [STORE, DB_IMPORT + "void appDb.entity(appDb.tables.facilities).live({}).subscribe(onRows);"],
+  ["apps/app/src/utils/rows.ts", DB_IMPORT + "appDb.entity(appDb.tables.facilities).live({ limit: 5 }).subscribe({ next: onRows });"],
 ];
 
 describe("data-access lint rules", () => {

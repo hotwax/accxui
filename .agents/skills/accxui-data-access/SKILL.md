@@ -50,8 +50,9 @@ const all = await shops.all();                                    // then filter
 await shops.upsertMany([fetchedRow]);                             // write-through after a fetch
 ```
 
-Nothing re-renders afterwards. For live updates outside a component (rare),
-`appDb.entity(t).live(options)` returns a Dexie `Observable` you must unsubscribe.
+Nothing re-renders afterwards. For live updates outside a component (rare, stores / services /
+utils only, never setup code or the worker), `appDb.entity(t).live(options)` returns a Dexie
+`Observable`: keep the subscription and `unsubscribe()` it in the logout teardown. Guide §1e.
 
 `QueryOptions`: `scope` / `equals` (equalities, resolved through indexes), `dateField` + `since` /
 `until` / `order` (newest first by default), `filter`, `limit`.
@@ -94,6 +95,9 @@ cache on the same layer, not a separate data path.
 | `appDb.get(oms)` | worker entry (`src/workers/*.worker.ts`) and `src/db/**` only |
 | `appDb.client()` | worker sync domains (`src/workers/**`) and as the argument to `useDbStatus(...)` only |
 | `useLiveEntity` outside `.vue` files, `src/components`, `src/views`, `src/composables` | `appDb.entity(...)` |
+| `.live()` / `.liveRead()` in `.vue`, components, views, composables | `useLiveEntity` (it owns the subscription) |
+| `.live()` / `.liveRead()` in `src/workers/**` | a one-shot `appDb.entity(...).get / query / all` |
+| `x.live(...).subscribe(...);` with the result discarded | keep it; `unsubscribe()` it in the logout teardown |
 | a string literal table name | `appDb.tables.x` |
 
 Exempt: an app-local Dexie store outside the app database, switched off in that app's own
