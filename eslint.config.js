@@ -15,7 +15,8 @@ import globals from "globals";
  *   - rows live on screen:       useLiveEntity(appDb.tables.x, options)  (components, views, composables)
  *   - an answer now, or a write: appDb.entity(appDb.tables.x)            (anywhere)
  * with table names always from `appDb.tables`. An "app db" is any identifier ending in `Db`
- * (`appDb`, `companyDb`, …). See docs/APP_DB_DEVELOPER_GUIDE.md §7.
+ * (`appDb`, `companyDb`, …); a client held in a variable is any identifier ending in `Client`
+ * (`companyClient = companyDb.client()`). See docs/APP_DB_DEVELOPER_GUIDE.md §7.
  *
  * Built from core rules only. Because flat config replaces `no-restricted-syntax` per file rather
  * than merging it, the folder-specific selector lists are composed below and the data-access blocks
@@ -23,6 +24,8 @@ import globals from "globals";
  */
 const DATA_ACCESS_GUIDE = " See docs/APP_DB_DEVELOPER_GUIDE.md §7.";
 const APP_DB = "/^[A-Za-z_$][\\w$]*Db$/";
+/** A DbClient held in a variable, by the naming the sync domains use: `companyClient = companyDb.client()`. */
+const DB_CLIENT = "/^[A-Za-z_$][\\w$]*Client$/";
 const TABLE_METHODS = "/^(entity|get|getMany|all|query|first|count|put|bulkPut|remove|bulkRemove|clear)$/";
 const STRING = ":matches(Literal[value=/.*/], TemplateLiteral)";
 /** A string-literal argument of the calls `call` matches, bare or as `"x" as any`. */
@@ -71,6 +74,14 @@ const DA_EVERYWHERE = [
   {
     selector: stringArgOf(`CallExpression[callee.object.callee.object.name=${APP_DB}][callee.object.callee.property.name='client'][callee.property.name=${TABLE_METHODS}]`),
     message: "Name the table through appDb.tables: appDb.client().get(appDb.tables.x, …). A typo there fails to compile." + DATA_ACCESS_GUIDE,
+  },
+  {
+    selector: stringArgOf(`CallExpression[callee.object.name=${DB_CLIENT}][callee.property.name=${TABLE_METHODS}]`),
+    message: "Name the table through appDb.tables: companyClient.count(appDb.tables.x) for a client held in a variable. A typo there fails to compile." + DATA_ACCESS_GUIDE,
+  },
+  {
+    selector: `CallExpression[callee.object.name=${DB_CLIENT}][callee.property.name=/^(liveRead|read|transaction)$/] > ArrayExpression > ${STRING}`,
+    message: "Name the tables through appDb.tables: client.liveRead([appDb.tables.x, …], …) for a client held in a variable. A typo there fails to compile." + DATA_ACCESS_GUIDE,
   },
   {
     selector: `CallExpression[callee.object.callee.object.name=${APP_DB}][callee.object.callee.property.name='client'][callee.property.name=/^(liveRead|read|transaction)$/] > ArrayExpression > ${STRING}`,

@@ -656,7 +656,7 @@ An "app db" is any identifier ending in `Db` (`appDb`, `companyDb`, …).
 | Rule | Rejects | Where |
 |---|---|---|
 | `@typescript-eslint/no-restricted-imports` | value imports of `dexie`, `@common/db/storage/dbClient` / `baseDb`, `@common/db/schema/appDbRegistry`, or low-level names (`dbClient`, `getAppDb`, `ensureDbReady`, `hasSyncedThisLogin`, …) from `@common` / `@common/db` | all of `src/` |
-| `no-restricted-syntax` | `appDb.raw()`; a string-literal table in `appDb.entity("x")`, `useLiveEntity("x")`, `appDb.client().get("x")` or `appDb.client().liveRead(["x"])` (also behind `as any`) | all of `src/` |
+| `no-restricted-syntax` | `appDb.raw()`; a string-literal table in `appDb.entity("x")`, `useLiveEntity("x")`, `appDb.client().get("x")` or `appDb.client().liveRead(["x"])`, and the same on a client held in a variable named `…Client` (`companyClient.count("x")`); also behind `as any` | all of `src/` |
 | `no-restricted-syntax` | `appDb.get(oms)` | outside `src/db/**` and `src/workers/*.worker.ts` |
 | `no-restricted-syntax` | `appDb.client()`, except as the `useDbStatus` argument | outside `src/db/**` and `src/workers/**` |
 | `no-restricted-syntax` | `useLiveEntity(...)` | outside `.vue` files, `src/components`, `src/views`, `src/composables` |
