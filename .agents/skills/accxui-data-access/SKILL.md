@@ -1,6 +1,6 @@
 ---
 name: accxui-data-access
-description: How AccxUI app code reads and writes local app data (IndexedDB). Use whenever you read, list, look up, cache, store, upsert or delete server data in apps/company or apps/order-manager, touch useLiveEntity, companyDb / orderManagerDb, appDb.entity, appDb.tables, useSeedData, mutate, refreshAfterMutation or resyncDomain, a worker sync domain, Dexie, liveQuery or IndexedDB, send a POST / PUT / DELETE that changes server data, or fix a data-access lint error (one ending "See docs/APP_DB_DEVELOPER_GUIDE.md §7").
+description: How AccxUI app code reads and writes local app data (IndexedDB). Use whenever you read, list, look up, cache, store, upsert or delete server data in any AccxUI app (apps/company, apps/order-manager or a new one), touch useLiveEntity, companyDb / orderManagerDb, appDb.entity, appDb.tables, useSeedData, mutate, refreshAfterMutation or resyncDomain, a worker sync domain, Dexie, liveQuery or IndexedDB, send a POST / PUT / DELETE that changes server data, or fix a data-access lint error (one ending "See docs/APP_DB_DEVELOPER_GUIDE.md §7").
 ---
 
 # AccxUI data access
@@ -144,7 +144,7 @@ cache on the same layer, not a separate data path.
 | `activateSyncDomains` without `deactivateSyncDomains` in the file, or in a `.vue` page without `onIonViewDidLeave` | deactivate with the same owner in `onIonViewDidLeave` (not only on unmount) |
 | `deactivateSyncDomains()` with no owner | `deactivateSyncDomains(SYNC_OWNER)` |
 | a string literal table name | `appDb.tables.x` |
-| `upsertMany` / `snapshotReplace` / `put` / `remove` outside `src/workers/**` (not lint-enforced) | `refreshRecord` for a missing record, `mutate` for a server change |
+| `upsertMany` / `snapshotReplace` anywhere, or `put` / `bulkPut` / `remove` / `bulkRemove` / `clear` on `appDb.entity(...)`, outside `src/workers/**` and `src/db/**` | `refreshRecord` for a missing record, `mutate` for a server change |
 
 Exempt: an app-local Dexie store outside the app database, switched off in that app's own
 `eslint.config.js` (Company `src/utils/storage.ts`, Order Manager `src/services/productDb.ts`). The app's
@@ -162,6 +162,8 @@ query it, **bump `version`** in the app db module, and give it a sync domain. It
 ```bash
 pnpm lint                      # from the app directory; the build (`eslint src && vite build`) runs it first
 ```
+
+An app with no app database yet, or a new table or sync domain: use the accxui-app-db-setup skill.
 
 Reference: `docs/APP_DB_DEVELOPER_GUIDE.md` (§1 patterns, §7 rules); the rules themselves are in
 the root `eslint.config.js` (the `DA_*` selector lists).
