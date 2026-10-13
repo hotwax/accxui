@@ -61,6 +61,9 @@ tester.run("data-access/table-name-from-schema", dataAccess.rules["table-name-fr
     { filename: COMPOSABLE, code: DB_IMPORT + "useLiveEntity<any>(companyDb.tables.facilities, { equals: { a: 1 } });" },
     { filename: COMPOSABLE, code: "useLiveEntity<any>(LEDGER_TABLES[kind], scoped);" },
     { filename: COMPOSABLE, code: 'otherThing.entity("facilities");' },
+    { filename: WORKER_DOMAIN, code: DB_IMPORT + "const c = companyDb.client();\nc.count(companyDb.tables.organizations);" },
+    { filename: WORKER_DOMAIN, code: DB_IMPORT + 'const c = companyDb.client();\nc.syncedThisLogin("organization");' },
+    { filename: WORKER_DOMAIN, code: 'const c = makeThing();\nc.count("organizations");' },
   ],
   invalid: [
     {
@@ -92,6 +95,23 @@ tester.run("data-access/table-name-from-schema", dataAccess.rules["table-name-fr
       code: 'useLiveEntity(client, "facilities");',
       output: null,
       errors: [{ messageId: "liveEntity" }],
+    },    {
+      filename: WORKER_DOMAIN,
+      code: DB_IMPORT + 'const c = companyDb.client();\nc.count("organizations");',
+      output: DB_IMPORT + "const c = companyDb.client();\nc.count(companyDb.tables.organizations);",
+      errors: [{ messageId: "client" }],
+    },
+    {
+      filename: WORKER_DOMAIN,
+      code: DB_IMPORT + 'companyDb.client().put("facilities" as any, row);',
+      output: DB_IMPORT + "companyDb.client().put(companyDb.tables.facilities, row);",
+      errors: [{ messageId: "client" }],
+    },
+    {
+      filename: WORKER_DOMAIN,
+      code: DB_IMPORT + 'const c = companyDb.client();\nc.transaction("rw", ["facilities", companyDb.tables.organizations], fn);',
+      output: DB_IMPORT + "const c = companyDb.client();\nc.transaction(\"rw\", [companyDb.tables.facilities, companyDb.tables.organizations], fn);",
+      errors: [{ messageId: "client" }],
     },
   ],
 });
@@ -101,11 +121,16 @@ tester.run("data-access/live-entity-in-setup", dataAccess.rules["live-entity-in-
     { filename: COMPOSABLE, code: "useLiveEntity<any>(companyDb.tables.facilities);" },
     { filename: "/repo/apps/company/src/views/Facilities.ts", code: "useLiveEntity<any>(companyDb.tables.facilities);" },
     { filename: "/repo/apps/company/src/components/FacilityList.ts", code: "useLiveEntity<any>(companyDb.tables.facilities);" },
+    { filename: "/repo/apps/company/src/App.vue", code: "useLiveEntity<any>(companyDb.tables.facilities);" },
+    { filename: "/repo/common/db/composables/useLiveEntity.ts", code: "useLiveEntity<any>(t);" },
   ],
   invalid: [
     { filename: STORE, code: "useLiveEntity<any>(orderManagerDb.tables.statuses);", errors: [{ messageId: "notSetup" }] },
     { filename: "/repo/apps/company/src/services/sync.ts", code: "useLiveEntity<any>(t);", errors: [{ messageId: "notSetup" }] },
     { filename: "/repo/apps/company/src/utils/rows.ts", code: "useLiveEntity<any>(t);", errors: [{ messageId: "notSetup" }] },
     { filename: WORKER_DOMAIN, code: "useLiveEntity<any>(t);", errors: [{ messageId: "notSetup" }] },
+    { filename: "/repo/apps/company/src/router/guards.ts", code: "useLiveEntity<any>(t);", errors: [{ messageId: "notSetup" }] },
+    { filename: "/repo/apps/company/src/main.ts", code: "useLiveEntity<any>(t);", errors: [{ messageId: "notSetup" }] },
+    { filename: DB_MODULE, code: "useLiveEntity<any>(t);", errors: [{ messageId: "notSetup" }] },
   ],
 });

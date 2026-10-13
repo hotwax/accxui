@@ -32,7 +32,16 @@ const posix = (filename) => filename.replace(/\\/g, "/");
 const inAppDbModule = (filename) => /\/src\/db\//.test(posix(filename));
 const inWorkers = (filename) => /\/src\/workers\//.test(posix(filename));
 const isWorkerEntry = (filename) => /\/src\/workers\/[^/]+\.worker\.ts$/.test(posix(filename));
-const inNonComponentCode = (filename) => /\/src\/(store|services|utils|workers)\//.test(posix(filename));
+const inAppSource = (filename) => /\/src\//.test(posix(filename));
+/** Where Vue setup runs: any SFC, plus `src/components`, `src/views` and `src/composables`. */
+const inSetupCode = (filename) =>
+  /\.vue$/.test(posix(filename)) || /\/src\/(components|views|composables)\//.test(posix(filename));
+
+/** dbClient methods whose first argument is a table name, and those taking a list of tables. */
+const CLIENT_TABLE_METHODS = new Set([
+  "entity", "get", "getMany", "all", "query", "first", "count", "put", "bulkPut", "remove", "bulkRemove", "clear",
+]);
+const CLIENT_TABLE_LIST_METHODS = new Set(["transaction", "liveRead", "read"]);
 
 const isTypeOnly = (declaration, specifier) =>
   declaration.importKind === "type" || specifier?.importKind === "type";
@@ -154,15 +163,63 @@ const tableNameFromSchema = {
     messages: {
       entity: "Name the table through {{db}}.tables: {{db}}.entity({{db}}.tables.{{table}}). A typo there fails to compile. " + GUIDE,
       liveEntity: "Name the table through the app db's tables object: useLiveEntity(appDb.tables.{{table}}, …). A typo there fails to compile. " + GUIDE,
+      client: "Name the table through {{db}}.tables: .{{method}}({{db}}.tables.{{table}}, …). A typo there fails to compile. " + GUIDE,
     },
   },
   create(context) {
     let appDbNames = new Set();
+    /** Local variables holding `appDb.client()`, mapped to the app db's name. */
+    const clientNames = new Map();
+
+    /** The app db behind `appDb.client().<m>(…)` or `c.<m>(…)` where `c = appDb.client()`. */
+    const clientOwner = (object) => {
+      if (object.type === "Identifier") return clientNames.get(object.name);
+      if (object.type === "CallExpression") return appDbMethodCall(object, appDbNames, "client");
+      return undefined;
+    };
+
+    const reportClientTable = (table, db, method) => {
+      const name = tableText(table);
+      context.report({
+        node: table,
+        messageId: "client",
+        data: { db, method, table: name ?? "x" },
+        fix: name && /^[A-Za-z_$][\w$]*$/.test(name)
+          ? (fixer) => fixer.replaceText(table, `${db}.tables.${name}`)
+          : null,
+      });
+    };
+
     return ({
       Program(program) {
         appDbNames = collectAppDbNames(program);
       },
+      VariableDeclarator(node) {
+        if (node.id.type !== "Identifier" || node.init?.type !== "CallExpression") return;
+        const db = appDbMethodCall(node.init, appDbNames, "client");
+        if (db) clientNames.set(node.id.name, db);
+      },
       CallExpression(node) {
+        const callee = node.callee;
+        if (callee.type === "MemberExpression" && !callee.computed && callee.property.type === "Identifier") {
+          const method = callee.property.name;
+          const owner = (CLIENT_TABLE_METHODS.has(method) || CLIENT_TABLE_LIST_METHODS.has(method))
+            ? clientOwner(callee.object)
+            : undefined;
+          if (owner) {
+            if (CLIENT_TABLE_METHODS.has(method)) {
+              const [table] = node.arguments;
+              if (isStringTable(table)) reportClientTable(table, owner, method);
+            } else {
+              const tables = node.arguments.find((arg) => unwrap(arg)?.type === "ArrayExpression");
+              for (const table of unwrap(tables)?.elements ?? []) {
+                if (isStringTable(table)) reportClientTable(table, owner, method);
+              }
+            }
+            return;
+          }
+        }
+
         const db = appDbMethodCall(node, appDbNames, "entity");
         if (db) {
           const [table] = node.arguments;
@@ -211,7 +268,7 @@ const liveEntityInSetup = {
     },
   },
   create(context) {
-    if (!inNonComponentCode(context.filename)) return {};
+    if (!inAppSource(context.filename) || inSetupCode(context.filename)) return {};
     return ({
       CallExpression(node) {
         if (node.callee.type === "Identifier" && node.callee.name === "useLiveEntity") {
