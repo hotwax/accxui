@@ -28,6 +28,11 @@ function probes() {
 
   // @ts-expect-error — not a table anywhere
   appDb.entity("widgetz");
+  own.extendEntities({ widgets: { fields: { label: "text" } } });
+  // @ts-expect-error — extendEntities checks table names against the schema
+  own.extendEntities({ widgetz: { fields: { label: "text" } } });
+  // @ts-expect-error — and field kinds against FieldKind
+  own.extendEntities({ widgets: { fields: { label: "string" } } });
   // @ts-expect-error — a seed table this app did not pick
   appDb.entity("enums");
   // @ts-expect-error — the client checks names too

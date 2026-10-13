@@ -3,13 +3,27 @@
  *
  * `defineSchema` keys entities by their IndexedDB STORE NAME, so its `stores` output maps 1:1 onto
  * what `version().stores()` wants and there is no domain/table split to keep aligned. `pick`,
- * `extendIndexes` and `mergeSchemas` all return a fresh AppSchema and never mutate their input, so
- * a framework-owned schema can be picked from by several apps at once.
+ * `extendIndexes`, `extendEntities` and `mergeSchemas` all return a fresh AppSchema and never mutate
+ * their input, so a framework-owned schema can be picked from by several apps at once.
  *
- * Imports only `./defineEntity`, for the same worker-bundle reason stated there.
+ * Imports only `./defineEntity` and `../types`, for the same worker-bundle reason stated there.
  */
 
 import { defineEntity, type Entity } from "./defineEntity";
+import type { FieldKind } from "../types";
+
+/**
+ * What an app adds to an entity it did not declare. Additive only: the primary key, key defaults
+ * and every existing field, index and rename stay as declared.
+ */
+export interface EntityExtension {
+  /** New stored fields. Naming a field the entity already declares throws. */
+  fields?: Record<string, FieldKind>;
+  /** Extra secondary indexes, on the entity's own fields or the ones added here. */
+  indexes?: string[];
+  /** Stored-field name → server field name, for any declared field the entity does not rename yet. */
+  rename?: Record<string, string>;
+}
 
 /** Every table of a schema as `{ facilities: "facilities", … }`: names autocomplete and a typo fails to compile. */
 export type TableNames<Tables extends string> = { readonly [Table in Tables]: Table };
@@ -35,6 +49,13 @@ export interface AppSchema<Tables extends string = string> {
   pick<Picked extends Tables>(tables: readonly Picked[]): AppSchema<Picked>;
   /** Extra secondary indexes appended after an entity's own. Throws on an unknown table, a pk restatement, or an unprojected field. */
   extendIndexes(map: Partial<Record<Tables, string[]>>): AppSchema<Tables>;
+  /**
+   * Fields, indexes and renames added to entities this schema already has — the app-side way to
+   * widen a framework entity. Sync domains project through the app's composed entity, so added
+   * fields are stored without touching the domain. Throws on an unknown table, a field already
+   * declared, a rename of an undeclared or already-renamed field, or an index `defineEntity` rejects.
+   */
+  extendEntities(map: Partial<Record<Tables, EntityExtension>>): AppSchema<Tables>;
 }
 
 /** The table names of a schema type. */
@@ -51,6 +72,54 @@ function storesOf(entities: Record<string, Entity>): Record<string, string> {
 // The table names are a compile-time view; at runtime every map is keyed by plain strings.
 function build<Tables extends string>(entities: Record<string, Entity>, seedTables: ReadonlySet<string>): AppSchema<Tables>;
 function build(entities: Record<string, Entity>, seedTables: ReadonlySet<string>): AppSchema {
+  function extendEntities(map: Partial<Record<string, EntityExtension>>): AppSchema {
+    const extended: Record<string, Entity> = { ...entities };
+
+    for (const [table, extension = {}] of Object.entries(map)) {
+      const entity = entities[table];
+      if(!entity) {
+        throw new Error(
+          `[db] defineSchema: extendEntities names "${table}", which is not a table in this schema.`,
+        );
+      }
+
+      const addedFields = extension.fields ?? {};
+      for (const field of Object.keys(addedFields)) {
+        if(field in entity.fields) {
+          throw new Error(`[db] defineSchema: extendEntities: "${table}" already declares field "${field}".`);
+        }
+      }
+      const fields = { ...entity.fields, ...addedFields };
+
+      for (const field of Object.keys(extension.rename ?? {})) {
+        if(!(field in fields)) {
+          throw new Error(
+            `[db] defineSchema: extendEntities: "${table}" renames "${field}", which is not declared in \`fields\`.`,
+          );
+        }
+        if(entity.rename && field in entity.rename) {
+          throw new Error(`[db] defineSchema: extendEntities: "${table}" already renames "${field}".`);
+        }
+      }
+      const rename = entity.rename || extension.rename
+        ? { ...entity.rename, ...extension.rename }
+        : undefined;
+
+      // Rebuild through defineEntity so the additions face the same validation the entity's own
+      // declaration did — a pk restatement or an unprojected index throws here too.
+      const addedIndexes = (extension.indexes ?? []).filter((index) => !entity.indexes.includes(index));
+      extended[table] = defineEntity({
+        primaryKey: entity.primaryKeyFields.join(","),
+        fields,
+        indexes: [...entity.indexes, ...addedIndexes],
+        ...(rename ? { rename } : {}),
+        ...(entity.keyDefaults ? { keyDefaults: entity.keyDefaults } : {}),
+      });
+    }
+
+    return build(extended, seedTables);
+  }
+
   return {
     entities,
     tables: Object.freeze(Object.fromEntries(Object.keys(entities).map((table) => [table, table]))) as any,
@@ -72,30 +141,19 @@ function build(entities: Record<string, Entity>, seedTables: ReadonlySet<string>
     },
 
     extendIndexes(map: Partial<Record<string, string[]>>) {
-      const extended: Record<string, Entity> = { ...entities };
-
-      for (const [table, extra = []] of Object.entries(map)) {
-        const entity = entities[table];
-        if(!entity) {
+      for (const table of Object.keys(map)) {
+        if(!entities[table]) {
           throw new Error(
             `[db] defineSchema: extendIndexes names "${table}", which is not a table in this schema.`,
           );
         }
-
-        // Rebuild through defineEntity so the extra indexes face the same validation the
-        // entity's own did — a pk restatement or an unprojected field throws here too.
-        const added = extra.filter((index) => !entity.indexes.includes(index));
-        extended[table] = defineEntity({
-          primaryKey: entity.primaryKeyFields.join(","),
-          fields: entity.fields,
-          indexes: [...entity.indexes, ...added],
-          ...(entity.rename ? { rename: entity.rename } : {}),
-          ...(entity.keyDefaults ? { keyDefaults: entity.keyDefaults } : {}),
-        });
       }
-
-      return build(extended, seedTables);
+      return extendEntities(
+        Object.fromEntries(Object.entries(map).map(([table, indexes]) => [table, { indexes }])),
+      );
     },
+
+    extendEntities,
   };
 }
 
@@ -126,7 +184,7 @@ export function mergeSchemas<Schemas extends AppSchema<any>[]>(
       if(table in merged) {
         throw new Error(
           `[db] mergeSchemas: table "${table}" is claimed by more than one schema. ` +
-          "Use `pick` to take it from exactly one, or `extendIndexes` to widen it.",
+          "Use `pick` to take it from exactly one, and `extendEntities` to widen it.",
         );
       }
       merged[table] = entity;
