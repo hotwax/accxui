@@ -191,8 +191,8 @@ throws, so a bad declaration fails on load instead of leaving an empty index.
 - `pick(tables)`: a subset (throws on an unknown table).
 - `mergeSchemas(...)`: combines schemas (throws if two claim one table).
 - `extendIndexes(map)`: adds indexes, re-validated.
-- `extendEntities(map)`: adds fields, indexes and renames to an entity the APP picked, the APP-side
-  way to widen a framework entity. Additive only: it throws on a field already declared or a rename
+- `extendEntities(map)`: adds fields, indexes and renames to entities of any schema (seed or not),
+  the APP-side way to widen an entity it did not declare. Additive only: it throws on a field already declared or a rename
   that already exists, and the primary key and `keyDefaults` stay as declared. Sync domains project
   through the APP's composed entity, so added fields are stored with no domain change. Bump `version`.
 

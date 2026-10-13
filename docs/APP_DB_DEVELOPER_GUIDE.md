@@ -358,6 +358,61 @@ Bump it for *any* schema change — new table, added or removed index, changed p
 by the previous build will still be there with their old shape — a `date` field still holding an ISO
 string, a renamed field still absent. Treat bumping as part of the change, not a step afterwards.
 
+### Extending an entity
+
+An APP often composes entities it did not declare: the seed tables today, and shared framework
+entities (products, orders, …) as they are added. When such an entity is right but your APP needs
+more of the row (a field the shared projection drops, an index for your query), extend it instead of
+redeclaring it. `extendEntities` works on any schema, seed or not, so apply it to the schema the
+entity comes from, before `mergeSchemas`:
+
+```ts
+// src/db/appDb.ts
+export const appDb = defineAppDb({
+  suffix: "AppDB",
+  version: 5,                                            // ← bump: this is a schema change
+  schema: mergeSchemas(
+    sharedSchema.pick(["products", "facilities"]).extendEntities({
+      products: {
+        fields: { brandName: "text", introductionDate: "date" }, // added to the whitelist
+        indexes: ["brandName", "[productTypeId+brandName]"],     // may use the added fields
+        rename: { brandName: "brand" },                          // stored name ← API field name
+      },
+    }),
+    appSchema,
+  ),
+});
+```
+
+`sharedSchema` stands for whichever schema declares the entity: `commonSchema` for a seed table, or
+any other shared schema the APP picks from. Then read the field as usual:
+`appDb.entity(appDb.tables.products).query({ equals: { brandName } })`.
+
+**It merges, never replaces.** Your fields, indexes and renames are added to the entity's own. It
+throws at load, naming the table, when you:
+
+- add a field the entity already declares (you cannot change a field's kind),
+- rename a field the entity does not declare, or one it already renames,
+- name a table the schema does not have, or add an index `defineEntity` rejects (an undeclared
+  field, or the primary key restated).
+
+An index the entity already has is skipped rather than duplicated. The primary key and
+`keyDefaults` cannot be changed; to change those, declare your own table under that name in your
+APP schema instead of picking the shared one.
+
+**The table's domain stores your fields with no change to it.** Sync domains store rows through the
+APP's composed entity, not the original declaration, so whichever domain fills the table writes the
+added fields on its next sync. The fields must be in what that domain's endpoint returns. If they
+aren't, they stay empty, and the table needs a domain that reads an endpoint which does return them.
+
+**What it does not affect.** `extendEntities` returns a new schema and leaves the source schema
+untouched, so another APP picking the same entity still gets the original. Provenance is kept: a
+seed table stays a seed table (same domain, same status-card entry), and any other table keeps
+whatever domain fills it. `extendIndexes(map)` is still there as the indexes-only form.
+
+**Bump `version`** as with any schema change. Without the bump, existing installs keep rows written
+without the new fields until the next full resync, and an added index may not exist on them.
+
 ### Picking seed tables
 
 Take only what you read:
@@ -370,7 +425,8 @@ mergeSchemas(commonSchema.pick([...APP_SEED_TABLES]), appSchema)
 To take every seed table, pass `commonSchema` itself. Picking seven gives seven tables, not all of
 them.
 
-Two ways to fill a seed table differently from the framework:
+Two ways to fill a seed table differently from the framework (to keep the framework's domain and
+only store more of each row, see [Extending an entity](#extending-an-entity)):
 
 - **Same table, your own domain.** Pick the seed table, and register a domain with the seed domain's
   **name** and your endpoint, leaving the seed one out of `registerDomains`. For example, an APP
