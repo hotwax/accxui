@@ -103,3 +103,49 @@ describe("commonUtil.isVersionGreaterOrEqual", () => {
     expect(commonUtil.isVersionGreaterOrEqual(undefined as any, "1.0.0")).toBe(false);
   });
 });
+
+describe("commonUtil.getErrorMessage", () => {
+  const msg = (e: any, f?: string) => commonUtil.getErrorMessage(e, f);
+
+  it("reads OFBiz string and list errors", () => {
+    expect(msg({ response: { data: { _ERROR_MESSAGE_: "Bad item" } } })).toBe("Bad item");
+    expect(msg({ response: { data: { _ERROR_MESSAGE_LIST_: ["first error", "second error"] } } })).toBe("first error, second error");
+  });
+
+  it("reads Moqui string and array errors", () => {
+    expect(msg({ response: { data: { errors: "No access" } } })).toBe("No access");
+    expect(msg({ response: { data: { errors: ["x", "y"] } } })).toBe("x, y");
+  });
+
+  it("reads errorMessage and error properties", () => {
+    expect(msg({ response: { data: { errorMessage: "Service failed" } } })).toBe("Service failed");
+    expect(msg({ response: { data: { error: "Custom error" } } })).toBe("Custom error");
+  });
+
+  it("reads plain string response data", () => {
+    expect(msg({ response: { data: "Service Unavailable" } })).toBe("Service Unavailable");
+    expect(msg("Direct error string")).toBe("Direct error string");
+  });
+
+  it("ignores empty and whitespace-only bodies and falls back to error.message", () => {
+    expect(msg({ response: { data: "  " }, message: "Network Error" })).toBe("Network Error");
+    expect(msg({ response: { data: "" }, message: "Connection timeout" })).toBe("Connection timeout");
+  });
+
+  it("ignores HTML bodies from gateway/proxy error pages", () => {
+    expect(msg({ response: { data: "<html><body>502 Bad Gateway</body></html>" } }, "Gateway fallback")).toBe("Gateway fallback");
+    expect(msg({ response: { data: "  <!DOCTYPE html><html>504</html>" } }, "Timeout fallback")).toBe("Timeout fallback");
+  });
+
+  it("handles an already-unwrapped response object", () => {
+    expect(msg({ data: { _ERROR_MESSAGE_: "From resp" } })).toBe("From resp");
+    expect(msg({ data: { errors: "From Moqui resp" } })).toBe("From Moqui resp");
+  });
+
+  it("uses the provided fallback when no message is extractable", () => {
+    expect(msg({}, "Custom fallback")).toBe("Custom fallback");
+    expect(msg({ response: {} }, "Custom fallback")).toBe("Custom fallback");
+    expect(msg(null, "Fallback")).toBe("Fallback");
+    expect(msg(undefined)).toBe("");
+  });
+});

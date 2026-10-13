@@ -3,10 +3,14 @@ import { createI18n } from "vue-i18n"
 let i18n: any
 
 export const translate = (key: string, ...args: any[]) => {
+  let message = key;
   if (i18n?.global?.t) {
-    return i18n.global.t(key, ...args);
+    message = i18n.global.t(key, ...args);
   }
-  return key;
+  if (args[0] && typeof args[0] === "object" && typeof message === "string" && message.includes("{")) {
+    message = message.replace(/\{(\w+)\}/g, (_, k) => (args[0][k] !== undefined ? String(args[0][k]) : `{${k}}`));
+  }
+  return message;
 };
 
 function findBestLocale(supportedLocales: string[]): string | null {
