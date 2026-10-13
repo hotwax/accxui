@@ -253,13 +253,15 @@ const facilities = appDb.entity(appDb.tables.facilities);
 const one = await facilities.get(facilityId);                           // by primary key
 const some = await facilities.query({ equals: { facilityTypeId } });    // same QueryOptions as useLiveEntity
 const all = await facilities.all();                                     // then filter / find in JS — fine
-await facilities.upsertMany([fetchedRow]);                              // write-through after a fetch
+await refreshRecord("facility", { facilityId });                       // missing? the domain fetches and stores it
 ```
 
 `first`, `count`, `getMany`, `put`, `bulkPut`, `remove`, `snapshotReplace` and the rest are on the same
-`EntityClient`. Writes project through the entity, so pass the server's record as-is. After a
-mutation on the server, reconcile through `refreshAfterMutation` (§4) rather than writing the
-response yourself. For live updates outside a component, see §1e.
+`EntityClient`. Writes project through the entity, so pass the server's record as-is. **Writes belong
+to sync domains**: the domain that fills a table is the only thing that writes it, so the row has one
+shape however it arrived. App code reads with `appDb.entity` / `useLiveEntity`, changes server data
+with `mutate` (§4), and fetches a record it is missing with `refreshRecord` (§4). For live updates
+outside a component, see §1e.
 
 ### 1e. Manual live subscriptions (rare)
 
@@ -610,6 +612,31 @@ type tables don't, so after mutating one of those use `resyncDomain`.
 A `byPk` read that fails rejects, so it surfaces as `CacheReconciliationError` rather than a silent
 stale row. A `byPk` route may answer with the record itself or a one-item list; an empty answer
 removes the stored row.
+
+### `refreshRecord`: fetching one record you don't have yet
+
+A cache-first lookup that misses asks the table's domain for the record instead of fetching and
+writing it itself:
+
+```ts
+import { refreshRecord } from "@/services/appDbSync";
+
+const widgets = appDb.entity(appDb.tables.widgets);
+const cached = await widgets.get(widgetId);
+if (cached) return cached;
+
+await refreshRecord("widget", { widgetId });      // worker: the widget domain's refetchOne
+return (await widgets.get(widgetId)) ?? null;
+```
+
+- It waits only for the worker to be **open**, not for its first sync pass, so a lookup right
+  after login is not stuck behind the seed sync. It still waits behind a sync of the **same**
+  domain that is already running.
+- It rejects with the domain's own error (crossing the worker keeps the message, not HTTP fields),
+  never a `CacheReconciliationError`: nothing was written to the server.
+- It needs a running worker. If the sync failed to start, it rejects with the start error.
+- The domain needs a `refetchOne`. A table filled only on request gets a class C domain whose
+  `sync` returns `0`.
 
 ---
 

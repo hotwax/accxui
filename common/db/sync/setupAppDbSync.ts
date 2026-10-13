@@ -48,6 +48,13 @@ export interface AppDbSync {
   stopAppDbSync: () => Promise<void>;
   /** Prefer `mutate` for new writes: it reconciles as part of the write, so the refresh can't be forgotten. */
   refreshAfterMutation: (domain: string, pk: Record<string, unknown>) => Promise<number>;
+  /**
+   * Fetch one record into the local db through its domain's `refetchOne`, for a cache-first lookup
+   * that missed. Not tied to a write: waits only for the worker to be open (not its first sync
+   * pass), and rejects with the domain's own error rather than a `CacheReconciliationError`.
+   * Resolves with the rows written; read the record back with `appDb.entity(table).get(...)`.
+   */
+  refreshRecord: (domain: string, pk: Record<string, unknown>) => Promise<number>;
   /** Prefer `mutate` with `resync` for new writes; call this directly for a refresh not tied to a write. */
   resyncDomain: (domain: string) => Promise<void>;
   /**
@@ -353,6 +360,29 @@ export function setupAppDbSync(config: AppDbSyncConfig): AppDbSync {
     }
   }
 
+  /**
+   * The service once its worker is open, starting the sync if nothing has. Null when it could not
+   * start. A service without `whenOpen` (a test double) is waited on until fully ready instead.
+   */
+  async function whenOpen(): Promise<SyncService | null> {
+    const readiness = starting ?? startAppDbSync();
+    const current = service;
+    if (!current?.whenOpen) {
+      await readiness.catch(() => undefined);
+      return service;
+    }
+    await Promise.race([current.whenOpen(), readiness.catch(() => undefined)]);
+    return service === current ? current : null;
+  }
+
+  async function refreshRecord(domain: string, pk: Record<string, unknown>): Promise<number> {
+    const current = await whenOpen();
+    if (!current) {
+      throw new Error(bootstrapState.errors.__start || "The reference-cache service is unavailable.");
+    }
+    return current.refetchOne(domain, pk);
+  }
+
   async function resyncDomain(domain: string): Promise<void> {
     try {
       await config.db.client().clearSyncedThisLogin(domain);
@@ -449,6 +479,7 @@ export function setupAppDbSync(config: AppDbSyncConfig): AppDbSync {
     startAppDbSync,
     stopAppDbSync,
     refreshAfterMutation,
+    refreshRecord,
     resyncDomain,
     mutate,
     resyncReferenceData,

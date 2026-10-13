@@ -62,6 +62,12 @@ export interface SyncService {
   syncDomainNow: (domain: string) => Promise<number>;
   /** After a successful mutation: refetch that record by PK and upsert it into the cache. */
   refetchOne: (domain: string, pk: Record<string, unknown>) => Promise<number>;
+  /**
+   * Resolves once the worker exists and has been handed its start payload — WITHOUT waiting for its
+   * first sync pass, which after login covers every seed domain. The worker serves calls while that
+   * pass runs, so a targeted refetch needs only this. Optional: a test double may omit it.
+   */
+  whenOpen?: () => Promise<void>;
   /** Status-card data: every registered domain, with its declared label and sync class. */
   catalog: () => Promise<CatalogItem[]>;
   /** Diagnostics: domains this worker build knows about. */
@@ -210,6 +216,13 @@ export function createSyncService(opts: SyncServiceOptions): SyncService {
   // Bumped on every start()/stop() so a terminated attempt's late worker message (queued before
   // teardown, delivered after) is ignored rather than mutating state past that teardown.
   let startGeneration = 0;
+  /** Released when the worker has its start payload; replaced on stop() so the next start re-arms it. */
+  let opened = openSignal();
+  function openSignal() {
+    let resolve!: () => void;
+    const promise = new Promise<void>((done) => { resolve = done; });
+    return { promise, resolve };
+  }
 
   function pushTokenIfChanged() {
     const current = commonUtil.getToken() || "";
@@ -287,13 +300,16 @@ export function createSyncService(opts: SyncServiceOptions): SyncService {
       // Before start(): the worker handles calls in order, so its first pass already covers them.
       if (viewDomains) await api.setDomains(viewDomains);
 
-      await api.start({
+      const started = api.start({
         maargUrl: commonUtil.getMaargURL(),
         token: lastToken,
         omsInstance: commonUtil.getOMSInstanceName(),
         baseTickMs: opts.baseTickMs,
         domains: opts.domains,
       });
+      // The start payload is posted: calls made from here are handled after it, with its context.
+      opened.resolve();
+      await started;
 
       if (generation !== startGeneration) return; // terminated (stop()) while starting
 
@@ -318,6 +334,9 @@ export function createSyncService(opts: SyncServiceOptions): SyncService {
     if (publisher) { publisher.close(); publisher = null; }
     if (terminate) { terminate(); terminate = null; } // kills the worker + its timer
     harness = null;
+    // Release anyone waiting on the old worker; they find no harness and fail fast.
+    opened.resolve();
+    opened = openSignal();
     viewDomains = null;
     serviceState.running = false;
     // The next login's passes, not this session's, decide what has been fetched.
@@ -341,6 +360,7 @@ export function createSyncService(opts: SyncServiceOptions): SyncService {
     },
     syncDomainNow: async (domain) => (harness ? harness.syncDomainNow(domain) : 0),
     refetchOne: async (domain, pk) => (harness ? harness.refetchOne({ domain, pk }) : 0),
+    whenOpen: () => opened.promise,
     catalog: async () => (harness ? harness.catalog() : []),
     registeredDomains: async () => (harness ? harness.domains() : []),
     clearDomainError: clearDomainErrors,
