@@ -1,6 +1,6 @@
 ---
 name: accxui-data-access
-description: How AccxUI app code reads and writes local app data (IndexedDB). Use whenever you read, list, look up, cache, store, upsert or delete server data in apps/company or apps/order-manager, touch useLiveEntity, companyDb / orderManagerDb, appDb.entity, appDb.tables, useSeedData, refreshAfterMutation, a worker sync domain, Dexie, liveQuery or IndexedDB, or fix a data-access lint error (one ending "See docs/APP_DB_DEVELOPER_GUIDE.md §7").
+description: How AccxUI app code reads and writes local app data (IndexedDB). Use whenever you read, list, look up, cache, store, upsert or delete server data in apps/company or apps/order-manager, touch useLiveEntity, companyDb / orderManagerDb, appDb.entity, appDb.tables, useSeedData, mutate, refreshAfterMutation or resyncDomain, a worker sync domain, Dexie, liveQuery or IndexedDB, send a POST / PUT / DELETE that changes server data, or fix a data-access lint error (one ending "See docs/APP_DB_DEVELOPER_GUIDE.md §7").
 ---
 
 # AccxUI data access
@@ -67,8 +67,27 @@ has. A typo is a missing property and fails to compile. **Never** pass a string 
 
 ## After a server write
 
-Send the mutation with `api()` from the owning composable, then reconcile the local row — never
-write the server's response into the table yourself:
+**New writes use `mutate`** (from `@/services/appDbSync`): it sends the request through `api()` and
+reconciles the local db before it resolves. The reconcile argument is required, so the refresh
+cannot be forgotten. Never write the server's response into the table yourself.
+
+```ts
+await mutate({ url: `oms/serviceJobs/${jobName}`, method: "put", data }, { refresh: [["serviceJob", { jobName }]] });
+await mutate({ url: "oms/facilityGroups", method: "post", data }, { resync: ["facilityGroup"] });     // whole domain
+await mutate({ url: "oms/facilities", method: "post", data }, (resp) => ({ refresh: [["facility", { facilityId: resp.data.facilityId }]] }));
+await mutate({ url: "oms/jobs/run", method: "post", data }, { none: "fires a job; nothing stored locally" });
+```
+
+- `refresh` and `resync` can be combined; list every domain the write touches.
+- A failed write (thrown, or flagged by the app's `isError`) rejects with its own error and
+  reconciles nothing.
+- **Adoption is in progress.** Existing code still uses `api()` + `refreshAfterMutation` /
+  `resyncDomain`; leave it unless you are migrating it. If your app's `appDbSync.ts` does not export
+  `mutate` yet, wire it there first: pass `api` and `isError: (resp) => commonUtil.hasError(resp)` to
+  `setupAppDbSync` and add `mutate` to the exports. Only fall back to the two-call form below when
+  `mutate` cannot express the write.
+
+The two-call form, for existing code:
 
 ```ts
 await refreshAfterMutation("serviceJob", { jobName });   // domain name + primary key
@@ -76,8 +95,9 @@ await refreshAfterMutation("serviceJob", { jobName });   // domain name + primar
 await resyncDomain("facilityGroup");
 ```
 
-These take **sync domain names** (strings), not table names. A `CacheReconciliationError` means
-the server write succeeded and only the local refresh failed — warn, don't retry the write.
+These take **sync domain names** (strings), not table names. A `CacheReconciliationError` (from
+either form) means the server write succeeded and only the local refresh failed — warn, don't retry
+the write.
 
 ## Seed lookups
 

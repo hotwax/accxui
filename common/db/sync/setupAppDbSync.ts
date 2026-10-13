@@ -46,7 +46,9 @@ export interface AppDbSync {
   syncService: () => SyncService | null;
   startAppDbSync: (onSynced?: () => void) => Promise<void>;
   stopAppDbSync: () => Promise<void>;
+  /** Prefer `mutate` for new writes: it reconciles as part of the write, so the refresh can't be forgotten. */
   refreshAfterMutation: (domain: string, pk: Record<string, unknown>) => Promise<number>;
+  /** Prefer `mutate` with `resync` for new writes; call this directly for a refresh not tied to a write. */
   resyncDomain: (domain: string) => Promise<void>;
   /**
    * Send a write through the configured `api`, then reconcile the local db before resolving. The

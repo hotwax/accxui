@@ -502,6 +502,11 @@ A domain that isn't registered never runs, with no error. Add a test (for exampl
 Mutations go to the server first, then you reconcile the local row. Never write the server's
 response into the table yourself.
 
+> **New code: use [`mutate`](#mutate-the-write-and-its-reconciliation-in-one-call).** It does the
+> write and the reconciliation in one call and makes the reconcile step required. The APPs are
+> moving to it separately; until an APP's `appDbSync.ts` exports `mutate`, wire it there (see the
+> end of that section). The two-call form below is what existing code uses.
+
 ```ts
 import { refreshAfterMutation } from "@/services/appDbSync";
 
