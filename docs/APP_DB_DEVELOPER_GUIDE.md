@@ -641,23 +641,49 @@ Deep imports follow the folder layout of `common/db`:
 | `@common/db/sync/*` | `defineSyncDomain`, `defineSnapshotDomain`, `defineCursorDomain`, `syncRegistry`, `pollingWorkerHarness` | yes, except `syncService` and `setupAppDbSync` |
 | `@common/db/composables/*` | `useLiveEntity`, `useSeedData`, `useDbStatus` | **no** — main thread only; import them from the barrel |
 
-**App code uses the two patterns, and the build checks it.** Reads and writes go through
+**App code uses the two patterns, and lint checks it.** Reads and writes go through
 `useLiveEntity` and `appDb.entity(...)`, with table names from `appDb.tables`; there is no raw handle
-on an app database. The `data-access` ESLint plugin (`eslint/plugins/data-access.js`) enforces it
-for `apps/*/src`, and the APP's `pnpm build` runs it first — `pnpm lint:data-access`, through the
-dedicated `eslint.data-access.config.js`, so the repo's older lint findings cannot fail a build. The
-main `eslint.config.js` loads the same plugin, so editors show the errors as you type.
+on an app database. The rules live in the root `eslint.config.js`, built from core rules: imports
+through `@typescript-eslint/no-restricted-imports`, calls through `no-restricted-syntax`. The APP's
+`eslint.config.js` spreads the root config, so editors show the errors as you type and `pnpm lint`
+lists them. Every data-access message ends with "See docs/APP_DB_DEVELOPER_GUIDE.md §7". The build
+does not run lint.
 
-| Rule | Rejects |
-|---|---|
-| `data-access/no-direct-db` | `dexie`; value imports of `@common/db/storage/dbClient` / `baseDb`, `@common/db/schema/appDbRegistry`, or low-level names (`dbClient`, `getAppDb`, `ensureDbReady`, `hasSyncedThisLogin`, …) from `@common` / `@common/db`; `appDb.raw()`; `appDb.get()` outside the worker entry and `src/db/**`; `appDb.client()` outside `src/workers/**` and the `useDbStatus` argument |
-| `data-access/table-name-from-schema` | a string-literal table in `appDb.entity("x")` / `useLiveEntity("x")` (also behind `as any`); `--fix` rewrites it to `appDb.tables.x` |
-| `data-access/live-entity-in-setup` | `useLiveEntity` in `src/store`, `src/services`, `src/utils` or `src/workers` |
+An "app db" is any identifier ending in `Db` (`appDb`, `companyDb`, …).
 
-Type-only imports are fine. An APP-local Dexie store kept outside the app database (for
-example a product cache) is exempted by listing it in `DATA_ACCESS_EXEMPT` in the plugin. New data-access rules
-go in the same plugin, with cases in `common/tests/dataAccessLint.spec.ts`. AI agents get the same
-guidance from the `accxui-data-access` skill (`.agents/skills/accxui-data-access/SKILL.md`).
+| Rule | Rejects | Where |
+|---|---|---|
+| `@typescript-eslint/no-restricted-imports` | value imports of `dexie`, `@common/db/storage/dbClient` / `baseDb`, `@common/db/schema/appDbRegistry`, or low-level names (`dbClient`, `getAppDb`, `ensureDbReady`, `hasSyncedThisLogin`, …) from `@common` / `@common/db` | all of `src/` |
+| `no-restricted-syntax` | `appDb.raw()`; a string-literal table in `appDb.entity("x")`, `useLiveEntity("x")`, `appDb.client().get("x")` or `appDb.client().liveRead(["x"])` (also behind `as any`) | all of `src/` |
+| `no-restricted-syntax` | `appDb.get(oms)` | outside `src/db/**` and `src/workers/*.worker.ts` |
+| `no-restricted-syntax` | `appDb.client()`, except as the `useDbStatus` argument | outside `src/db/**` and `src/workers/**` |
+| `no-restricted-syntax` | `useLiveEntity(...)` | outside `.vue` files, `src/components`, `src/views`, `src/composables` |
+
+Type-only imports are fine. There is no autofix: write `appDb.tables.x` by hand.
+
+`no-restricted-syntax` is one rule, and flat config replaces its options per file instead of merging
+them. So the root config composes the selector lists: each data-access block restates the
+folder's other selectors (no `api()` in `.vue`, `use*` composable and store names). Add a new
+data-access selector to the `DA_*` lists at the top of `eslint.config.js`, and a case to
+`common/tests/dataAccessLint.spec.ts`, which runs the real config.
+
+An APP-local Dexie store kept outside the app database (for example a product cache) is exempted in
+the APP's own `eslint.config.js`:
+
+```js
+// apps/<app>/eslint.config.js
+import accxuiConfig from "../../eslint.config.js"
+
+export default [
+  ...accxuiConfig,
+  {
+    files: ["src/services/productDb.ts"],   // the APP's own Dexie store
+    rules: { "@typescript-eslint/no-restricted-imports": "off", "no-restricted-syntax": "off" }
+  }
+]
+```
+
+AI agents get the same guidance from the `accxui-data-access` skill (`.agents/skills/accxui-data-access/SKILL.md`).
 
 **`fields` is the whitelist.** Undeclared fields are dropped. Stored rows carry the declared fields
 plus `syncedAt` — nothing else. There is no `raw` copy of the server payload to fall back on.
@@ -814,4 +840,4 @@ default `intervalMs` values. Imported by domains and by pages that build their a
 Pages, composables and stores never add files to this structure. They use the two patterns:
 `useLiveEntity(appDb.tables.x, ...)` and `appDb.entity(appDb.tables.x)`, plus `useSeedData` /
 `seedData`, `refreshAfterMutation` and the page-activation functions from `services/appDbSync.ts`.
-`pnpm lint:data-access` checks it.
+The root lint rules check it (§7).

@@ -1,13 +1,13 @@
 ---
 name: accxui-data-access
-description: How AccxUI app code reads and writes local app data (IndexedDB). Use whenever you read, list, look up, cache, store, upsert or delete server data in apps/company or apps/order-manager, touch useLiveEntity, companyDb / orderManagerDb, appDb.entity, appDb.tables, useSeedData, refreshAfterMutation, a worker sync domain, Dexie, liveQuery or IndexedDB, or fix a `data-access/*` lint error.
+description: How AccxUI app code reads and writes local app data (IndexedDB). Use whenever you read, list, look up, cache, store, upsert or delete server data in apps/company or apps/order-manager, touch useLiveEntity, companyDb / orderManagerDb, appDb.entity, appDb.tables, useSeedData, refreshAfterMutation, a worker sync domain, Dexie, liveQuery or IndexedDB, or fix a data-access lint error (one ending "See docs/APP_DB_DEVELOPER_GUIDE.md §7").
 ---
 
 # AccxUI data access
 
 App code reaches the app database (one IndexedDB database per OMS instance) through **two
 patterns only**. Both go through the framework's `dbClient`; app code never touches Dexie.
-A lint gate enforces this and fails the build — `pnpm lint:data-access` in the app.
+The root `eslint.config.js` enforces this with core rules (`no-restricted-syntax`, `@typescript-eslint/no-restricted-imports`); every data-access message ends with "See docs/APP_DB_DEVELOPER_GUIDE.md §7".
 
 `appDb` below is the app's database object: `companyDb` (`@/db/companyDb`) in Company,
 `orderManagerDb` (`@/db/orderManagerDb`) in Order Manager.
@@ -61,8 +61,8 @@ Nothing re-renders afterwards. For live updates outside a component (rare),
 `companyDb.tables.facilities`, `orderManagerDb.tables.statuses`. These are static (no database
 needed — they work in workers and before sign-in) and list exactly the tables that app's database
 has. A typo is a missing property and fails to compile. **Never** pass a string literal
-(`entity("facilities")`, `useLiveEntity("facilities")`) — the lint rule rejects it, and
-`--fix` rewrites it.
+(`entity("facilities")`, `useLiveEntity("facilities")`) — the lint rule rejects it
+(there is no autofix; write `appDb.tables.x`).
 
 ## After a server write
 
@@ -84,20 +84,20 @@ Labels, option lists and joins over seed reference tables come from `useSeedData
 or `seedData` (stores, utils): `seed.facilityName(id)`, `seed.enumsByType(typeId)`. It is a shared
 cache on the same layer, not a separate data path.
 
-## Never in app code (`data-access/*` lint errors)
+## Never in app code (data-access lint errors)
 
 | Don't | Do instead |
 |---|---|
 | `import Dexie / liveQuery from "dexie"` | the two patterns above |
 | `dbClient`, `getAppDb`, `ensureDbReady`, `hasSyncedThisLogin` …, or value imports from `@common/db/storage/dbClient` / `baseDb` / `schema/appDbRegistry` | `appDb.entity(...)` / `useLiveEntity` (type-only imports are fine) |
 | `appDb.raw()` | doesn't exist — use `appDb.entity(...)` |
-| `appDb.get(oms)` / `getOrderManagerDb(oms)` | worker entry (`src/workers/*.worker.ts`) and `src/db/**` only |
+| `appDb.get(oms)` | worker entry (`src/workers/*.worker.ts`) and `src/db/**` only |
 | `appDb.client()` | worker sync domains (`src/workers/**`) and as the argument to `useDbStatus(...)` only |
-| `useLiveEntity` in `src/store`, `src/services`, `src/utils`, `src/workers` | `appDb.entity(...)` |
+| `useLiveEntity` outside `.vue` files, `src/components`, `src/views`, `src/composables` | `appDb.entity(...)` |
 | a string literal table name | `appDb.tables.x` |
 
-Exempt: the app-local stores outside the app database — Company `src/utils/storage.ts`, Order
-Manager `src/services/productDb.ts`.
+Exempt: an app-local Dexie store outside the app database, switched off in that app's own
+`eslint.config.js` (Company `src/utils/storage.ts`, Order Manager `src/services/productDb.ts`).
 
 ## Adding a table
 
@@ -108,8 +108,8 @@ query it, **bump `version`** in the app db module, and give it a sync domain. It
 ## Check your work
 
 ```bash
-pnpm lint:data-access          # from the app directory; the build runs it first
+pnpm lint 2>&1 | grep "APP_DB_DEVELOPER_GUIDE"   # from the app directory: data-access errors only
 ```
 
 Reference: `docs/APP_DB_DEVELOPER_GUIDE.md` (§1 patterns, §7 rules); the rules themselves are in
-`eslint/plugins/data-access.js`.
+the root `eslint.config.js` (the `DA_*` selector lists), tested by `common/tests/dataAccessLint.spec.ts`.

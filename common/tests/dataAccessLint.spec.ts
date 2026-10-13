@@ -1,136 +1,109 @@
-import { afterAll, describe, it } from "vitest";
-import { RuleTester } from "eslint";
-import typescriptParser from "@typescript-eslint/parser";
-import dataAccess from "../../eslint/plugins/data-access.js";
+import { describe, expect, it } from "vitest";
+import { ESLint } from "eslint";
+import path from "path";
 
 /**
- * The data-access lint rules: app code reaches the app database only through useLiveEntity and
- * appDb.entity(appDb.tables.x). Paths matter — `src/workers/**`, the worker entry and `src/db/**`
- * carry the allowances — so every case names its file.
+ * The data-access rules in the root `eslint.config.js`: app code reaches the app database only
+ * through useLiveEntity and appDb.entity(appDb.tables.x). They are built from core rules
+ * (`no-restricted-syntax`, `@typescript-eslint/no-restricted-imports`), so this runs the real config
+ * and keeps only the data-access messages. Paths matter — `src/workers/**`, the worker entry and
+ * `src/db/**` carry the allowances — so every case names its file.
  */
-RuleTester.afterAll = afterAll;
-RuleTester.describe = describe;
-RuleTester.it = it;
-RuleTester.itOnly = it.only;
+const ROOT = path.resolve(__dirname, "../..");
+const eslint = new ESLint({ cwd: ROOT, overrideConfigFile: path.join(ROOT, "eslint.config.js") });
 
-const tester = new RuleTester({
-  languageOptions: { parser: typescriptParser, ecmaVersion: "latest", sourceType: "module" },
-});
+const COMPOSABLE = "apps/app/src/composables/useWidgets.ts";
+const VIEW = "apps/app/src/views/Settings.vue";
+const STORE = "apps/app/src/store/order.ts";
+const SERVICE = "apps/app/src/services/sync.ts";
+const WORKER_DOMAIN = "apps/app/src/workers/domains/widgetDomain.ts";
+const WORKER_ENTRY = "apps/app/src/workers/appSync.worker.ts";
+const DB_MODULE = "apps/app/src/db/appDb.ts";
+const DB_IMPORT = 'import { appDb } from "@/db/appDb";\n';
 
-const COMPOSABLE = "/repo/apps/company/src/composables/useWidgets.ts";
-const VIEW = "/repo/apps/company/src/views/Settings.ts";
-const STORE = "/repo/apps/order-manager/src/store/order.ts";
-const WORKER_DOMAIN = "/repo/apps/company/src/workers/domains/organizationDomain.ts";
-const WORKER_ENTRY = "/repo/apps/company/src/workers/appSync.worker.ts";
-const DB_MODULE = "/repo/apps/order-manager/src/db/orderManagerDb.ts";
-const DB_IMPORT = 'import { companyDb } from "@/db/companyDb";\n';
+/** The data-access messages ESLint reports for `code` at `file`. */
+async function dataAccessErrors(file: string, code: string): Promise<string[]> {
+  const source = file.endsWith(".vue") ? `<script setup lang="ts">\n${code}\n</script>\n` : code;
+  const [result] = await eslint.lintText(source, { filePath: path.join(ROOT, file) });
+  return result.messages
+    .filter((message) => message.message.includes("APP_DB_DEVELOPER_GUIDE"))
+    .map((message) => message.message);
+}
 
-tester.run("data-access/no-direct-db", dataAccess.rules["no-direct-db"], {
-  valid: [
-    { filename: COMPOSABLE, code: DB_IMPORT + "companyDb.entity(companyDb.tables.facilities).all();" },
-    { filename: COMPOSABLE, code: 'import type { EntityClient } from "@common/db/storage/dbClient";' },
-    { filename: COMPOSABLE, code: 'import { type BaseDB } from "@common/db/storage/baseDb";' },
-    { filename: COMPOSABLE, code: 'import type Dexie from "dexie";' },
-    { filename: COMPOSABLE, code: 'import { toMillis } from "@common/db/storage/projection";' },
-    { filename: COMPOSABLE, code: 'import { useLiveEntity, type BaseDB } from "@common";' },
-    { filename: VIEW, code: DB_IMPORT + 'import { useDbStatus } from "@common";\nuseDbStatus(companyDb.client(), [], {});' },
-    { filename: WORKER_DOMAIN, code: DB_IMPORT + 'const c = companyDb.client();\nc.syncedThisLogin("organization");' },
-    { filename: WORKER_ENTRY, code: DB_IMPORT + "export const getDb = (oms: string) => companyDb.get(oms);" },
-    { filename: DB_MODULE, code: 'import { orderManagerDb } from "@/db/orderManagerDb";\nexport const get = (oms: string) => orderManagerDb.get(oms);' },
-  ],
-  invalid: [
-    { filename: COMPOSABLE, code: 'import Dexie from "dexie";', errors: [{ messageId: "dexie" }] },
-    { filename: COMPOSABLE, code: 'import { liveQuery } from "dexie";', errors: [{ messageId: "dexie" }] },
-    { filename: COMPOSABLE, code: 'import { dbClient } from "@common/db/storage/dbClient";', errors: [{ messageId: "storage" }] },
-    { filename: COMPOSABLE, code: 'import { ensureDbReady } from "@common/db/storage/baseDb";', errors: [{ messageId: "storage" }] },
-    { filename: COMPOSABLE, code: 'import { getAppDb } from "@common/db/schema/appDbRegistry";', errors: [{ messageId: "registry" }] },
-    { filename: COMPOSABLE, code: 'import { dbClient, getAppDb } from "@common";', errors: [{ messageId: "lowLevel" }, { messageId: "lowLevel" }] },
-    { filename: COMPOSABLE, code: 'import { markSyncedThisLogin } from "@common/db";', errors: [{ messageId: "lowLevel" }] },
-    { filename: COMPOSABLE, code: DB_IMPORT + "companyDb.raw();", errors: [{ messageId: "raw" }] },
-    { filename: COMPOSABLE, code: DB_IMPORT + 'companyDb.get("oms");', errors: [{ messageId: "get" }] },
-    { filename: STORE, code: 'import { getOrderManagerDb } from "@/db/orderManagerDb";\ngetOrderManagerDb("oms");', errors: [{ messageId: "get" }] },
-    { filename: COMPOSABLE, code: DB_IMPORT + 'companyDb.client().all("facilities");', errors: [{ messageId: "client" }] },
-    { filename: VIEW, code: DB_IMPORT + "const client = companyDb.client();", errors: [{ messageId: "client" }] },
-  ],
-});
+const valid: Array<[string, string]> = [
+  [COMPOSABLE, DB_IMPORT + "appDb.entity(appDb.tables.facilities).all();"],
+  [COMPOSABLE, 'import type { EntityClient } from "@common/db/storage/dbClient";'],
+  [COMPOSABLE, 'import { type BaseDB } from "@common/db/storage/baseDb";'],
+  [COMPOSABLE, 'import type Dexie from "dexie";'],
+  [COMPOSABLE, 'import { toMillis } from "@common/db/storage/projection";'],
+  [COMPOSABLE, 'import { useLiveEntity, type BaseDB } from "@common";'],
+  [COMPOSABLE, DB_IMPORT + "const table = appDb.tables.facilities;\nappDb.entity(table);"],
+  [COMPOSABLE, DB_IMPORT + "useLiveEntity<any>(appDb.tables.facilities, { equals: { a: 1 } });"],
+  [COMPOSABLE, "useLiveEntity<any>(LEDGER_TABLES[kind], scoped);"],
+  [COMPOSABLE, DB_IMPORT + "useLiveEntity<any>(appDb.tables.facilities, null);"],
+  [COMPOSABLE, 'otherThing.entity("facilities");'],
+  [VIEW, DB_IMPORT + 'import { useDbStatus } from "@common";\nuseDbStatus(appDb.client(), [], {});'],
+  [VIEW, DB_IMPORT + "useLiveEntity<any>(appDb.tables.facilities);"],
+  ["apps/app/src/components/FacilityList.ts", "useLiveEntity<any>(appDb.tables.facilities);"],
+  [WORKER_DOMAIN, DB_IMPORT + 'const c = appDb.client();\nc.syncedThisLogin("widget");'],
+  [WORKER_DOMAIN, DB_IMPORT + "appDb.client().count(appDb.tables.widgets);"],
+  [WORKER_ENTRY, DB_IMPORT + "export const getDb = (oms: string) => appDb.get(oms);"],
+  [DB_MODULE, "export const get = (oms: string) => appDb.get(oms);"],
+  ["common/db/composables/useLiveEntity.ts", "useLiveEntity<any>(t);"],
+];
 
-tester.run("data-access/table-name-from-schema", dataAccess.rules["table-name-from-schema"], {
-  valid: [
-    { filename: COMPOSABLE, code: DB_IMPORT + "companyDb.entity(companyDb.tables.facilities);" },
-    { filename: COMPOSABLE, code: DB_IMPORT + "const table = companyDb.tables.facilities;\ncompanyDb.entity(table);" },
-    { filename: COMPOSABLE, code: DB_IMPORT + "useLiveEntity<any>(companyDb.tables.facilities, { equals: { a: 1 } });" },
-    { filename: COMPOSABLE, code: "useLiveEntity<any>(LEDGER_TABLES[kind], scoped);" },
-    { filename: COMPOSABLE, code: 'otherThing.entity("facilities");' },
-    { filename: WORKER_DOMAIN, code: DB_IMPORT + "const c = companyDb.client();\nc.count(companyDb.tables.organizations);" },
-    { filename: WORKER_DOMAIN, code: DB_IMPORT + 'const c = companyDb.client();\nc.syncedThisLogin("organization");' },
-    { filename: WORKER_DOMAIN, code: 'const c = makeThing();\nc.count("organizations");' },
-  ],
-  invalid: [
-    {
-      filename: COMPOSABLE,
-      code: DB_IMPORT + 'companyDb.entity("facilities").all();',
-      output: DB_IMPORT + "companyDb.entity(companyDb.tables.facilities).all();",
-      errors: [{ messageId: "entity" }],
-    },
-    {
-      filename: COMPOSABLE,
-      code: DB_IMPORT + 'useLiveEntity<any>("facilities", opts);',
-      output: DB_IMPORT + "useLiveEntity<any>(companyDb.tables.facilities, opts);",
-      errors: [{ messageId: "liveEntity" }],
-    },
-    {
-      filename: COMPOSABLE,
-      code: DB_IMPORT + 'companyDb.entity("facilities" as any);',
-      output: DB_IMPORT + "companyDb.entity(companyDb.tables.facilities);",
-      errors: [{ messageId: "entity" }],
-    },
-    {
-      filename: COMPOSABLE,
-      code: 'useLiveEntity("facilities");',
-      output: null,
-      errors: [{ messageId: "liveEntity" }],
-    },
-    {
-      filename: COMPOSABLE,
-      code: 'useLiveEntity(client, "facilities");',
-      output: null,
-      errors: [{ messageId: "liveEntity" }],
-    },    {
-      filename: WORKER_DOMAIN,
-      code: DB_IMPORT + 'const c = companyDb.client();\nc.count("organizations");',
-      output: DB_IMPORT + "const c = companyDb.client();\nc.count(companyDb.tables.organizations);",
-      errors: [{ messageId: "client" }],
-    },
-    {
-      filename: WORKER_DOMAIN,
-      code: DB_IMPORT + 'companyDb.client().put("facilities" as any, row);',
-      output: DB_IMPORT + "companyDb.client().put(companyDb.tables.facilities, row);",
-      errors: [{ messageId: "client" }],
-    },
-    {
-      filename: WORKER_DOMAIN,
-      code: DB_IMPORT + 'const c = companyDb.client();\nc.transaction("rw", ["facilities", companyDb.tables.organizations], fn);',
-      output: DB_IMPORT + "const c = companyDb.client();\nc.transaction(\"rw\", [companyDb.tables.facilities, companyDb.tables.organizations], fn);",
-      errors: [{ messageId: "client" }],
-    },
-  ],
-});
+const invalid: Array<[string, string]> = [
+  [COMPOSABLE, 'import Dexie from "dexie";'],
+  [COMPOSABLE, 'import { liveQuery } from "dexie";'],
+  [COMPOSABLE, 'import { dbClient } from "@common/db/storage/dbClient";'],
+  [COMPOSABLE, 'import { ensureDbReady } from "@common/db/storage/baseDb";'],
+  [COMPOSABLE, 'import { getAppDb } from "@common/db/schema/appDbRegistry";'],
+  [COMPOSABLE, 'import { markSyncedThisLogin } from "@common/db";'],
+  [COMPOSABLE, DB_IMPORT + "appDb.raw();"],
+  [COMPOSABLE, DB_IMPORT + 'appDb.get("oms");'],
+  [STORE, DB_IMPORT + 'appDb.get("oms");'],
+  [COMPOSABLE, DB_IMPORT + "appDb.client().all(appDb.tables.facilities);"],
+  [VIEW, DB_IMPORT + "const client = appDb.client();"],
+  [COMPOSABLE, DB_IMPORT + 'appDb.entity("facilities").all();'],
+  [COMPOSABLE, DB_IMPORT + 'appDb.entity("facilities" as any);'],
+  [COMPOSABLE, DB_IMPORT + 'useLiveEntity<any>("facilities", opts);'],
+  [COMPOSABLE, 'useLiveEntity(client, "facilities");'],
+  [WORKER_DOMAIN, DB_IMPORT + 'appDb.client().put("facilities" as any, row);'],
+  [WORKER_DOMAIN, DB_IMPORT + 'appDb.client().liveRead(["facilities", appDb.tables.widgets], fn);'],
+  [STORE, "useLiveEntity<any>(appDb.tables.statuses);"],
+  [SERVICE, "useLiveEntity<any>(t);"],
+  ["apps/app/src/utils/rows.ts", "useLiveEntity<any>(t);"],
+  [WORKER_DOMAIN, "useLiveEntity<any>(t);"],
+  ["apps/app/src/router/guards.ts", "useLiveEntity<any>(t);"],
+  ["apps/app/src/main.ts", "useLiveEntity<any>(t);"],
+  [DB_MODULE, "useLiveEntity<any>(t);"],
+];
 
-tester.run("data-access/live-entity-in-setup", dataAccess.rules["live-entity-in-setup"], {
-  valid: [
-    { filename: COMPOSABLE, code: "useLiveEntity<any>(companyDb.tables.facilities);" },
-    { filename: "/repo/apps/company/src/views/Facilities.ts", code: "useLiveEntity<any>(companyDb.tables.facilities);" },
-    { filename: "/repo/apps/company/src/components/FacilityList.ts", code: "useLiveEntity<any>(companyDb.tables.facilities);" },
-    { filename: "/repo/apps/company/src/App.vue", code: "useLiveEntity<any>(companyDb.tables.facilities);" },
-    { filename: "/repo/common/db/composables/useLiveEntity.ts", code: "useLiveEntity<any>(t);" },
-  ],
-  invalid: [
-    { filename: STORE, code: "useLiveEntity<any>(orderManagerDb.tables.statuses);", errors: [{ messageId: "notSetup" }] },
-    { filename: "/repo/apps/company/src/services/sync.ts", code: "useLiveEntity<any>(t);", errors: [{ messageId: "notSetup" }] },
-    { filename: "/repo/apps/company/src/utils/rows.ts", code: "useLiveEntity<any>(t);", errors: [{ messageId: "notSetup" }] },
-    { filename: WORKER_DOMAIN, code: "useLiveEntity<any>(t);", errors: [{ messageId: "notSetup" }] },
-    { filename: "/repo/apps/company/src/router/guards.ts", code: "useLiveEntity<any>(t);", errors: [{ messageId: "notSetup" }] },
-    { filename: "/repo/apps/company/src/main.ts", code: "useLiveEntity<any>(t);", errors: [{ messageId: "notSetup" }] },
-    { filename: DB_MODULE, code: "useLiveEntity<any>(t);", errors: [{ messageId: "notSetup" }] },
-  ],
+describe("data-access lint rules", () => {
+  it.each(valid)("allows %s: %s", async (file, code) => {
+    expect(await dataAccessErrors(file, code)).toEqual([]);
+  });
+
+  it.each(invalid)("rejects %s: %s", async (file, code) => {
+    expect(await dataAccessErrors(file, code)).toHaveLength(1);
+  });
+
+  it("reports each low-level name imported from @common", async () => {
+    expect(await dataAccessErrors(COMPOSABLE, 'import { dbClient, getAppDb } from "@common";')).toHaveLength(2);
+  });
+
+  it("keeps the existing per-folder rules on files the data-access blocks also cover", async () => {
+    const [store] = await eslint.lintText('export const orderStore = defineStore("order", {});', {
+      filePath: path.join(ROOT, STORE),
+    });
+    expect(store.messages.map((message) => message.message)).toContain(
+      "Store names must start with 'use' and end with 'Store' (e.g., useUserStore).",
+    );
+    const [view] = await eslint.lintText('<script setup lang="ts">\napi({ url: "x" });\n</script>\n', {
+      filePath: path.join(ROOT, VIEW),
+    });
+    expect(view.messages.map((message) => message.message)).toContain(
+      "Calling 'api' directly in vue files is not allowed. Use services or composables for API calls.",
+    );
+  });
 });

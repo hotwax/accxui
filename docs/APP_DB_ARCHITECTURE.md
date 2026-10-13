@@ -124,15 +124,16 @@ const some = await facilities.query({ equals: { facilityTypeId } });
 
 ### 2.2 Enforced by lint
 
-`pnpm lint:data-access` (run by `build`, rules in `eslint/plugins/data-access.js`) rejects any other
-path in APP code:
+The root `eslint.config.js` rejects any other path in APP code, using core ESLint rules
+(`no-restricted-syntax`, `@typescript-eslint/no-restricted-imports`). The APP's own
+`eslint.config.js` spreads the root config, so editors and `pnpm lint` show the errors:
 
 | Not allowed | Use instead |
 |---|---|
 | `import … from "dexie"` | the two patterns |
 | `dbClient`, `getAppDb`, `ensureDbReady`, `BaseDB` value imports | `appDb.entity(...)` / `useLiveEntity` |
 | a string table name | `appDb.tables.x` |
-| `useLiveEntity` in `src/store`, `src/services`, `src/utils`, `src/workers` | `appDb.entity(...)` |
+| `useLiveEntity` outside `.vue`, `src/components`, `src/views`, `src/composables` | `appDb.entity(...)` |
 | `appDb.get(oms)` outside `src/db/**` and the worker entry | `appDb.entity(...)` |
 | `appDb.client()` outside `src/workers/**` and `useDbStatus(...)` | `appDb.entity(...)` |
 
