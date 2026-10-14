@@ -925,6 +925,9 @@ importers:
       firebase:
         specifier: 'catalog:'
         version: 10.3.1
+      ionicons:
+        specifier: 'catalog:'
+        version: 8.0.13
       luxon:
         specifier: 'catalog:'
         version: 3.7.2
@@ -983,6 +986,9 @@ importers:
       '@vue/test-utils':
         specifier: ^2.0.0-0
         version: 2.4.6
+      chrome-ide-trace:
+        specifier: ^0.1.0
+        version: 0.1.1(@vue/compiler-dom@3.5.30)(@vue/compiler-sfc@3.5.30)(vite@5.2.0(@types/node@24.13.3)(lightningcss@1.33.0)(terser@5.46.1))
       eslint:
         specifier: 'catalog:'
         version: 10.2.0(jiti@2.6.1)
@@ -16382,7 +16388,9 @@ snapshots:
       source-map: 0.6.1
       string-length: 2.0.0
     transitivePeerDependencies:
+      - bufferutil
       - supports-color
+      - utf-8-validate
 
   '@jest/schemas@29.6.3':
     dependencies:
@@ -20392,6 +20400,12 @@ snapshots:
       '@vue/compiler-sfc': 3.5.30
       vite: 5.2.0(@types/node@22.19.15)(lightningcss@1.33.0)(terser@5.46.1)
 
+  chrome-ide-trace@0.1.1(@vue/compiler-dom@3.5.30)(@vue/compiler-sfc@3.5.30)(vite@5.2.0(@types/node@24.13.3)(lightningcss@1.33.0)(terser@5.46.1)):
+    dependencies:
+      '@vue/compiler-dom': 3.5.30
+      '@vue/compiler-sfc': 3.5.30
+      vite: 5.2.0(@types/node@24.13.3)(lightningcss@1.33.0)(terser@5.46.1)
+
   chrome-trace-event@1.0.4: {}
 
   ci-info@1.6.0: {}
@@ -24261,7 +24275,9 @@ snapshots:
       pretty-format: 24.9.0
       throat: 4.1.0
     transitivePeerDependencies:
+      - bufferutil
       - supports-color
+      - utf-8-validate
 
   jest-leak-detector@24.9.0:
     dependencies:
