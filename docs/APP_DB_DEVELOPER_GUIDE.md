@@ -46,14 +46,14 @@ Two conveniences sit on the same layer and are not separate data paths:
 
 | You need | Use | Shape |
 |---|---|---|
-| A label, option list or joined lookup for seed data | `useSeedData()` in components; `seedData` in stores and utils | `seed.facilityName(id)` in a template or `computed` |
+| A label, option list or joined lookup for seed data | `useSeedData()` during setup (never in `App.vue`); `await loadSeedData()` in stores and utils | `seed.facilityName(id)` in a template or `computed` |
 | Row counts + last-sync per domain (Settings) | `useDbStatus(appDb.client(), catalog, actions)` | `{ domains, totalRows, refreshAll, … }` |
 
 **Not for pages or stores** — framework and worker internals:
 
 | You want… | Use | Who uses it |
 |---|---|---|
-| Snapshot reads across several tables; sync login markers | `appDb.client()` — `read`, `liveRead`, `syncedThisLogin`, `markSyncedThisLogin`, `clearSyncedThisLogin` | Framework internals (`useSeedData`, `useDbStatus`, `setupAppDbSync`) and hand-written worker sync domains |
+| Snapshot reads across several tables; sync login markers | `appDb.client()` — `read`, `liveRead`, `syncedThisLogin`, `markSyncedThisLogin`, `clearSyncedThisLogin` | Framework internals (`useLiveEntity`'s `syncDomain`, `loadSeedData`, `useDbStatus`, `setupAppDbSync`) and hand-written worker sync domains |
 
 **Name tables through `appDb.tables`.** Every schema carries its table names as a static object —
 `commonSchema.tables`, `appSchema.tables`, and the composed `appDb.tables` (the seed tables
@@ -79,20 +79,29 @@ There is no raw Dexie handle on an app database: nothing outside `common/db` tou
 ### 1a. `useSeedData()` — seed lookups
 
 Typed getters over the framework seed tables: labels, option lists and in-memory joins. It takes no
-arguments and resolves the active database itself. The APP may wrap it in its own lookup composable.
+arguments and resolves the active database itself. The APP may wrap it in its own lookup composable,
+which then also runs during setup.
 
-Each seed table is one Dexie `liveQuery`, opened the first time any getter needs it and kept until
-sync stops (logout, or the stop at the start of a login). Every caller shares that one read, so a
-table is read once per session, and the query re-emits whenever the table changes: the login sync
-filling it, a `refreshAfterMutation`, or a resync from Settings. A table nobody asks for is never
-read. There is no init step.
+**One instance per component tree.** The first `useSeedData()` in a tree creates the instance and
+provides it; every component below it (a page's cards, rows, segments) injects that same instance,
+so a list of 200 cards still holds one read per table. A second call in the same setup returns the
+same instance. Each seed table is opened through `useLiveEntity` the first time a getter needs it,
+usually from a template during render, inside the scope captured at setup, and closes when the
+providing component unmounts. The read re-emits whenever the table changes: the login sync filling
+it, a `refreshAfterMutation`, or a resync from Settings. A table nobody asks for is never read.
+
+**Where to call it.** In the page or component that shows the labels, during setup. Never in
+`App.vue` or a layout: everything would inject that instance and every seed table it touched would
+stay open for the session (lint rejects it in `App.vue`). It throws outside setup. Ionic keeps
+pages in the navigation stack mounted, so a page's reads stay open while a page pushed over it is
+shown. A modal opened with `modalController` is mounted outside the page's tree and opens its own.
 
 Getters come in two kinds, told apart by name:
 
 | Kind | Names | Returns | Use it for |
 |---|---|---|---|
 | Reactive | no prefix: `statusDescription`, `facilityName`, `enumsByType`, `countries`, `shipmentMethodOptions`, `partyRelationshipTypes`, `allowedTransitions`, … | a value, synchronously | templates and `computed`s |
-| Async | `get` prefix: `getFacilities`, `getGeos`, `getProductStores`, `getEnumsByType`, … | a Promise of the table's rows once its first local read lands | code that must act on the rows, such as building a request from them |
+| Async | `get` prefix: `getFacilities`, `getGeos`, `getProductStores`, `getEnumsByType`, … | a Promise of the table's current rows, read once | code that must act on the rows, such as building a request from them |
 
 ```ts
 import { useSeedData } from "@common/db";
@@ -115,15 +124,35 @@ const facilityRows = await seed.getFacilities();
 const facilityIds = facilityRows.filter(isPhysicalFacility).map((facility) => facility.facilityId);
 ```
 
-**In stores, services and utils, use `seedData`, not `useSeedData()`.** It is the same getter set as
-a plain object, and it reads the same shared tables, so it answers exactly what the composable does.
-Pinia stores never call a composable:
+**In stores, services and utils, use `await loadSeedData()`, not `useSeedData()`.** It answers the
+same getters from a one-shot snapshot: the seed tables (all of them, or the ones you name) and their
+login markers, read in ONE transaction. It does not follow later changes, so keep it in the store's
+state with `markRaw` and read it again on the next load. A getter that runs before the first read
+answers from `emptySeedData` (raw ids, empty lists), as a cold table does. A getter over a table
+left out of a narrowed snapshot throws, naming it.
 
 ```ts
-import { seedData } from "@common/db";
+import { emptySeedData, loadSeedData, type SeedData } from "@common/db";
+import { markRaw } from "vue";
 
-const parentTypeId = seedData.facilityType(seedData.facility(facilityId)?.facilityTypeId)?.parentTypeId;
+state: () => ({ seedSnapshot: null as SeedData | null }),
+getters: {
+  seed: (state): SeedData => state.seedSnapshot ?? emptySeedData,
+},
+actions: {
+  async fetchOrder(orderId: string) {
+    const [resp] = await Promise.all([getOrder(orderId), this.loadSeed()]);
+    // …
+  },
+  async loadSeed() {
+    this.seedSnapshot = markRaw(await loadSeedData());
+  },
+},
 ```
+
+A util never calls `useSeedData()` either: it takes the caller's seed as an argument, typed as just
+the getters it reads (`Pick<SeedData, "facility" | "facilityType">`), so a component passes its
+`useSeedData()` and a store its snapshot.
 
 **Don't resolve seed data into a ref.** There's no need for `watch` + `await` + a label-map `ref`:
 the reactive getter already re-renders on its own, and a watcher only adds a raw-id flash and a race
@@ -147,7 +176,7 @@ const isLoadingStates = computed(() => !!form.countryGeoId && !countryStates.val
 `synced` stays false if that domain's sync fails, so a screen that must not spin forever also
 accepts "first read landed and `serviceState.running` is false".
 
-**The async `get*` getters wait for the first local read, not for the sync.** Use them when the rows
+**The async `get*` getters read the table once, now, not after the sync.** Use them when the rows
 must be in hand before you continue, such as code that stamps a looked-up value permanently
 (for example, building an address state from `await getGeos()`). On a fresh
 login they can still resolve `[]`, so they do not tell "not synced yet" from "empty". Use
@@ -170,7 +199,8 @@ own tables are built on it; seed lookups go through `useSeedData` instead.
 Pick `useSeedData` for read-only seed lookups: labels, dropdown options, names by id. Pick `useLiveEntity`
 when the screen queries a table (`equals`, `scope`, `filter`, a date range), needs `hydrated` for
 its loading and empty states, or reads one of the app's own tables. Each `useLiveEntity` call is its own
-subscription, closed on unmount; `useSeedData`'s are shared and live for the session.
+subscription, closed on unmount; `useSeedData`'s are shared by the component tree that opened them
+and close when its root unmounts.
 
 ```ts
 import { useLiveEntity } from "@common";
@@ -275,7 +305,7 @@ one keeps re-running its query on every write until the page reloads. So:
 - **The sync worker** (`src/workers/**`): no live queries at all. It writes and renders nothing; read
   once with `appDb.entity(...).get / query / all`.
 - **Stores, services, utils:** allowed, but keep the subscription and unsubscribe it in the same
-  teardown that runs on logout, as `useSeedData` does in `clearSeedTables()`:
+  teardown that runs on logout:
 
 ```ts
 import { appDb } from "@/db/appDb";
@@ -870,7 +900,8 @@ An "app db" is any identifier ending in `Db` (`appDb`, `companyDb`, …).
 | `no-restricted-syntax` | `appDb.get(oms)` | outside `src/db/**` and `src/workers/*.worker.ts` |
 | `no-restricted-syntax` | `appDb.client()`, except as the `useDbStatus` argument | outside `src/db/**` and `src/workers/**` |
 | `no-restricted-syntax` | a write: `upsertMany(...)` / `snapshotReplace(...)` on anything, or `put` / `bulkPut` / `remove` / `bulkRemove` / `clear` called on `appDb.entity(...)`. Use `refreshRecord`, or `refreshAfterMutation` / `resyncDomain` after a server write (§4) | outside `src/db/**` and `src/workers/**` |
-| `no-restricted-syntax` | `useLiveEntity(...)` | outside `.vue` files, `src/components`, `src/views`, `src/composables` |
+| `no-restricted-syntax` | `useLiveEntity(...)`, `useSeedData()`; use `appDb.entity(...)` / `await loadSeedData()` | outside `.vue` files, `src/components`, `src/views`, `src/composables` |
+| `no-restricted-syntax` | `useSeedData()`: it would hold every seed table open for the session (§1a) | `src/App.vue` |
 | `no-restricted-syntax` | `.live(...)` / `.liveRead(...)`: use `useLiveEntity` | `.vue` files, `src/components`, `src/views`, `src/composables` |
 | `no-restricted-syntax` | `.live(...)` / `.liveRead(...)` at all | `src/workers/**` |
 | `no-restricted-syntax` | a discarded subscription: `x.live(...).subscribe(...);` as a bare statement, or `void …subscribe(...)` | everywhere else (§1e) |
@@ -1065,5 +1096,5 @@ default `intervalMs` values. Imported by domains and by pages that build their a
 
 Pages, composables and stores never add files to this structure. They use the two patterns:
 `useLiveEntity(appDb.tables.x, ...)` and `appDb.entity(appDb.tables.x)`, plus `useSeedData` /
-`seedData`, `refreshAfterMutation` and the page-activation functions from `services/appDbSync.ts`.
+`loadSeedData`, `refreshAfterMutation` and the page-activation functions from `services/appDbSync.ts`.
 The APP's build lints it first (§7).

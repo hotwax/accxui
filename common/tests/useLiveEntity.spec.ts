@@ -135,3 +135,50 @@ describe("useLiveEntity table guard", () => {
     scope.stop();
   });
 });
+
+describe("useLiveEntity syncDomain", () => {
+  /** A client whose `liveRead` hands the reader the rows and, when present, the domain's login marker. */
+  const markerClient = (rows: any[], markers: Record<string, unknown>) => {
+    const reads: { tables: string[]; markerKey?: string }[] = [];
+    const client = {
+      liveRead: (tables: string[], read: (tx: any) => Promise<unknown>) => ({
+        subscribe: ({ next }: any) => {
+          const entry: { tables: string[]; markerKey?: string } = { tables };
+          reads.push(entry);
+          read({
+            entity: (table: string) => ({
+              query: async () => (table === "statuses" ? rows : []),
+              get: async (key: string) => { entry.markerKey = key; return markers[key]; },
+            }),
+          }).then(next);
+          return { unsubscribe: () => undefined };
+        },
+      }),
+      entity: () => { throw new Error("syncDomain reads go through liveRead"); },
+    } as any;
+    return { client, reads };
+  };
+
+  it("reads the rows and the domain's login marker in one transaction, reporting synced", async () => {
+    const { client, reads } = markerClient([], { "loginSync:status": { synced: true } });
+    const scope = effectScope();
+    const list = scope.run(() => useLiveEntity(client, "statuses", { syncDomain: "status" }))!;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(reads).toEqual([{ tables: ["statuses", "syncMeta"], markerKey: "loginSync:status" }]);
+    expect(list.records.value).toEqual([]);
+    expect(list.synced.value).toBe(true);
+    scope.stop();
+  });
+
+  it("is not synced while the marker is missing, even with rows", async () => {
+    const { client } = markerClient([{ statusId: "A" }], {});
+    const scope = effectScope();
+    const list = scope.run(() => useLiveEntity(client, "statuses", { syncDomain: "status" }))!;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(list.records.value).toEqual([{ statusId: "A" }]);
+    expect(list.synced.value).toBe(false);
+    scope.stop();
+  });
+});

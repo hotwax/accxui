@@ -14,6 +14,7 @@ import globals from "globals";
  * Data access: app code reaches the app database (IndexedDB) only through two patterns,
  *   - rows live on screen:       useLiveEntity(appDb.tables.x, options)  (components, views, composables)
  *   - an answer now:             appDb.entity(appDb.tables.x)            (anywhere)
+ * plus the seed lookups: useSeedData() during setup (never in App.vue), await loadSeedData() elsewhere,
  * with table names always from `appDb.tables`. Writes belong to the table's sync domain
  * (`src/workers/**`): app code fetches a missing record with refreshRecord, and after a server write
  * reconciles with refreshAfterMutation / resyncDomain. An "app db" is any identifier ending in `Db`
@@ -104,9 +105,24 @@ const DA_NO_CLIENT = [{
 }];
 
 /** Outside Vue setup code (.vue files, src/components, src/views, src/composables). */
-const DA_NO_LIVE_ENTITY = [{
-  selector: "CallExpression[callee.name='useLiveEntity']",
-  message: "useLiveEntity is a Vue composable and only works during setup (components, views, composables). Here use appDb.entity(appDb.tables.x) for a one-shot read." + DATA_ACCESS_GUIDE,
+const DA_NO_LIVE_ENTITY = [
+  {
+    selector: "CallExpression[callee.name='useLiveEntity']",
+    message: "useLiveEntity is a Vue composable and only works during setup (components, views, composables). Here use appDb.entity(appDb.tables.x) for a one-shot read." + DATA_ACCESS_GUIDE,
+  },
+  {
+    selector: "CallExpression[callee.name='useSeedData']",
+    message: "useSeedData is a Vue composable and only works during setup (components, views, composables). Here read a snapshot: const seed = await loadSeedData(), or take the caller's seed as an argument." + DATA_ACCESS_GUIDE,
+  },
+];
+
+/**
+ * In App.vue: the first useSeedData() in a tree provides its live reads to every component below it,
+ * so one in the root would hold every seed table open for the whole session.
+ */
+const DA_APP_NO_SEED = [{
+  selector: "CallExpression[callee.name='useSeedData']",
+  message: "No useSeedData() in App.vue: every component would inject this one instance and its seed reads would stay open for the session. Call it in the page (or component) that shows the labels." + DATA_ACCESS_GUIDE,
 }];
 
 /** In Vue setup code: useLiveEntity owns the subscription, so no hand-made live query. */
@@ -142,7 +158,7 @@ const DA_NO_WRITE = [
 const LIVE_SUBSCRIBE = "CallExpression[callee.property.name='subscribe'][callee.object.callee.property.name=/^(live|liveRead)$/]";
 const DA_KEEP_SUBSCRIPTION = [{
   selector: `ExpressionStatement > ${LIVE_SUBSCRIBE}, UnaryExpression[operator='void'] > ${LIVE_SUBSCRIBE}`,
-  message: "Keep the subscription: const sub = appDb.entity(appDb.tables.x).live(options).subscribe(…), then sub.unsubscribe() in the same teardown that runs on logout (as useSeedData does in clearSeedTables). A discarded subscription can never be unsubscribed." + DATA_ACCESS_GUIDE,
+  message: "Keep the subscription: const sub = appDb.entity(appDb.tables.x).live(options).subscribe(…), then sub.unsubscribe() in the same teardown that runs on logout. A discarded subscription can never be unsubscribed." + DATA_ACCESS_GUIDE,
 }];
 
 /** Page-level sync: an activation is always retired, and only by its own owner. */
@@ -225,6 +241,10 @@ function dataAccessBlocks(folder = { vue: [], composables: [], store: [] }) {
     {
       files: ["**/src/**/*.vue"],
       rules: { "no-restricted-syntax": syntax(folder.vue, DA_EVERYWHERE, DA_PAGE_SYNC, DA_NO_GET, DA_NO_CLIENT, DA_NO_WRITE, DA_SETUP_NO_MANUAL_LIVE, DA_PAGE_LEAVE) }
+    },
+    {
+      files: ["**/src/App.vue"],
+      rules: { "no-restricted-syntax": syntax(folder.vue, DA_EVERYWHERE, DA_PAGE_SYNC, DA_NO_GET, DA_NO_CLIENT, DA_NO_WRITE, DA_SETUP_NO_MANUAL_LIVE, DA_PAGE_LEAVE, DA_APP_NO_SEED) }
     },
     {
       files: ["**/src/**/composables/*.ts"],

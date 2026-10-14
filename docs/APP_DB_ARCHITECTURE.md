@@ -68,7 +68,7 @@ flowchart TB
     end
     subgraph CONV["Framework conveniences on the same layer"]
       direction LR
-      USD["useSeedData() / seedData<br/>seed lookups"]
+      USD["useSeedData() / loadSeedData()<br/>seed lookups"]
       UDS["useDbStatus(appDb.client(), …)<br/>status card"]
       SYNC["Sync domains, harness,<br/>setupAppDbSync"]
     end
@@ -116,9 +116,12 @@ const some = await facilities.query({ equals: { facilityTypeId } });
   `limit`.
 - **`hydrated`** is true once the first emission arrived and either rows exist or no sync is
   running. It tells "not loaded yet" from "really empty".
-- **Seed lookups** (`useSeedData()` in components, `seedData` in stores): one shared live query
-  per seed table, opened on first use, kept until logout. Label getters (`facilityName(id)`),
-  list getters with `.withSync()` (is the empty list real?), async `get*` getters.
+- **Seed lookups** (`useSeedData()` during setup, `await loadSeedData()` in stores): the first
+  `useSeedData()` in a component tree provides one live read per seed table (through
+  `useLiveEntity`, with its domain's login marker), opened on first use and shared by every
+  component below it, closed when that component unmounts; never in `App.vue`. `loadSeedData()` is
+  a one-shot snapshot. Label getters (`facilityName(id)`), list getters with `.withSync()` (is the
+  empty list real?), async `get*` getters.
 - **Table names** always come from `appDb.tables.x`: typed, static, work in the worker and before
   sign-in.
 

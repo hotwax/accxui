@@ -206,7 +206,8 @@ sequenceDiagram
 |---|---|---|
 | Rows on screen | `useLiveEntity(appDb.tables.x, opts)` | yes |
 | A value now, or a write | `appDb.entity(appDb.tables.x).get / query / …` | no |
-| Seed labels and lists | `useSeedData()` / `seedData` (shared live query per seed table) | yes |
+| Seed labels and lists | `useSeedData()` (one live read per seed table, shared by the component tree that opened it) | yes |
+| Seed labels in a store | `await loadSeedData()` (one-shot snapshot) | no |
 
 Use `hydrated` (or `.withSync()` on seed lists) to tell "not loaded yet" from "really empty".
 
@@ -226,7 +227,7 @@ sequenceDiagram
     participant H as Harness (worker)
     participant WAPI as Maarg (worker)
     participant DB as IndexedDB
-    participant L as useLiveEntity / seedData
+    participant L as useLiveEntity / useSeedData
 
     V->>API: POST / PUT mutation
     API-->>V: 200 (change committed)
@@ -314,7 +315,6 @@ sequenceDiagram
     participant SAS as appDbSync
     participant SS as syncService
     participant H as Worker
-    participant SD as useSeedData tables
     participant C as appDb.client()
     participant DB as IndexedDB
 
@@ -325,7 +325,6 @@ sequenceDiagram
     SAS->>SS: stop()
     SS->>SS: stop token watch, ignore late messages
     SS->>H: terminate() (worker and its timer gone)
-    SAS->>SD: clearSeedTables() (close every shared seed live query)
     SAS->>C: clearAllTables()
     C->>DB: one rw transaction: clear every data table,<br/>delete every syncMeta key EXCEPT schemaVersion
     Note over DB: empty database, same schema.<br/>The next login re-runs the one-time sync.

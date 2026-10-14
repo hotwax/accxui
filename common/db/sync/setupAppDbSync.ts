@@ -1,6 +1,5 @@
 import { computed, reactive, ref, type ComputedRef, type Ref } from "vue";
 import type { AppDb } from "../schema/defineAppDb";
-import { clearSeedTables } from "../composables/useSeedData";
 import {
   clearDomainErrors,
   clearScopeError,
@@ -281,7 +280,6 @@ export function setupAppDbSync(config: AppDbSyncConfig): AppDbSync {
     }
     starting = null;
     bootstrapState.running = false;
-    clearSeedTables();
     // Chained so a start waiting on `clearing` also waits out an earlier wipe still running.
     const clear: Promise<void> = (clearing ?? Promise.resolve())
       .then(() => config.db.client().clearAllTables())

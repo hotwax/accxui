@@ -1,6 +1,6 @@
 ---
 name: accxui-data-access
-description: How AccxUI app code reads and writes local app data (IndexedDB). Use whenever you read, list, look up, cache, store, upsert or delete server data in any AccxUI app (apps/company, apps/order-manager or a new one), touch useLiveEntity, companyDb / orderManagerDb, appDb.entity, appDb.tables, useSeedData, refreshAfterMutation, resyncDomain or refreshRecord, a worker sync domain, Dexie, liveQuery or IndexedDB, send a POST / PUT / DELETE that changes server data, or fix a data-access lint error (one ending "See docs/APP_DB_DEVELOPER_GUIDE.md §7").
+description: How AccxUI app code reads and writes local app data (IndexedDB). Use whenever you read, list, look up, cache, store, upsert or delete server data in any AccxUI app (apps/company, apps/order-manager or a new one), touch useLiveEntity, companyDb / orderManagerDb, appDb.entity, appDb.tables, useSeedData, loadSeedData, refreshAfterMutation, resyncDomain or refreshRecord, a worker sync domain, Dexie, liveQuery or IndexedDB, send a POST / PUT / DELETE that changes server data, or fix a data-access lint error (one ending "See docs/APP_DB_DEVELOPER_GUIDE.md §7").
 ---
 
 # AccxUI data access
@@ -39,7 +39,8 @@ domains, worker) is the **accxui-app-db-setup** skill.
 | An answer **now** | `appDb.entity(appDb.tables.x).get / query / all / first / count` | anywhere: stores, services, utils, composables, workers |
 | A record the db **doesn't have** | `refreshRecord(domain, pk)`, then `appDb.entity(...).get` | composables, stores |
 | To **change** server data | `api()`, check it, then `refreshAfterMutation` / `resyncDomain` | composables, stores |
-| Labels and option lists from seed tables | `useSeedData()` (components) / `seedData` (stores, utils) | anywhere |
+| Labels and option lists from seed tables, **on screen** | `useSeedData()` | during setup in pages, components, composables; never in `App.vue` |
+| Seed labels and joins **outside a component** | `await loadSeedData()` (a one-shot snapshot) | stores, services, utils |
 | Live rows **outside** a component (rare) | `appDb.entity(t).live(options)`; keep and `unsubscribe()` it on logout | stores, services, utils |
 
 ## Recipes
@@ -60,6 +61,27 @@ const { records, first, hydrated } = useLiveEntity<any>(
 - Returns `{ records, first, count, hydrated, error }` refs. `hydrated` tells "not loaded yet" from
   "really empty": use it for loading and empty states.
 - While an id is unknown, return `{ filter: () => false }`, not `{}` (which reads the whole table).
+
+**Seed labels and option lists:**
+
+```ts
+import { useSeedData } from "@common/db";
+
+const seed = useSeedData();                      // during setup only
+// template / computed: seed.statusDescription(order.statusId), seed.enumsByType("ORDER_SALES_CHANNEL")
+const states = computed(() => seed.statesForCountry.withSync(countryGeoId.value)); // empty is real once synced
+```
+
+- The first `useSeedData()` in a component tree opens one live read per table it uses and provides
+  it; every component below injects the same instance, so a page's cards add no queries. The reads
+  close when that component unmounts. Call it in the page or component that shows the labels, never
+  in `App.vue` or a layout (that would hold every seed table open for the session).
+- Outside components: `const seed = await loadSeedData()` (or `loadSeedData(["facilities", ...])`),
+  a snapshot read in one transaction, with the same getters. It does not follow later changes; keep
+  it in store state with `markRaw` and read it again on the next load. Until it is read, a store
+  getter uses `emptySeedData` (raw ids), as a cold table answers.
+- A util that needs seed lookups takes the caller's `seed` as an argument (`Pick<SeedData, ...>`);
+  it never calls `useSeedData()`.
 
 **An answer now:**
 
@@ -120,6 +142,8 @@ Every data-access message ends with "See docs/APP_DB_DEVELOPER_GUIDE.md §7".
 | `appDb.get(oms)` | worker entry (`src/workers/*.worker.ts`) and `src/db/**` only |
 | `appDb.client()` | worker sync domains, and as the `useDbStatus(...)` argument only |
 | `useLiveEntity` outside `.vue` files, `src/components`, `src/views`, `src/composables` | `appDb.entity(...)` |
+| `useSeedData` outside `.vue` files, `src/components`, `src/views`, `src/composables` | `await loadSeedData()`, or take the caller's `seed` as an argument |
+| `useSeedData` in `App.vue` | call it in the page or component that shows the labels |
 | `.live()` / `.liveRead()` in `.vue`, components, views, composables | `useLiveEntity` (it owns the subscription) |
 | `.live()` / `.liveRead()` in `src/workers/**` | a one-shot `appDb.entity(...).get / query / all` |
 | `x.live(...).subscribe(...);` with the result discarded | keep it; `unsubscribe()` it in the logout teardown |
@@ -135,6 +159,7 @@ Exempt: an app-local Dexie store outside the app database, switched off in that 
 ## Before you finish
 
 - [ ] Reads use `useLiveEntity` / `appDb.entity`, table names from `appDb.tables`.
+- [ ] Seed lookups: `useSeedData()` during setup (not in `App.vue`), `loadSeedData()` outside components.
 - [ ] No app-db writes outside `src/workers/**`; missing records go through `refreshRecord`.
 - [ ] Every server write reconciles with `refreshAfterMutation` / `resyncDomain` for each domain it touches.
 - [ ] A new table or domain went through accxui-app-db-setup (schema, `version` bump, registered domain).

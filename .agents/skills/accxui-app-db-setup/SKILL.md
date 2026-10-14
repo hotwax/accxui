@@ -36,7 +36,8 @@ only). Full reference: `docs/APP_DB_DEVELOPER_GUIDE.md`.
 8. **Class B is never activated from a page; class A always is,** and the page deactivates it with
    the same owner in `onIonViewDidLeave`.
 9. **Seed tables are picked, not redeclared.** Statuses, facilities, enums and the other reference
-   tables come from `commonSchema`; labels come from `useSeedData()`.
+   tables come from `commonSchema`; labels come from `useSeedData()` in the pages that show them
+   (never `App.vue`, which lint rejects) and `loadSeedData()` in stores.
 
 ## Which sync class
 

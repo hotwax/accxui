@@ -79,6 +79,11 @@ export function __resetDbVersionChecks(): void {
 
 const LOGIN_MARKER_PREFIX = "loginSync:";
 
+/** The `syncMeta` key of `domain`'s once-per-login marker. */
+export function loginMarkerKey(domain: string): string {
+  return `${LOGIN_MARKER_PREFIX}${domain}`;
+}
+
 export async function hasSyncedThisLogin(db: BaseDB, domain: string): Promise<boolean> {
   try {
     const record = await db.syncMeta.get(`${LOGIN_MARKER_PREFIX}${domain}`);
