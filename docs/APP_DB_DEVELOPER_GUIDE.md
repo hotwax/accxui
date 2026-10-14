@@ -497,7 +497,7 @@ only store more of each row, see [Extending an entity](#extending-an-entity)):
 |---|---|---|---|
 | **B** | Reference / config. Rarely changes. | Once per login, then only on mutation | `defineSnapshotDomain` |
 | **A** | Live, append-mostly. Transactional. | `intervalMs`, only while a view needs it | `defineCursorDomain`, or hand-written |
-| **C** | Write-through only. | Never polled | hand-written |
+| **C** | One record at a time, when a screen asks. | Never polled; filled by `refreshRecord` | `defineSyncDomain` with `sync` returning `0` and a `refetchOne` |
 
 **Class B — the common case.** Fetch the whole set, replace what's stored:
 
@@ -515,6 +515,23 @@ defineSnapshotDomain({
 
 `collectionKey` is explicit on purpose — the envelope differs per endpoint, and guessing is how a
 snapshot silently becomes `[]`. Add `strictCollection: true` to fail loudly instead of degrading.
+
+`defineSnapshotDomain` options:
+
+| Option | Use it when |
+|---|---|
+| `collectionKey` | the list is wrapped: `"widgetList"` reads `resp.widgetList`; `null` for a bare array |
+| `strictCollection: true` | a missing envelope key should throw rather than snapshot to `[]` |
+| `listParams` | the list needs fixed server params (a type filter); also sent by `refetchScope` |
+| `batchSize` / `unpaged: true` | page size (default 250) / the route ignores paging: one request, still asks for a full page |
+| `scopeOnSync: { field, value }` | the table holds more than this list returns: prune only rows in that partition |
+| `fanOut: { parentTable, parentKeyField, urlFor, collectionKey? }` | rows come per parent (one URL per id in an already-synced parent table); the parent id is stamped on each row, and `refetchOne` re-reads that parent's rows |
+| `byPk` (+ `byPkRecordKey`) | a by-id route exists; `byPkRecordKey` unwraps `{ <key>: record }`. An empty answer **removes** the stored row |
+| `refetchScope: (pk) => ({ params, scope? })` | no by-id route, but the list filters by key: re-read that slice and prune within `scope` |
+
+Each sync refuses to replace a populated table with an empty fetch (unless forced), and skips
+rows it cannot key. An entity whose key member the server may legitimately omit declares
+`keyDefaults: { feedId: "" }` on `defineEntity` (§2), so those rows are kept instead of dropped.
 
 **Class A — live data.** A cursor domain fetches only what's newer than what you hold:
 

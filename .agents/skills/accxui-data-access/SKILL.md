@@ -5,21 +5,46 @@ description: How AccxUI app code reads and writes local app data (IndexedDB). Us
 
 # AccxUI data access
 
-App code reaches the app database (one IndexedDB database per OMS instance) through **two
-patterns only**. Both go through the framework's `dbClient`; app code never touches Dexie.
-The root `eslint.config.js` enforces this with core rules (`no-restricted-syntax`, `@typescript-eslint/no-restricted-imports`); every data-access message ends with "See docs/APP_DB_DEVELOPER_GUIDE.md §7".
+Every app keeps server data in one IndexedDB database per OMS instance, filled by a background sync
+worker. `appDb` below is the app's database object: `companyDb` (`@/db/companyDb`) in Company,
+`orderManagerDb` (`@/db/orderManagerDb`) in Order Manager. Building the database itself (tables,
+domains, worker) is the **accxui-app-db-setup** skill.
 
-`appDb` below is the app's database object: `companyDb` (`@/db/companyDb`) in Company,
-`orderManagerDb` (`@/db/orderManagerDb`) in Order Manager.
+## Rules
 
-## The two patterns
+1. **Read through two patterns only:** `useLiveEntity` on screen, `appDb.entity(...)` for an answer
+   now. *Why:* both go through the framework's `dbClient`, which checks the database version and
+   projects every row; anything else bypasses that.
+2. **Never write the app db from app code.** Only a table's sync domain (`src/workers/**`) writes
+   it. *Why:* one writer keeps one row shape; a second writer with its own fetch drops fields the
+   domain stores. Lint rejects `upsertMany` / `snapshotReplace` and writes on `appDb.entity(...)`
+   outside `src/workers/**` and `src/db/**`.
+3. **A record the db is missing:** `refreshRecord(domain, pk)`, then read it back. Never `api()` it
+   and store it yourself.
+4. **After a server write:** `api()` from a composable or store, check it landed, then
+   `refreshAfterMutation(domain, pk)` or `resyncDomain(domain)`. Never write the response into a
+   table. *Why:* the domain re-reads the server's version, so the row matches what the next sync
+   would store.
+5. **Table names from `appDb.tables`, never a string.** *Why:* a typo fails to compile instead of
+   reading an empty store.
+6. **No Dexie, `dbClient`, `appDb.raw()` / `.get()` in app code; `appDb.client()` only in workers.**
+7. **No server fetch on mount for synced data.** Read what the worker stored; the worker owns the
+   cadence. *Why:* a page fetch reintroduces the load waterfalls the app database removes.
+
+## Which call
 
 | You want… | Use | Where |
 |---|---|---|
-| Rows that stay current **on screen** | `useLiveEntity<any>(appDb.tables.x, options)` | components, views, composables — during `setup` |
-| An answer **now** | `appDb.entity(appDb.tables.x).get / query / all / first / count` | anywhere: stores, services, utils, async handlers, composables, workers |
+| Rows that stay current **on screen** | `useLiveEntity<any>(appDb.tables.x, options)` | components, views, composables, during `setup` |
+| An answer **now** | `appDb.entity(appDb.tables.x).get / query / all / first / count` | anywhere: stores, services, utils, composables, workers |
+| A record the db **doesn't have** | `refreshRecord(domain, pk)`, then `appDb.entity(...).get` | composables, stores |
+| To **change** server data | `api()`, check it, then `refreshAfterMutation` / `resyncDomain` | composables, stores |
+| Labels and option lists from seed tables | `useSeedData()` (components) / `seedData` (stores, utils) | anywhere |
+| Live rows **outside** a component (rare) | `appDb.entity(t).live(options)`; keep and `unsubscribe()` it on logout | stores, services, utils |
 
-### 1. Live, on screen — `useLiveEntity`
+## Recipes
+
+**On screen:**
 
 ```ts
 import { useLiveEntity } from "@common";
@@ -33,45 +58,23 @@ const { records, first, hydrated } = useLiveEntity<any>(
 ```
 
 - Returns `{ records, first, count, hydrated, error }` refs. `hydrated` tells "not loaded yet" from
-  "really empty" — use it for loading/empty states.
-- It is a composable: never call it in a store, service, util or worker.
+  "really empty": use it for loading and empty states.
 - While an id is unknown, return `{ filter: () => false }`, not `{}` (which reads the whole table).
 
-### 2. One-shot read — `appDb.entity`
+**An answer now:**
 
 ```ts
-import { companyDb } from "@/db/companyDb";
-
 const shops = companyDb.entity(companyDb.tables.shopifyShops);
-
 const one = await shops.get(shopId);                              // by primary key
-const some = await shops.query({ equals: { productStoreId } });   // same QueryOptions
-const all = await shops.all();                                    // then filter/find in JS — fine
+const some = await shops.query({ equals: { productStoreId } });   // through an index when one fits
+const all = await shops.all();                                    // then filter / find in JS
 ```
 
-**Writes belong to sync domains.** `upsertMany` / `snapshotReplace` / `put` / `remove` are called
-only inside a worker sync domain (`src/workers/**`): the domain that fills a table is its one
-writer, so a row has one shape however it arrived. App code never writes the app db.
+`QueryOptions`: `scope` / `equals` (equalities; a dotted path reaches a nested field, and a list
+matches when any value does), `dateField` + `since` / `until` / `order` (newest first by default),
+`filter`, `limit`. Nothing re-renders afterwards.
 
-Nothing re-renders afterwards. For live updates outside a component (rare, stores / services /
-utils only, never setup code or the worker), `appDb.entity(t).live(options)` returns a Dexie
-`Observable`: keep the subscription and `unsubscribe()` it in the logout teardown. Guide §1e.
-
-`QueryOptions`: `scope` / `equals` (equalities, resolved through indexes), `dateField` + `since` /
-`until` / `order` (newest first by default), `filter`, `limit`.
-
-## Table names: always `appDb.tables`
-
-`companyDb.tables.facilities`, `orderManagerDb.tables.statuses`. These are static (no database
-needed — they work in workers and before sign-in) and list exactly the tables that app's database
-has. A typo is a missing property and fails to compile. **Never** pass a string literal
-(`entity("facilities")`, `useLiveEntity("facilities")`) — the lint rule rejects it
-(there is no autofix; write `appDb.tables.x`).
-
-## Missing a record — `refreshRecord`
-
-A cache-first lookup that misses asks the table's sync domain to fetch and store the record, then
-reads it back. Don't `api()` it and `upsertMany` it yourself.
+**A record the db is missing:**
 
 ```ts
 import { refreshRecord } from "@/services/appDbSync";
@@ -84,15 +87,11 @@ return (await logs.get(logId)) ?? null;
 ```
 
 - Takes a **sync domain name** and that record's key. The domain needs a `refetchOne`; a table
-  filled only on request gets a class C domain whose `sync` returns `0`.
+  filled only on request gets a class C domain (accxui-app-db-setup).
 - Waits only for the worker to be open, not its first sync pass. Rejects with the domain's own
-  error (not a `CacheReconciliationError`), or the start error if the sync could not start.
+  error, or the start error if the sync could not start.
 
-## After a server write
-
-Send the write with `api()` from a composable or store, check it landed (the app's `hasError`
-check), then reconcile the local db through the table's sync domain. Never write the server's
-response into the table yourself.
+**After a server write:**
 
 ```ts
 import { refreshAfterMutation, resyncDomain } from "@/services/appDbSync";
@@ -104,53 +103,41 @@ await refreshAfterMutation("serviceJob", { jobName });   // re-reads that one re
 await resyncDomain("facilityGroup");                     // re-snapshots the whole domain
 ```
 
-- These take **sync domain names** (strings), not table names. List every domain the write touches.
+- Both take **sync domain names**, not table names. List every domain the write touches.
 - Reconcile only after the write is known to have landed: a failed write reconciles nothing.
-- A `CacheReconciliationError` means the server write succeeded and only the local refresh failed:
-  warn ("saved, refresh to see it"), don't retry the write.
+- A `CacheReconciliationError` means the write succeeded and only the local refresh failed: warn
+  ("saved, refresh to see it"), don't retry the write.
 
-## Seed lookups
+## Lint errors and their fix
 
-Labels, option lists and joins over seed reference tables come from `useSeedData()` (components)
-or `seedData` (stores, utils): `seed.facilityName(id)`, `seed.enumsByType(typeId)`. It is a shared
-cache on the same layer, not a separate data path.
+Every data-access message ends with "See docs/APP_DB_DEVELOPER_GUIDE.md §7".
 
-## Never in app code (data-access lint errors)
-
-| Don't | Do instead |
+| Rejected | Do instead |
 |---|---|
-| `import Dexie / liveQuery from "dexie"` | the two patterns above |
+| `import Dexie / liveQuery from "dexie"` | the two read patterns |
 | `dbClient`, `getAppDb`, `ensureDbReady`, `hasSyncedThisLogin` …, or value imports from `@common/db/storage/dbClient` / `baseDb` / `schema/appDbRegistry` | `appDb.entity(...)` / `useLiveEntity` (type-only imports are fine) |
-| `appDb.raw()` | doesn't exist — use `appDb.entity(...)` |
+| `appDb.raw()` | doesn't exist: `appDb.entity(...)` |
 | `appDb.get(oms)` | worker entry (`src/workers/*.worker.ts`) and `src/db/**` only |
-| `appDb.client()` | worker sync domains (`src/workers/**`) and as the argument to `useDbStatus(...)` only |
+| `appDb.client()` | worker sync domains, and as the `useDbStatus(...)` argument only |
 | `useLiveEntity` outside `.vue` files, `src/components`, `src/views`, `src/composables` | `appDb.entity(...)` |
 | `.live()` / `.liveRead()` in `.vue`, components, views, composables | `useLiveEntity` (it owns the subscription) |
 | `.live()` / `.liveRead()` in `src/workers/**` | a one-shot `appDb.entity(...).get / query / all` |
 | `x.live(...).subscribe(...);` with the result discarded | keep it; `unsubscribe()` it in the logout teardown |
-| `activateSyncDomains` without `deactivateSyncDomains` in the file, or in a `.vue` page without `onIonViewDidLeave` | deactivate with the same owner in `onIonViewDidLeave` (not only on unmount) |
+| `activateSyncDomains` without `deactivateSyncDomains` in the file, or in a page without `onIonViewDidLeave` | deactivate with the same owner in `onIonViewDidLeave` |
 | `deactivateSyncDomains()` with no owner | `deactivateSyncDomains(SYNC_OWNER)` |
-| a string literal table name | `appDb.tables.x` |
+| a string-literal table name | `appDb.tables.x` |
 | `upsertMany` / `snapshotReplace` anywhere, or `put` / `bulkPut` / `remove` / `bulkRemove` / `clear` on `appDb.entity(...)`, outside `src/workers/**` and `src/db/**` | `refreshRecord` for a missing record; `refreshAfterMutation` / `resyncDomain` after a server write |
+| `import { api, client } from "@common"` in a `.vue` file | the call goes in a composable or store |
 
 Exempt: an app-local Dexie store outside the app database, switched off in that app's own
-`eslint.config.js` (Company `src/utils/storage.ts`, Order Manager `src/services/productDb.ts`). The app's
-config spreads `dbConfig` from the root `eslint.config.js`: the local-database rules, plus no
-`api` / `client` imports from `@common` in `.vue` files.
+`eslint.config.js` (Company `src/utils/storage.ts`, Order Manager `src/services/productDb.ts`).
 
-## Adding a table
+## Before you finish
 
-Declare the entity in the app's schema (`src/db/companySchema.ts`), add indexes for every way you
-query it, **bump `version`** in the app db module, and give it a sync domain. It then appears on
-`companyDb.tables` automatically. Details: `docs/APP_DB_DEVELOPER_GUIDE.md` §2–§3.
+- [ ] Reads use `useLiveEntity` / `appDb.entity`, table names from `appDb.tables`.
+- [ ] No app-db writes outside `src/workers/**`; missing records go through `refreshRecord`.
+- [ ] Every server write reconciles with `refreshAfterMutation` / `resyncDomain` for each domain it touches.
+- [ ] A new table or domain went through accxui-app-db-setup (schema, `version` bump, registered domain).
+- [ ] `pnpm lint` (or `pnpm build`, which lints first) and `pnpm test:unit` pass in the app.
 
-## Check your work
-
-```bash
-pnpm lint                      # from the app directory; the build (`eslint src && vite build`) runs it first
-```
-
-An app with no app database yet, or a new table or sync domain: use the accxui-app-db-setup skill.
-
-Reference: `docs/APP_DB_DEVELOPER_GUIDE.md` (§1 patterns, §7 rules); the rules themselves are in
-the root `eslint.config.js` (the `DA_*` selector lists).
+Reference: `docs/APP_DB_DEVELOPER_GUIDE.md` (§1 patterns, §4 writes, §7 rules).
