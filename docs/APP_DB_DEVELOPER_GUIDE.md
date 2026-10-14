@@ -543,8 +543,24 @@ predicate still trims client-side, but you pay for the full page every tick.
 registerDomains(appSyncDomains);   // src/workers/appSyncDomains.ts: [...appSeedDomains, widgetDomain, /* … */]
 ```
 
-A domain that isn't registered never runs, with no error. Add a test (for example
-`tests/db/domainTables.spec.ts`) asserting every registered domain's table is declared in `appDb`.
+A domain that isn't registered never runs, with no error. Every app runs the shared wiring checks
+from `@common/db/testing/appDbWiring` in `tests/db/appDbWiring.spec.ts`:
+
+```ts
+expect(checkDomainWiring({
+  tables: Object.keys(appDb.tables),
+  domains: appSyncDomains,                       // exactly what the worker registers
+  filledBy: { widgetNotes: "widget" },           // a table one domain fills besides its own
+  unfilled: {},                                  // declared on purpose with nothing filling it: say why
+})).toEqual([]);
+expect(checkSyncLifecycle({ appVue: source("App.vue"), userStore: source("store/user.ts") })).toEqual([]);
+```
+
+`checkDomainWiring` reports a domain whose table the database doesn't declare, a domain name
+registered twice, a table nothing fills, and a class C domain without a `refetchOne`.
+`checkSyncLifecycle` reports an `App.vue` that doesn't start the sync on `isAuthenticated`, a
+`postLogin` that doesn't stop the sync before starting it, and a `postLogout` that doesn't stop it.
+Each returns a list of problems, so a failure names all of them.
 
 ---
 
@@ -910,7 +926,7 @@ promise loses the tracking at its first await, so the query never re-runs when t
 | "Latest N" shows the oldest rows | No `dateField`, so `limit` cuts storage order | Pass `dateField`; it orders newest first |
 | Seed list empty on a fresh login, screen shows "none" | Read before the seed sync landed: a reactive getter or `get*` answers `[]` until then | Use the getter's `.withSync()` and wait for `synced` (§1a) |
 | `refreshAfterMutation` resolves but the row is stale | The domain has no `byPk`, `refetchScope` or `fanOut`, so the refetch does nothing | §4; use `resyncDomain(name)` |
-| Table stays empty, no error | Domain not registered, or the table name differs between domain and schema | Worker entry; a `domainTables.spec.ts` that checks every registered table |
+| Table stays empty, no error | Domain not registered, or the table name differs between domain and schema | Worker entry; `checkDomainWiring` in `tests/db/appDbWiring.spec.ts` names the table |
 | Table empty and the status card says "none" | Class-B domain never ran — check `syncMeta` for its `loginSync:` marker | Force via `resyncDomain(name)` |
 | Snapshot wiped rows that still exist server-side | Envelope mis-declared, so the response unwrapped to `[]` | `collectionKey`; add `strictCollection: true` |
 | Rows stop updating after switching OMS instance | A captured Dexie handle instead of the late-binding client | Use `appDb.entity()` / `appDb.client()`, never a stored `BaseDB` handle |
@@ -955,7 +971,7 @@ apps/<app>/
 │   └── views/Settings.vue               the status card (useDbStatus)
 ├── eslint.config.js                     ...dbConfig from the root; the build lints first
 └── tests/db/
-    ├── domainTables.spec.ts             every registered domain's table exists in appDb
+    ├── appDbWiring.spec.ts              checkDomainWiring + checkSyncLifecycle (§3)
     └── appSchema.spec.ts                optional: entity keys, indexes, projections
 ```
 
