@@ -10,6 +10,10 @@ on:
       appDir:
         required: true
         type: string
+      accxuiVersion:
+        description: 'AccxUI tag or commit to build against'
+        default: 'main'
+        type: string
     secrets:
       envPAT:
         required: true
@@ -26,6 +30,7 @@ jobs:
       uses: actions/checkout@v4
       with:
         repository: hotwax/accxui
+        ref: ${{ inputs.accxuiVersion }}
         path: .
 
     - name: Checkout app in apps/
@@ -37,7 +42,7 @@ jobs:
     - name: Install pnpm
       uses: pnpm/action-setup@v4
       with:
-        version: 9
+        version: 9.15.9
         run_install: false
 
     - name: Use Node.js ${{ matrix.node-version }}
@@ -47,7 +52,7 @@ jobs:
         cache: 'pnpm'
 
     - name: Install Dependencies
-      run: pnpm install
+      run: pnpm install --frozen-lockfile
 
     - name: Generate .env file
       run: cp .env.example .env

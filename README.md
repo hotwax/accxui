@@ -2,8 +2,18 @@
 
 ## Prerequisite
 
-- Node `v22.12.0` or higher
-- `pnpm`
+- Node 22 (at least `v22.12.0`), matching CI
+- pnpm `9.15.9`, matching the CI pnpm 9 toolchain
+
+From the workspace root, select the toolchain before installing:
+
+```bash
+nvm install
+nvm use
+npm install --global pnpm@9.15.9
+node --version
+pnpm --version
+```
 
 ## Workspace Setup
 
@@ -19,7 +29,7 @@
    `git clone https://github.com/hotwax/fulfillment.git apps/fulfillment`
 5. Create a `.env` file in that app by taking reference from its `.env.example`.
 6. Install dependencies once from the `accxui` root:
-   `pnpm install`
+   `pnpm install --frozen-lockfile`
 
 ## Start A Single App
 
@@ -51,7 +61,8 @@ pnpm --filter fulfillment build
 
 ## Useful Notes
 
-- Run `pnpm install` from the `accxui` root after adding a new app to `apps/`.
+- Run `pnpm install --frozen-lockfile` from the root for apps already recorded in `pnpm-lock.yaml`.
+- After adding an app or changing its dependency manifest, regenerate the workspace lockfile with `pnpm install --lockfile-only`, review the diff, and commit it to AccxUI. Then verify `pnpm install --frozen-lockfile` without changing workspace membership.
 - Keep each app inside `apps/<app-name>` so the workspace can discover it.
 - If you want to start multiple apps, run separate `pnpm --filter <app-name> dev` commands.
 
