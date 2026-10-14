@@ -37,7 +37,7 @@ describe("checkDomainWiring", () => {
 
   it("reports a class C domain without refetchOne", () => {
     expect(checkDomainWiring({ tables: ["c"], domains: [domain("c", "c", "C", false)] }))
-      .toEqual(['class C domain "c" has no refetchOne, so refreshRecord cannot fill it']);
+      .toEqual(['class C domain "c" has no refetchOne, so refreshAfterMutation cannot fill it']);
   });
 
   it("accepts a table filled by another domain or declared unfilled, and keeps those lists honest", () => {

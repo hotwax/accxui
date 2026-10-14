@@ -16,8 +16,8 @@ import globals from "globals";
  *   - an answer now:             appDb.entity(appDb.tables.x)            (anywhere)
  * plus the seed lookups: useSeedData() during setup (never in App.vue), await loadSeedData() elsewhere,
  * with table names always from `appDb.tables`. Writes belong to the table's sync domain
- * (`src/workers/**`): app code fetches a missing record with refreshRecord, and after a server write
- * reconciles with refreshAfterMutation / resyncDomain. An "app db" is any identifier ending in `Db`
+ * (`src/workers/**`): app code fetches a missing record with refreshAfterMutation, and after a server
+ * write reconciles with refreshAfterMutation / resyncDomain. An "app db" is any identifier ending in `Db`
  * (`appDb`, `companyDb`, …); a client held in a variable is any identifier ending in `Client`
  * (`companyClient = companyDb.client()`). See docs/APP_DB_DEVELOPER_GUIDE.md §7.
  *
@@ -146,11 +146,11 @@ const DA_WORKER_NO_LIVE = [{
 const DA_NO_WRITE = [
   {
     selector: "CallExpression[callee.property.name=/^(upsertMany|snapshotReplace)$/]",
-    message: "App code does not write the app db: the table's sync domain is its only writer. For a record the db is missing, call refreshRecord(domain, pk) and read it back; after a server write, call refreshAfterMutation(domain, pk) or resyncDomain(domain)." + DATA_ACCESS_GUIDE,
+    message: "App code does not write the app db: the table's sync domain is its only writer. For a record the db is missing, call refreshAfterMutation(domain, pk) and read it back; after a server write, call refreshAfterMutation(domain, pk) or resyncDomain(domain)." + DATA_ACCESS_GUIDE,
   },
   {
     selector: `CallExpression[callee.property.name=/^(put|bulkPut|remove|bulkRemove|clear)$/][callee.object.callee.property.name='entity'][callee.object.callee.object.name=${APP_DB}]`,
-    message: "App code does not write the app db: the table's sync domain is its only writer. For a record the db is missing, call refreshRecord(domain, pk) and read it back; after a server write, call refreshAfterMutation(domain, pk) or resyncDomain(domain)." + DATA_ACCESS_GUIDE,
+    message: "App code does not write the app db: the table's sync domain is its only writer. For a record the db is missing, call refreshAfterMutation(domain, pk) and read it back; after a server write, call refreshAfterMutation(domain, pk) or resyncDomain(domain)." + DATA_ACCESS_GUIDE,
   },
 ];
 

@@ -1,6 +1,6 @@
 ---
 name: accxui-data-access
-description: How AccxUI app code reads and writes local app data (IndexedDB). Use whenever you read, list, look up, cache, store, upsert or delete server data in any AccxUI app (apps/company, apps/order-manager or a new one), touch useLiveEntity, companyDb / orderManagerDb, appDb.entity, appDb.tables, useSeedData, loadSeedData, refreshAfterMutation, resyncDomain or refreshRecord, a worker sync domain, Dexie, liveQuery or IndexedDB, send a POST / PUT / DELETE that changes server data, or fix a data-access lint error (one ending "See docs/APP_DB_DEVELOPER_GUIDE.md §7").
+description: How AccxUI app code reads and writes local app data (IndexedDB). Use whenever you read, list, look up, cache, store, upsert or delete server data in any AccxUI app (apps/company, apps/order-manager or a new one), touch useLiveEntity, companyDb / orderManagerDb, appDb.entity, appDb.tables, useSeedData, loadSeedData, refreshAfterMutation or resyncDomain, a worker sync domain, Dexie, liveQuery or IndexedDB, send a POST / PUT / DELETE that changes server data, or fix a data-access lint error (one ending "See docs/APP_DB_DEVELOPER_GUIDE.md §7").
 ---
 
 # AccxUI data access
@@ -19,7 +19,7 @@ domains, worker) is the **accxui-app-db-setup** skill.
    it. *Why:* one writer keeps one row shape; a second writer with its own fetch drops fields the
    domain stores. Lint rejects `upsertMany` / `snapshotReplace` and writes on `appDb.entity(...)`
    outside `src/workers/**` and `src/db/**`.
-3. **A record the db is missing:** `refreshRecord(domain, pk)`, then read it back. Never `api()` it
+3. **A record the db is missing:** `refreshAfterMutation(domain, pk)`, then read it back. Never `api()` it
    and store it yourself.
 4. **After a server write:** `api()` from a composable or store, check it landed, then
    `refreshAfterMutation(domain, pk)` or `resyncDomain(domain)`. Never write the response into a
@@ -37,7 +37,7 @@ domains, worker) is the **accxui-app-db-setup** skill.
 |---|---|---|
 | Rows that stay current **on screen** | `useLiveEntity<any>(appDb.tables.x, options)` | components, views, composables, during `setup` |
 | An answer **now** | `appDb.entity(appDb.tables.x).get / query / all / first / count` | anywhere: stores, services, utils, composables, workers |
-| A record the db **doesn't have** | `refreshRecord(domain, pk)`, then `appDb.entity(...).get` | composables, stores |
+| A record the db **doesn't have** | `refreshAfterMutation(domain, pk)`, then `appDb.entity(...).get` | composables, stores |
 | To **change** server data | `api()`, check it, then `refreshAfterMutation` / `resyncDomain` | composables, stores |
 | Labels and option lists from seed tables, **on screen** | `useSeedData()` | during setup in pages, components, composables; never in `App.vue` |
 | Seed labels and joins **outside a component** | `await loadSeedData()` (a one-shot snapshot) | stores, services, utils |
@@ -99,19 +99,20 @@ matches when any value does), `dateField` + `since` / `until` / `order` (newest 
 **A record the db is missing:**
 
 ```ts
-import { refreshRecord } from "@/services/appDbSync";
+import { refreshAfterMutation } from "@/services/appDbSync";
 
 const logs = companyDb.entity(companyDb.tables.dataManagerLogs);
 const cached = await logs.get(logId);
 if (cached) return cached;
-await refreshRecord("dataManagerLog", { logId });   // the domain's refetchOne, in the worker
+await refreshAfterMutation("dataManagerLog", { logId });   // the domain's refetchOne, in the worker
 return (await logs.get(logId)) ?? null;
 ```
 
 - Takes a **sync domain name** and that record's key. The domain needs a `refetchOne`; a table
   filled only on request gets a class C domain (accxui-app-db-setup).
-- Waits only for the worker to be open, not its first sync pass. Rejects with the domain's own
-  error, or the start error if the sync could not start.
+- The same call as after a write: waits for the worker's first sync pass and rejects with a
+  `CacheReconciliationError`. Its message says a change was saved, so a lookup catches it and shows
+  its own message.
 
 **After a server write:**
 
@@ -150,7 +151,7 @@ Every data-access message ends with "See docs/APP_DB_DEVELOPER_GUIDE.md §7".
 | `activateSyncDomains` without `deactivateSyncDomains` in the file, or in a page without `onIonViewDidLeave` | deactivate with the same owner in `onIonViewDidLeave` |
 | `deactivateSyncDomains()` with no owner | `deactivateSyncDomains(SYNC_OWNER)` |
 | a string-literal table name | `appDb.tables.x` |
-| `upsertMany` / `snapshotReplace` anywhere, or `put` / `bulkPut` / `remove` / `bulkRemove` / `clear` on `appDb.entity(...)`, outside `src/workers/**` and `src/db/**` | `refreshRecord` for a missing record; `refreshAfterMutation` / `resyncDomain` after a server write |
+| `upsertMany` / `snapshotReplace` anywhere, or `put` / `bulkPut` / `remove` / `bulkRemove` / `clear` on `appDb.entity(...)`, outside `src/workers/**` and `src/db/**` | `refreshAfterMutation` for a missing record; `refreshAfterMutation` / `resyncDomain` after a server write |
 | `import { api, client } from "@common"` in a `.vue` file | the call goes in a composable or store |
 
 Exempt: an app-local Dexie store outside the app database, switched off in that app's own
@@ -160,7 +161,7 @@ Exempt: an app-local Dexie store outside the app database, switched off in that 
 
 - [ ] Reads use `useLiveEntity` / `appDb.entity`, table names from `appDb.tables`.
 - [ ] Seed lookups: `useSeedData()` during setup (not in `App.vue`), `loadSeedData()` outside components.
-- [ ] No app-db writes outside `src/workers/**`; missing records go through `refreshRecord`.
+- [ ] No app-db writes outside `src/workers/**`; missing records go through `refreshAfterMutation`.
 - [ ] Every server write reconciles with `refreshAfterMutation` / `resyncDomain` for each domain it touches.
 - [ ] A new table or domain went through accxui-app-db-setup (schema, `version` bump, registered domain).
 - [ ] `pnpm lint` (or `pnpm build`, which lints first) and `pnpm test:unit` pass in the app.

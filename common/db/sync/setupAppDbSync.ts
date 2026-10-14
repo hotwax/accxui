@@ -22,14 +22,13 @@ export interface AppDbSync {
   syncService: () => SyncService | null;
   startAppDbSync: (onSynced?: () => void) => Promise<void>;
   stopAppDbSync: () => Promise<void>;
-  refreshAfterMutation: (domain: string, pk: Record<string, unknown>) => Promise<number>;
   /**
-   * Fetch one record into the local db through its domain's `refetchOne`, for a cache-first lookup
-   * that missed. Not tied to a write: waits only for the worker to be open (not its first sync
-   * pass), and rejects with the domain's own error rather than a `CacheReconciliationError`.
-   * Resolves with the rows written; read the record back with `appDb.entity(table).get(...)`.
+   * Fetch one record into the local db through its domain's `refetchOne`: after a server write, or
+   * for a record the db is missing. Waits for the worker's first sync pass, and rejects with a
+   * `CacheReconciliationError`. Resolves with the rows written; read the record back with
+   * `appDb.entity(table).get(...)`.
    */
-  refreshRecord: (domain: string, pk: Record<string, unknown>) => Promise<number>;
+  refreshAfterMutation: (domain: string, pk: Record<string, unknown>) => Promise<number>;
   resyncDomain: (domain: string) => Promise<void>;
   resyncReferenceData: () => Promise<void>;
   bootstrapState: typeof bootstrapState;
@@ -324,29 +323,6 @@ export function setupAppDbSync(config: AppDbSyncConfig): AppDbSync {
     }
   }
 
-  /**
-   * The service once its worker is open, starting the sync if nothing has. Null when it could not
-   * start. A service without `whenOpen` (a test double) is waited on until fully ready instead.
-   */
-  async function whenOpen(): Promise<SyncService | null> {
-    const readiness = starting ?? startAppDbSync();
-    const current = service;
-    if (!current?.whenOpen) {
-      await readiness.catch(() => undefined);
-      return service;
-    }
-    await Promise.race([current.whenOpen(), readiness.catch(() => undefined)]);
-    return service === current ? current : null;
-  }
-
-  async function refreshRecord(domain: string, pk: Record<string, unknown>): Promise<number> {
-    const current = await whenOpen();
-    if (!current) {
-      throw new Error(bootstrapState.errors.__start || "The reference-cache service is unavailable.");
-    }
-    return current.refetchOne(domain, pk);
-  }
-
   async function resyncDomain(domain: string): Promise<void> {
     try {
       await config.db.client().clearSyncedThisLogin(domain);
@@ -373,7 +349,6 @@ export function setupAppDbSync(config: AppDbSyncConfig): AppDbSync {
     startAppDbSync,
     stopAppDbSync,
     refreshAfterMutation,
-    refreshRecord,
     resyncDomain,
     resyncReferenceData,
     bootstrapState,

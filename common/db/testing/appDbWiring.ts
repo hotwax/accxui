@@ -29,7 +29,7 @@ export interface DomainWiringInput {
  * - every registered domain's `table` exists in the database (otherwise its writes throw in the worker);
  * - no two registered domains share a name (the registry keeps one, the other never runs);
  * - every table is filled by some domain, or is declared in `filledBy` / `unfilled`;
- * - every class C domain has a `refetchOne` (`refreshRecord` and `refreshAfterMutation` call it);
+ * - every class C domain has a `refetchOne` (`refreshAfterMutation` calls it);
  * - `filledBy` and `unfilled` stay true: listed tables exist, and a `filledBy` domain is registered.
  */
 export function checkDomainWiring({ tables, domains, filledBy = {}, unfilled = {} }: DomainWiringInput): string[] {
@@ -48,7 +48,7 @@ export function checkDomainWiring({ tables, domains, filledBy = {}, unfilled = {
       }
     }
     if (domain.syncClass === "C" && !domain.refetchOne) {
-      problems.push(`class C domain "${domain.name}" has no refetchOne, so refreshRecord cannot fill it`);
+      problems.push(`class C domain "${domain.name}" has no refetchOne, so refreshAfterMutation cannot fill it`);
     }
   }
 

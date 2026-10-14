@@ -1,6 +1,6 @@
 ---
 name: accxui-app-db-setup
-description: Use when an AccxUI app under apps/* needs local IndexedDB storage it does not have yet, or a new table, sync domain or seed table in its app database. Triggers include a new app that should "store / cache / sync data locally", "work like Company / Order Manager", defineAppDb, defineEntity, defineSchema, mergeSchemas, commonSchema.pick, extendEntities, defineSnapshotDomain, defineSyncDomain, defineCursorDomain, pageNewestFirst, refetchOne, refreshRecord, a class C / on-request table, registerDomains, exposeWorkerHarness, setupAppDbSync, appSync.worker.ts, startAppDbSync / stopAppDbSync, checkDomainWiring, a schema version bump, or a table that stays empty.
+description: Use when an AccxUI app under apps/* needs local IndexedDB storage it does not have yet, or a new table, sync domain or seed table in its app database. Triggers include a new app that should "store / cache / sync data locally", "work like Company / Order Manager", defineAppDb, defineEntity, defineSchema, mergeSchemas, commonSchema.pick, extendEntities, defineSnapshotDomain, defineSyncDomain, defineCursorDomain, pageNewestFirst, refetchOne, refreshAfterMutation, a class C / on-request table, registerDomains, exposeWorkerHarness, setupAppDbSync, appSync.worker.ts, startAppDbSync / stopAppDbSync, checkDomainWiring, a schema version bump, or a table that stays empty.
 ---
 
 # Setting up the AccxUI app database
@@ -19,8 +19,8 @@ only). Full reference: `docs/APP_DB_DEVELOPER_GUIDE.md`.
    import `@common/db/schema/*`, `@common/db/seed/*`, `@common/db/sync/*`, `@common/db/types`,
    `@common/core/workerRemoteApi`. Never `@common`, `@common/db`, `commonUtil`, `api()`, stores or
    composables. *Why:* the barrel pulls in Vue and the worker chunk breaks or bloats.
-2. **Only sync domains write the app db.** A screen missing a record calls `refreshRecord`; a server
-   write reconciles with `refreshAfterMutation` / `resyncDomain`. If no domain fits, add one (class C
+2. **Only sync domains write the app db.** A screen missing a record calls `refreshAfterMutation`; a
+   server write reconciles with `refreshAfterMutation` / `resyncDomain`. If no domain fits, add one (class C
    if it is fetched only on request). *Why:* one writer keeps one row shape.
 3. **Every table is filled by a registered domain**, and every domain is in `appSyncDomains`.
    *Why:* `define*Domain` does not register anything; a missing domain fails silently and the table
@@ -125,7 +125,7 @@ appDb.setOmsInstanceResolver(() => "default");        // test fallback; main.ts 
 import { defineSnapshotDomain } from "@common/db/sync/defineSnapshotDomain";
 
 export const cycleCountDomain = defineSnapshotDomain({
-  name: "cycleCount",                 // what refreshAfterMutation / resyncDomain / refreshRecord name
+  name: "cycleCount",                 // what refreshAfterMutation / resyncDomain name
   label: "Cycle counts",              // shown on the Settings status card
   syncClass: "B",
   table: "cycleCounts",
@@ -234,7 +234,7 @@ needs it:
 ```ts
 let rows = await appDb.entity(appDb.tables.cycleCountNotes).query({ equals: { cycleCountId } });
 if (!rows.length) {
-  await refreshRecord("cycleCountNote", { cycleCountId });   // the domain fetches and stores
+  await refreshAfterMutation("cycleCountNote", { cycleCountId });   // the domain fetches and stores
   rows = await appDb.entity(appDb.tables.cycleCountNotes).query({ equals: { cycleCountId } });
 }
 ```
@@ -242,7 +242,7 @@ if (!rows.length) {
 ### A record built from several calls
 
 - Write **one** fetch-and-assemble function and call it from both `sync` and `refetchOne`.
-  `refreshAfterMutation` and `refreshRecord` go through `refetchOne`, so a second assembly drops
+  `refreshAfterMutation` goes through `refetchOne`, so a second assembly drops
   fields after every write (`organizationDomain.ts` shares `fetchOrganization`).
 - Shape the row with nested fields on the entity and pass the raw assembled record to
   `upsertMany` / `snapshotReplace`; the entity decides what is kept.
@@ -289,7 +289,7 @@ import { appDb } from "@/db/appDb";
 import workerUrl from "@/workers/appSync.worker.ts?worker&url";
 
 export const {
-  startAppDbSync, stopAppDbSync, refreshAfterMutation, refreshRecord, resyncDomain, resyncReferenceData,
+  startAppDbSync, stopAppDbSync, refreshAfterMutation, resyncDomain, resyncReferenceData,
   syncService, bootstrapState,
   // only with class A domains:
   activateSyncDomains, deactivateSyncDomains, createSyncDomainOwner, syncDomainsReady, syncDomainsError, syncNow,
@@ -381,7 +381,7 @@ it("stamps the parent id onto each note", async () => {
 ```
 
 A class B domain that checks `syncedThisLogin` also needs `client: () => ({ syncedThisLogin,
-markSyncedThisLogin, count })` on the mocked `appDb`. A composable that calls `refreshRecord` mocks
+markSyncedThisLogin, count })` on the mocked `appDb`. A composable that calls `refreshAfterMutation` mocks
 `@/services/appDbSync`.
 
 ## Common mistakes
@@ -395,9 +395,9 @@ markSyncedThisLogin, count })` on the mocked `appDb`. A composable that calls `r
 | Domain not in `appSyncDomains` | table stays empty, no error | add it; `checkDomainWiring` names the table |
 | `api()` or `fetch` inside a domain | fails in the worker | `@common/core/workerRemoteApi` |
 | Writing the POST response into the table | drifts from the server | `refreshAfterMutation` / `resyncDomain` after the write |
-| A composable fetching a record and `upsertMany`-ing it | a second writer; lint rejects it | `refreshRecord` + a domain `refetchOne` |
+| A composable fetching a record and `upsertMany`-ing it | a second writer; lint rejects it | `refreshAfterMutation` + a domain `refetchOne` |
 | `sync` and `refetchOne` assembling a record differently | the row loses fields after every write | one shared fetch-and-assemble function |
-| A class C domain with no `refetchOne` | `refreshRecord` fails | give it one; `checkDomainWiring` reports it |
+| A class C domain with no `refetchOne` | `refreshAfterMutation` fails | give it one; `checkDomainWiring` reports it |
 | Activating a class B domain from a page | needless re-fetch, worker churn | class B runs at login |
 | Sync started only in `postLogin` | nothing syncs after a reload | the `isAuthenticated` watch in `App.vue`; `checkSyncLifecycle` reports it |
 | A second `defineAppDb` or Dexie instance for app data | bypasses sync; lint fails | one `appDb`, more tables in `appSchema` |

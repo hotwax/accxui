@@ -283,7 +283,7 @@ const facilities = appDb.entity(appDb.tables.facilities);
 const one = await facilities.get(facilityId);                           // by primary key
 const some = await facilities.query({ equals: { facilityTypeId } });    // same QueryOptions as useLiveEntity
 const all = await facilities.all();                                     // then filter / find in JS — fine
-await refreshRecord("facility", { facilityId });                       // missing? the domain fetches and stores it
+await refreshAfterMutation("facility", { facilityId });               // missing? the domain fetches and stores it
 ```
 
 `first`, `count`, `getMany`, `put`, `bulkPut`, `remove`, `snapshotReplace` and the rest are on the same
@@ -291,8 +291,7 @@ await refreshRecord("facility", { facilityId });                       // missin
 to sync domains**: the domain that fills a table is the only thing that writes it, so the row has one
 shape however it arrived. App code reads with `appDb.entity` / `useLiveEntity`, changes server data
 with `api()` then `refreshAfterMutation` / `resyncDomain` (§4), and fetches a record it is missing with
-`refreshRecord` (§4). For live updates
-outside a component, see §1e.
+`refreshAfterMutation` too (§4). For live updates outside a component, see §1e.
 
 ### 1e. Manual live subscriptions (rare)
 
@@ -527,7 +526,7 @@ only store more of each row, see [Extending an entity](#extending-an-entity)):
 |---|---|---|---|
 | **B** | Reference / config. Rarely changes. | Once per login, then only on mutation | `defineSnapshotDomain` |
 | **A** | Live, append-mostly. Transactional. | `intervalMs`, only while a view needs it | `defineCursorDomain`, or hand-written |
-| **C** | One record at a time, when a screen asks. | Never polled; filled by `refreshRecord` | `defineSyncDomain` with `sync` returning `0` and a `refetchOne` |
+| **C** | One record at a time, when a screen asks. | Never polled; filled by `refreshAfterMutation` | `defineSyncDomain` with `sync` returning `0` and a `refetchOne` |
 
 **Class B — the common case.** Fetch the whole set, replace what's stored:
 
@@ -654,28 +653,26 @@ A `byPk` read that fails rejects, so it surfaces as `CacheReconciliationError` r
 stale row. A `byPk` route may answer with the record itself or a one-item list; an empty answer
 removes the stored row.
 
-### `refreshRecord`: fetching one record you don't have yet
+### A record you don't have yet
 
-A cache-first lookup that misses asks the table's domain for the record instead of fetching and
-writing it itself:
+A cache-first lookup that misses asks the table's domain for the record through the same
+`refreshAfterMutation`, instead of fetching and writing it itself:
 
 ```ts
-import { refreshRecord } from "@/services/appDbSync";
+import { refreshAfterMutation } from "@/services/appDbSync";
 
 const widgets = appDb.entity(appDb.tables.widgets);
 const cached = await widgets.get(widgetId);
 if (cached) return cached;
 
-await refreshRecord("widget", { widgetId });      // worker: the widget domain's refetchOne
+await refreshAfterMutation("widget", { widgetId });   // worker: the widget domain's refetchOne
 return (await widgets.get(widgetId)) ?? null;
 ```
 
-- It waits only for the worker to be **open**, not for its first sync pass, so a lookup right
-  after login is not stuck behind the seed sync. It still waits behind a sync of the **same**
-  domain that is already running.
-- It rejects with the domain's own error (crossing the worker keeps the message, not HTTP fields),
-  never a `CacheReconciliationError`: nothing was written to the server.
-- It needs a running worker. If the sync failed to start, it rejects with the start error.
+- It behaves exactly as after a write: it waits for the worker's first sync pass, records a failure
+  in the sync status, and rejects with a `CacheReconciliationError`.
+- That error's message says a server change was saved. A lookup changed nothing, so catch it and
+  show your own message; don't pass it to a mutation-error helper.
 - The domain needs a `refetchOne`. A table filled only on request gets a class C domain whose
   `sync` returns `0`.
 
@@ -881,7 +878,7 @@ Deep imports follow the folder layout of `common/db`:
 
 **App code uses the two patterns, and the build checks it.** Reads go through `useLiveEntity` and
 `appDb.entity(...)`, with table names from `appDb.tables`; there is no raw handle on an app database.
-Writes belong to the table's sync domain: app code calls `refreshRecord` for a missing record and
+Writes belong to the table's sync domain: app code calls `refreshAfterMutation` for a missing record and
 `api()` then `refreshAfterMutation` / `resyncDomain` for a server change. The rules live in the root `eslint.config.js`, built from core rules: imports
 through `@typescript-eslint/no-restricted-imports`, calls through `no-restricted-syntax`. The root
 file also exports `dbConfig`: the local-database rules plus no `api` / `client` imports in `.vue`
@@ -899,7 +896,7 @@ An "app db" is any identifier ending in `Db` (`appDb`, `companyDb`, …).
 | `no-restricted-syntax` | `appDb.raw()`; a string-literal table in `appDb.entity("x")`, `useLiveEntity("x")`, `appDb.client().get("x")` or `appDb.client().liveRead(["x"])`, and the same on a client held in a variable named `…Client` (`companyClient.count("x")`); also behind `as any` | all of `src/` |
 | `no-restricted-syntax` | `appDb.get(oms)` | outside `src/db/**` and `src/workers/*.worker.ts` |
 | `no-restricted-syntax` | `appDb.client()`, except as the `useDbStatus` argument | outside `src/db/**` and `src/workers/**` |
-| `no-restricted-syntax` | a write: `upsertMany(...)` / `snapshotReplace(...)` on anything, or `put` / `bulkPut` / `remove` / `bulkRemove` / `clear` called on `appDb.entity(...)`. Use `refreshRecord`, or `refreshAfterMutation` / `resyncDomain` after a server write (§4) | outside `src/db/**` and `src/workers/**` |
+| `no-restricted-syntax` | a write: `upsertMany(...)` / `snapshotReplace(...)` on anything, or `put` / `bulkPut` / `remove` / `bulkRemove` / `clear` called on `appDb.entity(...)`. Use `refreshAfterMutation` for a missing record, or `refreshAfterMutation` / `resyncDomain` after a server write (§4) | outside `src/db/**` and `src/workers/**` |
 | `no-restricted-syntax` | `useLiveEntity(...)`, `useSeedData()`; use `appDb.entity(...)` / `await loadSeedData()` | outside `.vue` files, `src/components`, `src/views`, `src/composables` |
 | `no-restricted-syntax` | `useSeedData()`: it would hold every seed table open for the session (§1a) | `src/App.vue` |
 | `no-restricted-syntax` | `.live(...)` / `.liveRead(...)`: use `useLiveEntity` | `.vue` files, `src/components`, `src/views`, `src/composables` |
