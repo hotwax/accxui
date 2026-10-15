@@ -1,6 +1,6 @@
 ---
 name: accxui-app-db-access
-description: Use when AccxUI app code reads or writes the local app database (IndexedDB) in an app that has one (apps/company, apps/order-manager or a new one): showing synced rows, looking up a record, reconciling after a POST / PUT / DELETE, or fixing a data-access lint error. Triggers include useLiveEntity, companyDb / orderManagerDb, appDb.tables, appDb.entity, appDb.client, hydrated, refreshAfterMutation, resyncDomain, CacheReconciliationError, which domain name or pk to pass, a refresh that resolves 0, a record missing from the db, Dexie, liveQuery, IndexedDB, upsertMany / snapshotReplace outside a worker, and lint errors ending "See docs/APP_DB_DEVELOPER_GUIDE.md §7".
+description: "Use when AccxUI app code reads or writes the local app database (IndexedDB) in an app that has one (apps/company, apps/order-manager or a new one): showing synced rows, looking up a record, reconciling after a POST / PUT / DELETE, or fixing a data-access lint error. Triggers include useLiveEntity, companyDb / orderManagerDb, appDb.tables, appDb.entity, appDb.client, hydrated, refreshAfterMutation, resyncDomain, CacheReconciliationError, which domain name or pk to pass, a refresh that resolves 0, a record missing from the db, Dexie, liveQuery, IndexedDB, upsertMany / snapshotReplace outside a worker, and lint errors ending 'See docs/APP_DB_DEVELOPER_GUIDE.md §7'."
 ---
 
 # AccxUI app database: reading and writing local data
