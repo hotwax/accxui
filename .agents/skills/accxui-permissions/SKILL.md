@@ -1,6 +1,6 @@
 ---
 name: accxui-permissions
-description: Use when AccxUI app code (apps/company, apps/order-manager, apps/bopis or a new app) checks what the logged-in user may see or do: gating a route, hiding or disabling a button, filtering menu entries, adding a permission, or the app-access check at login. Triggers include hasPermission, Actions, src/authorization/actions.ts, permissionId, meta.permissionId, requirePermission, fetchPermissions, admin/user/permissions, VITE_APP_PERMISSION_ID, "You do not have permission to access the app", "You do not have permission to access this page", COMMON_ADMIN, an OR / AND permission string, and Company's useAuth().hasPermission from composables/useSecurity.ts.
+description: "Use when AccxUI app code (apps/company, apps/order-manager, apps/bopis or a new app) checks what the logged-in user may see or do: gating a route, hiding or disabling a button, filtering menu entries, adding a permission, or the app-access check at login. Triggers include hasPermission, Actions, src/authorization/actions.ts, permissionId, meta.permissionId, requirePermission, fetchPermissions, admin/user/permissions, VITE_APP_PERMISSION_ID, 'You do not have permission to access the app', 'You do not have permission to access this page', COMMON_ADMIN, an OR / AND permission string, and Company's useAuth().hasPermission from composables/useSecurity.ts."
 ---
 
 # Permissions
