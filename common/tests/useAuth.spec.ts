@@ -5,10 +5,11 @@ const api = vi.hoisted(() => vi.fn());
 const logger = vi.hoisted(() => ({ error: vi.fn(), warn: vi.fn(), info: vi.fn() }));
 vi.mock("../core/remoteApi", () => ({ default: (...args: any[]) => api(...args) }));
 vi.mock("../core/logger", () => ({ default: logger }));
-vi.mock("../core/i18n", () => ({ translate: (key: string, params?: any) => key.replace(/\{(\w+)\}/g, (_, k) => params?.[k] ?? `{${k}}`) }));
+vi.mock("../core/i18n", () => ({ translate: (key: string) => key }));
 vi.mock("../helpers/cookieHelper", () => ({ cookieHelper: () => ({ get: () => "", set: vi.fn(), remove: vi.fn() }) }));
 vi.mock("../utils/commonUtil", async (importOriginal) => {
   const actual: any = await importOriginal();
+
   return {
     commonUtil: {
       ...actual.commonUtil,

@@ -110,7 +110,7 @@ export function useAuth() {
         if(commonUtil.hasError(resp)) {
           const serverError = commonUtil.getErrorMessage(resp, translate("Please contact administrator."));
           logger.error("Failed to login", serverError);
-          commonUtil.showToast(translate("Failed to login. {error}", { error: serverError }));
+          commonUtil.showToast(`${translate("Failed to login.")} ${serverError}`);
           updateUserId("")
           updateToken("", "")
 
@@ -138,7 +138,7 @@ export function useAuth() {
       // before `hasError()` can inspect the body - surface that message here instead.
       const serverError = commonUtil.getErrorMessage(err, translate("Please contact administrator."));
       logger.error("Failed to login", serverError);
-      commonUtil.showToast(translate("Failed to login. {error}", { error: serverError }));
+      commonUtil.showToast(`${translate("Failed to login.")} ${serverError}`);
 
       return Promise.reject(new Error(serverError));
     }

@@ -3,15 +3,10 @@ import { createI18n } from "vue-i18n"
 let i18n: any
 
 export const translate = (key: string, ...args: any[]) => {
-  const params = args[0];
-  const message = i18n?.global?.t ? i18n.global.t(key, ...args) : key;
-
-  // vue-i18n already interpolates keys it knows. Only fill placeholders ourselves when the key
-  // is missing (message === key), so brace tokens inside parameter values stay literal.
-  if (message === key && params && typeof params === "object" && typeof key === "string" && key.includes("{")) {
-    return key.replace(/\{(\w+)\}/g, (_, k) => (params[k] !== undefined ? String(params[k]) : `{${k}}`));
+  if (i18n?.global?.t) {
+    return i18n.global.t(key, ...args);
   }
-  return message;
+  return key;
 };
 
 function findBestLocale(supportedLocales: string[]): string | null {
