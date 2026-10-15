@@ -9,7 +9,7 @@ sync runtime) is in [APP_DB_ARCHITECTURE.md](APP_DB_ARCHITECTURE.md). Recipes:
 [APP_DB_DEVELOPER_GUIDE.md](APP_DB_DEVELOPER_GUIDE.md).
 
 Names: `appDb` (`src/db/appDb.ts`), database `{oms}-AppDB`, `appDbSync`
-(`src/services/appDbSync.ts`), worker `src/workers/appSync.worker.ts`.
+(`src/db/appDbSync.ts`), worker `src/workers/appSync.worker.ts`.
 
 | # | Flow |
 |---|---|
@@ -30,7 +30,7 @@ sequenceDiagram
     autonumber
     participant M as main.ts
     participant APP as App.vue
-    participant SVC as services/appDbSync.ts
+    participant SVC as db/appDbSync.ts
     participant DB as db/appDb.ts
 
     M->>APP: import
@@ -204,10 +204,10 @@ sequenceDiagram
 
 | Need | Use | Re-renders? |
 |---|---|---|
-| Rows on screen | `useLiveEntity(appDb.tables.x, opts)` | yes |
-| A value now, or a write | `appDb.entity(appDb.tables.x).get / query / …` | no |
+| Rows on screen | `useLiveEntity(appDb.tables.x, opts)`, in a composable or `.vue` file | yes |
 | Seed labels and lists | `useSeedData()` (one live read per seed table, shared by the component tree that opened it) | yes |
-| Seed labels in a store | `await loadSeedData()` (one-shot snapshot) | no |
+| Rows in a store action or util | taken as arguments from the composable or page that calls it | — |
+| A read or write in a worker sync domain | `appDb.entity(appDb.tables.x).get / query / upsertMany / …` | no |
 
 Use `hydrated` (or `.withSync()` on seed lists) to tell "not loaded yet" from "really empty".
 

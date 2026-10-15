@@ -31,22 +31,23 @@ The rule of thumb: **read from the database, never fetch reference data in a vie
 ## 1. Choosing a data API
 
 App code reaches the database one way — through `dbClient`, with one query shape (`QueryOptions`) —
-in **two patterns, picked by need**:
+and **one pattern**: the composables.
 
 | You want… | Use | Where it works |
 |---|---|---|
-| Rows that stay current **on screen** (§1b) | `useLiveEntity(table, options?)` | Components and composables, during `setup` |
-| An answer **now**, or a **write** (§1d) | `appDb.entity(table)` — `get`, `getMany`, `all`, `query`, `first`, `count`, `put`, `bulkPut`, `upsertMany`, `snapshotReplace`, `remove`, … | Anywhere: stores, services, async handlers, composables, the worker |
-| Live updates **outside a component** (rare) | `appDb.entity(table).live(options)` — a Dexie `Observable`; keep the subscription and unsubscribe it (§1e) | Stores, services, utils. **Not** setup code (use `useLiveEntity`) and **not** the worker |
+| Rows that stay current **on screen** (§1b) | `useLiveEntity(table, options?)` | Composables and `.vue` files, during `setup` |
+| Seed labels, option lists and joins (§1a) | `useSeedData()` | Composables and `.vue` files, during `setup` (never `App.vue`) |
+| One-shot reads and **writes** (§1d) | `appDb.entity(table)` — `get`, `getMany`, `all`, `query`, `first`, `count`, `put`, `bulkPut`, `upsertMany`, `snapshotReplace`, `remove`, … | Worker sync domains (`src/workers/**`) and `src/db/**` only |
 
-`appDb` is the APP's database object (`src/db/appDb.ts`). `all()` followed by a JS
-`filter` / `find` is fine.
+`appDb` is the APP's database object (`src/db/appDb.ts`). Stores, utils and the router never read
+it: a store action or util that needs rows takes them as arguments, and the composable or page that
+calls it passes them (§1e).
 
 Two conveniences sit on the same layer and are not separate data paths:
 
 | You need | Use | Shape |
 |---|---|---|
-| A label, option list or joined lookup for seed data | `useSeedData()` during setup (never in `App.vue`); `await loadSeedData()` in stores and utils | `seed.facilityName(id)` in a template or `computed` |
+| A label, option list or joined lookup for seed data | `useSeedData()` during setup in a composable or `.vue` file (never in `App.vue`) | `seed.facilityName(id)` in a template or `computed` |
 | Row counts + last-sync per domain (Settings) | `useDbStatus(appDb.client(), catalog, actions)` | `{ domains, totalRows, refreshAll, … }` |
 
 **Not for pages or stores** — framework and worker internals:
@@ -62,7 +63,7 @@ involved, so it works in the worker and before sign-in:
 
 ```ts
 useLiveEntity<any>(appDb.tables.facilities, () => ({ equals: { facilityTypeId } }));
-await appDb.entity(appDb.tables.statuses).all();
+await appDb.entity(appDb.tables.statuses).all();   // in a worker sync domain
 ```
 
 A misspelled name is a missing property, so it fails to compile — including in `useLiveEntity`,
@@ -90,7 +91,7 @@ usually from a template during render, inside the scope captured at setup, and c
 providing component unmounts. The read re-emits whenever the table changes: the login sync filling
 it, a `refreshAfterMutation`, or a resync from Settings. A table nobody asks for is never read.
 
-**Where to call it.** In the page or component that shows the labels, during setup. Never in
+**Where to call it.** In the page, component or composable that shows the labels, during setup. Never in
 `App.vue` or a layout: everything would inject that instance and every seed table it touched would
 stay open for the session (lint rejects it in `App.vue`). It throws outside setup. Ionic keeps
 pages in the navigation stack mounted, so a page's reads stay open while a page pushed over it is
@@ -124,35 +125,19 @@ const facilityRows = await seed.getFacilities();
 const facilityIds = facilityRows.filter(isPhysicalFacility).map((facility) => facility.facilityId);
 ```
 
-**In stores, services and utils, use `await loadSeedData()`, not `useSeedData()`.** It answers the
-same getters from a one-shot snapshot: the seed tables (all of them, or the ones you name) and their
-login markers, read in ONE transaction. It does not follow later changes, so keep it in the store's
-state with `markRaw` and read it again on the next load. A getter that runs before the first read
-answers from `emptySeedData` (raw ids, empty lists), as a cold table does. A getter over a table
-left out of a narrowed snapshot throws, naming it.
+**A store or util never reads seed data itself.** It takes the rows or getters it needs as
+arguments, and the composable or page that calls it passes them from its `useSeedData()`. A util
+types the parameter as just the getters it reads (`Pick<SeedData, "facility" | "facilityType">`); a
+store action takes plain rows:
 
 ```ts
-import { emptySeedData, loadSeedData, type SeedData } from "@common/db";
-import { markRaw } from "vue";
-
-state: () => ({ seedSnapshot: null as SeedData | null }),
-getters: {
-  seed: (state): SeedData => state.seedSnapshot ?? emptySeedData,
-},
-actions: {
-  async fetchOrder(orderId: string) {
-    const [resp] = await Promise.all([getOrder(orderId), this.loadSeed()]);
-    // …
-  },
-  async loadSeed() {
-    this.seedSnapshot = markRaw(await loadSeedData());
-  },
-},
+// The page (or its composable) reads the rows; the store action only uses them.
+const seed = useSeedData();
+await orderStore.runSearch(await seed.getFacilityTypes().catch(() => []));
 ```
 
-A util never calls `useSeedData()` either: it takes the caller's seed as an argument, typed as just
-the getters it reads (`Pick<SeedData, "facility" | "facilityType">`), so a component passes its
-`useSeedData()` and a store its snapshot.
+`loadSeedData()` (a one-shot snapshot) is framework-internal: app code does not call it, and lint
+rejects it outside `src/workers/**` and `src/db/**`.
 
 **Don't resolve seed data into a ref.** There's no need for `watch` + `await` + a label-map `ref`:
 the reactive getter already re-renders on its own, and a watcher only adds a raw-id flash and a race
@@ -268,63 +253,60 @@ tables' common domains, not the APP's own or overridden ones.
 Actions are injected rather than imported, because the card must refresh through the same service
 that owns your app's worker.
 
-### 1d. `appDb.entity()` — one-shot reads and writes
+### 1d. `appDb.entity()` — for worker sync domains
 
-For an answer **now**, or a **write**: stores, services, async handlers, cache-first lookups and
-the worker's sync domains. Plain async calls — nothing re-renders afterwards; use `useLiveEntity`
-for that. Every call resolves the signed-in database, so a client held in a module-scope const
+One-shot reads and writes, used by the worker's sync domains (`src/workers/**`) and `src/db/**`.
+App code (composables, pages, stores, utils) does not use it: lint rejects it outside those two
+folders. Every call resolves the signed-in database, so a client held in a module-scope const
 follows an OMS switch.
 
 ```ts
+// src/workers/domains/facilityDomain.ts
 import { appDb } from "@/db/appDb";
 
 const facilities = appDb.entity(appDb.tables.facilities);
 
 const one = await facilities.get(facilityId);                           // by primary key
 const some = await facilities.query({ equals: { facilityTypeId } });    // same QueryOptions as useLiveEntity
-const all = await facilities.all();                                     // then filter / find in JS — fine
-await refreshAfterMutation("facility", { facilityId });               // missing? the domain fetches and stores it
+await facilities.upsertMany(rows);                                      // the domain is the table's only writer
 ```
 
 `first`, `count`, `getMany`, `put`, `bulkPut`, `remove`, `snapshotReplace` and the rest are on the same
-`EntityClient`. Writes project through the entity, so pass the server's record as-is. **Writes belong
-to sync domains**: the domain that fills a table is the only thing that writes it, so the row has one
-shape however it arrived. App code reads with `appDb.entity` / `useLiveEntity`, changes server data
+`EntityClient`. Writes project through the entity, so pass the server's record as-is. **Only sync
+domains write**: the domain that fills a table is the only thing that writes it, so the row has one
+shape however it arrived. App code reads with `useLiveEntity` / `useSeedData`, changes server data
 with `api()` then `refreshAfterMutation` / `resyncDomain` (§4), and fetches a record it is missing with
-`refreshAfterMutation` too (§4). For live updates outside a component, see §1e.
+`refreshAfterMutation` too (§4); the `useLiveEntity` reading that record then shows it.
 
-### 1e. Manual live subscriptions (rare)
+No live queries in the worker: it writes and renders nothing, so it reads once with
+`get / query / all`. In app code, `useLiveEntity` owns every subscription: it subscribes,
+re-subscribes when the options change and unsubscribes on unmount.
 
-`useLiveEntity` owns its subscription: it subscribes, re-subscribes when the options change and
-unsubscribes on unmount. Anything else that calls `.live()` owns its subscription too, and a leaked
-one keeps re-running its query on every write until the page reloads. So:
+### 1e. Store data with app-db rows
 
-- **Setup code** (`.vue`, `src/components`, `src/views`, `src/composables`): never call `.live()` or
-  `.liveRead()`. Use `useLiveEntity`.
-- **The sync worker** (`src/workers/**`): no live queries at all. It writes and renders nothing; read
-  once with `appDb.entity(...).get / query / all`.
-- **Stores, services, utils:** allowed, but keep the subscription and unsubscribe it in the same
-  teardown that runs on logout:
+Pinia stores hold server data (what `api()` returned, raw ids) and never read the app db; the app db
+and its workers never reach a store. When a screen needs both, a **page or domain composable** joins
+them, and a store action or util that needs seed rows takes them as arguments:
 
 ```ts
-import { appDb } from "@/db/appDb";
+// src/composables/useOrderQueue.ts
+export function useOrderQueue() {
+  const orderStore = useOrderStore();
+  const seed = useSeedData();
 
-let facilitiesSub: { unsubscribe(): void } | null = null;
+  // The store action gets the facility type rows it needs from here.
+  const search = async () => orderStore.runSearch(await seed.getFacilityTypes().catch(() => []));
+  const rows = computed(() => orderStore.searchResults.map((order) => ({
+    ...order,
+    statusLabel: seed.statusDescription(order.statusId),   // the join, in the composable
+  })));
 
-export function watchFacilities(onRows: (rows: any[]) => void) {
-  facilitiesSub?.unsubscribe();
-  facilitiesSub = appDb.entity(appDb.tables.facilities).live({}).subscribe({ next: onRows });
-}
-
-/** Call from the logout teardown, next to stopAppDbSync(). */
-export function stopWatchingFacilities() {
-  facilitiesSub?.unsubscribe();
-  facilitiesSub = null;
+  return { rows, search };
 }
 ```
 
-Lint enforces the first two, and that a subscription's handle is kept (§7). It cannot check that
-`unsubscribe()` is actually called, so that part is for review.
+The same holds for utils: they are pure, so they take store data and seed rows as parameters
+rather than reading a store or the db.
 
 ---
 
@@ -463,7 +445,7 @@ export const appDb = defineAppDb({
 
 `sharedSchema` stands for whichever schema declares the entity: `commonSchema` for a seed table, or
 any other shared schema the APP picks from. Then read the field as usual:
-`appDb.entity(appDb.tables.products).query({ equals: { brandName } })`.
+`useLiveEntity(appDb.tables.products, () => ({ equals: { brandName } }))`.
 
 **It merges, never replaces.** Your fields, indexes and renames are added to the entity's own. A
 nested object (or list of objects) is merged into rather than replaced:
@@ -616,7 +598,7 @@ Mutations go to the server first, then you reconcile the local row. Never write 
 response into the table yourself.
 
 ```ts
-import { refreshAfterMutation } from "@/services/appDbSync";
+import { refreshAfterMutation } from "@/db/appDbSync";
 
 const response = await api({ url: "oms/widgets", method: "post", data: { widgetId, widgetName } });
 // ...check the response however your APP does (for example a local `hasError` helper)
@@ -655,18 +637,21 @@ removes the stored row.
 
 ### A record you don't have yet
 
-A cache-first lookup that misses asks the table's domain for the record through the same
-`refreshAfterMutation`, instead of fetching and writing it itself:
+A screen that reads a record the db does not have asks the table's domain for it through the same
+`refreshAfterMutation`, instead of fetching and writing it itself. The `useLiveEntity` reading the
+record shows it once the domain has written it:
 
 ```ts
-import { refreshAfterMutation } from "@/services/appDbSync";
+import { refreshAfterMutation } from "@/db/appDbSync";
 
-const widgets = appDb.entity(appDb.tables.widgets);
-const cached = await widgets.get(widgetId);
-if (cached) return cached;
-
-await refreshAfterMutation("widget", { widgetId });   // worker: the widget domain's refetchOne
-return (await widgets.get(widgetId)) ?? null;
+const { first: widget, hydrated } = useLiveEntity<any>(
+  appDb.tables.widgets,
+  () => ({ equals: { widgetId: props.widgetId } }),
+);
+watch(hydrated, (ready) => {
+  // worker: the widget domain's refetchOne; the live read above then shows the row
+  if (ready && !widget.value) void refreshAfterMutation("widget", { widgetId: props.widgetId }).catch(showLookupError);
+});
 ```
 
 - It behaves exactly as after a write: it waits for the worker's first sync pass, records a failure
@@ -681,11 +666,11 @@ return (await widgets.get(widgetId)) ?? null;
 ## 5. Polling while a view is open (class A)
 
 Class-A domains are off by default. A view switches on what it reads, with args, and switches them
-off when it leaves. The three functions come from your app's `services/appDbSync.ts`, which
+off when it leaves. The three functions come from your app's `db/appDbSync.ts`, which
 re-exports them from `setupAppDbSync`:
 
 ```ts
-import { activateSyncDomains, createSyncDomainOwner, deactivateSyncDomains } from "@/services/appDbSync";
+import { activateSyncDomains, createSyncDomainOwner, deactivateSyncDomains } from "@/db/appDbSync";
 
 // Once per screen instance, at setup — never a shared constant.
 const SYNC_OWNER = createSyncDomainOwner("widgetView");
@@ -726,7 +711,7 @@ activates must register `onIonViewDidLeave`, and `deactivateSyncDomains()` alway
 
 **What the screen can read back:**
 
-| From `services/appDbSync` | Use |
+| From `db/appDbSync` | Use |
 |---|---|
 | `syncDomainsReady` | `Ref<boolean>` — the worker has accepted this activation |
 | `syncDomainsError` | `ComputedRef<string>` — an error from one of the *activated* domains, else `""`. Drive the screen's warning banner from this |
@@ -811,10 +796,11 @@ exposeWorkerHarness((omsInstance) => {
 ```
 
 ```ts
-// 4. src/services/appDbSync.ts — the main-thread facade (barrel import is fine here)
-import { createSyncService, setupAppDbSync } from "@common/db";
+// 4. src/db/appDbSync.ts — the main-thread facade. DEEP imports, like the rest of src/db
+import { setupAppDbSync } from "@common/db/sync/setupAppDbSync";
+import { createSyncService } from "@common/db/sync/syncService";
 import { appDb } from "@/db/appDb";
-import workerUrl from "@/workers/appSync.worker.ts?worker&url";
+import workerUrl from "../workers/appSync.worker.ts?worker&url";
 
 export const {
   startAppDbSync, stopAppDbSync, refreshAfterMutation,
@@ -862,8 +848,8 @@ all factory-built can pass `appDb.get(omsInstance)` straight through without it.
 
 **Never import `@common/db` (the barrel) from anything the worker reaches.** It re-exports modules
 that import `vue`, and Vite must emit the worker chunk as a single iife. Use deep imports in your db
-module, your schema module, and every domain file. The barrel is fine in components, composables and
-`services/appDbSync.ts`.
+module, your schema module, and every domain file. The barrel is fine in components, composables, stores and
+`main.ts`; `src/db/appDbSync.ts` uses deep imports like the rest of `src/db`.
 
 Deep imports follow the folder layout of `common/db`:
 
@@ -876,49 +862,57 @@ Deep imports follow the folder layout of `common/db`:
 | `@common/db/sync/*` | `defineSyncDomain`, `defineSnapshotDomain`, `defineCursorDomain`, `syncRegistry`, `pollingWorkerHarness` | yes, except `syncService` and `setupAppDbSync` |
 | `@common/db/composables/*` | `useLiveEntity`, `useSeedData`, `useDbStatus` | **no** — main thread only; import them from the barrel |
 
-**App code uses the two patterns, and the build checks it.** Reads go through `useLiveEntity` and
-`appDb.entity(...)`, with table names from `appDb.tables`; there is no raw handle on an app database.
-Writes belong to the table's sync domain: app code calls `refreshAfterMutation` for a missing record and
-`api()` then `refreshAfterMutation` / `resyncDomain` for a server change. The rules live in the root `eslint.config.js`, built from core rules: imports
-through `@typescript-eslint/no-restricted-imports`, calls through `no-restricted-syntax`. The root
-file also exports `dbConfig`: the local-database rules plus no `api` / `client` imports in `.vue`
-files, with the parsers they need. The APP's
-`eslint.config.js` spreads `dbConfig`, and its build runs that lint first
-(`"build": "eslint src && vite build"`), so a data-access violation fails `pnpm --filter <app> build`.
-Editors show the same errors as you type. Every data-access message ends with "See
-docs/APP_DB_DEVELOPER_GUIDE.md §7".
+**App code uses one read pattern and fixed layers, and the build checks it.** Reads go through
+`useLiveEntity` / `useSeedData` in composables and `.vue` files, with table names from `appDb.tables`;
+there is no raw handle on an app database. Writes belong to the table's sync domain: app code calls
+`refreshAfterMutation` for a missing record and `api()` then `refreshAfterMutation` / `resyncDomain`
+for a server change. API calls live in composables, Pinia stores and worker domains; utils are pure;
+stores and the app db never reach each other (`AGENTS.md`, App layout). The rules live in the root
+`eslint.config.js`, built from core rules: layer and data-access imports through
+`@typescript-eslint/no-restricted-imports`, the API import through `no-restricted-imports`, calls
+through `no-restricted-syntax`. The root file also exports `dbConfig`, these rules with the parsers
+they need. The APP's `eslint.config.js` spreads `dbConfig`, and its build runs that lint first
+(`"build": "eslint src && vite build"`), so a violation fails `pnpm --filter <app> build`. Editors
+show the same errors as you type. Data-access messages end with "See docs/APP_DB_DEVELOPER_GUIDE.md
+§7"; layer messages with "See AGENTS.md (App layout)".
 
 An "app db" is any identifier ending in `Db` (`appDb`, `companyDb`, …).
 
 | Rule | Rejects | Where |
 |---|---|---|
+| `no-restricted-imports` | `import { api, client } from "@common"` or `@common/core/remoteApi`: API calls live in composables, stores and worker domains | everywhere except `src/composables`, `src/store` |
+| `@typescript-eslint/no-restricted-imports` | `@/composables/*` (value imports; types are fine): composables are used only by composables and `.vue` files | everywhere except `src/composables` and `.vue` files |
+| `@typescript-eslint/no-restricted-imports` | an app db module (`@/db/*` except `@/db/appDbSync`) | `src/store` |
+| `@typescript-eslint/no-restricted-imports` | `@/store/*`, `pinia`, `@/db/*`, and `useLiveEntity` / `useSeedData` / `loadSeedData` from `@common` / `@common/db` | `src/utils` (stores and `pinia` also in `src/db` and `src/workers`) |
 | `@typescript-eslint/no-restricted-imports` | value imports of `dexie`, `@common/db/storage/dbClient` / `baseDb`, `@common/db/schema/appDbRegistry`, or low-level names (`dbClient`, `getAppDb`, `ensureDbReady`, `hasSyncedThisLogin`, …) from `@common` / `@common/db` | all of `src/` |
 | `no-restricted-syntax` | `appDb.raw()`; a string-literal table in `appDb.entity("x")`, `useLiveEntity("x")`, `appDb.client().get("x")` or `appDb.client().liveRead(["x"])`, and the same on a client held in a variable named `…Client` (`companyClient.count("x")`); also behind `as any` | all of `src/` |
+| `no-restricted-syntax` | `appDb.entity(...)` and `loadSeedData()`: read with `useLiveEntity` / `useSeedData` | outside `src/db/**` and `src/workers/**` |
+| `no-restricted-syntax` | `useLiveEntity(...)`, `useSeedData()`, `useDbStatus(...)`: the caller passes the rows | outside `src/composables` and `.vue` files |
+| `no-restricted-syntax` | a `use…Store()` call: take the data as a parameter | `src/utils` |
 | `no-restricted-syntax` | `appDb.get(oms)` | outside `src/db/**` and `src/workers/*.worker.ts` |
 | `no-restricted-syntax` | `appDb.client()`, except as the `useDbStatus` argument | outside `src/db/**` and `src/workers/**` |
-| `no-restricted-syntax` | a write: `upsertMany(...)` / `snapshotReplace(...)` on anything, or `put` / `bulkPut` / `remove` / `bulkRemove` / `clear` called on `appDb.entity(...)`. Use `refreshAfterMutation` for a missing record, or `refreshAfterMutation` / `resyncDomain` after a server write (§4) | outside `src/db/**` and `src/workers/**` |
-| `no-restricted-syntax` | `useLiveEntity(...)`, `useSeedData()`; use `appDb.entity(...)` / `await loadSeedData()` | outside `.vue` files, `src/components`, `src/views`, `src/composables` |
+| `no-restricted-syntax` | a write: `upsertMany(...)` / `snapshotReplace(...)` on anything, or `put` / `bulkPut` / `remove` / `bulkRemove` / `clear` called on `appDb.entity(...)`. Use `refreshAfterMutation` for a missing record, or `refreshAfterMutation` / `resyncDomain` after a server write (§4) | outside `src/workers/**` |
 | `no-restricted-syntax` | `useSeedData()`: it would hold every seed table open for the session (§1a) | `src/App.vue` |
-| `no-restricted-syntax` | `.live(...)` / `.liveRead(...)`: use `useLiveEntity` | `.vue` files, `src/components`, `src/views`, `src/composables` |
 | `no-restricted-syntax` | `.live(...)` / `.liveRead(...)` at all | `src/workers/**` |
-| `no-restricted-syntax` | a discarded subscription: `x.live(...).subscribe(...);` as a bare statement, or `void …subscribe(...)` | everywhere else (§1e) |
 | `no-restricted-syntax` | `activateSyncDomains(...)` in a file with no `deactivateSyncDomains(...)` | all of `src/` (§5) |
 | `no-restricted-syntax` | `deactivateSyncDomains()` with no owner | all of `src/` (§5) |
 | `no-restricted-syntax` | `activateSyncDomains(...)` in a page with no `onIonViewDidLeave` | `.vue` files (§5) |
-| `no-restricted-imports` | `import { api, client } from "@common"`: API calls belong in composables and stores | `.vue` files |
 
-The `.vue` API rule is a separate rule from the DB selectors, so an APP still moving its page-level
-API calls can switch it off alone in its own `eslint.config.js` (`"no-restricted-imports": "off"` for
-`src/**/*.vue`) until they are moved.
+The framework's plain helpers that happen to be named `use…` (`useAuth`, `useSolrSearch`, …) come
+from `@common`, not `@/composables`, so stores and the router keep using them.
+
+In `.vue` files the API ban is `no-restricted-imports` alone, so an APP still moving its page-level
+API calls can switch it off for just those pages in its own `eslint.config.js` (list the files, with
+a TODO) until they are moved.
 
 Type-only imports are fine. There is no autofix: write `appDb.tables.x` by hand.
 
-`no-restricted-syntax` is one rule, and flat config replaces its options per file instead of merging
-them. So the root config composes the selector lists: each data-access block restates the
-folder's other selectors (no `api()` in `.vue`, `use*` composable and store names). Add a new
-data-access selector to the `DA_*` lists at the top of `eslint.config.js`, and check it by linting a
-sample file from an app folder (`eslint --stdin --stdin-filename src/views/X.vue`). Lint rules have
-no committed spec.
+Flat config replaces a rule's options per file instead of merging them. So the root config composes
+the lists per folder: each data-access block restates the folder's other selectors (no `api()` in
+`.vue`, `use*` composable and store names) and its import bans (`IMPORT_*`). Add a new data-access
+selector to the `DA_*` lists, or a layer ban to the `IMPORT_*` lists, at the top of
+`eslint.config.js`, and check it by linting a sample file from an app folder (`eslint --stdin
+--stdin-filename src/views/X.vue`). Lint rules have no committed spec.
 
 The APP's config, including the exemption for an APP-local Dexie store kept outside the app
 database (for example a product cache):
@@ -930,8 +924,12 @@ import { dbConfig } from "../../eslint.config.js"
 export default [
   ...dbConfig,
   {
-    files: ["src/services/productDb.ts"],   // the APP's own Dexie store
+    files: ["src/db/productDb.ts"],   // the APP's own Dexie store
     rules: { "@typescript-eslint/no-restricted-imports": "off", "no-restricted-syntax": "off" }
+  },
+  {
+    files: ["src/store/productCache.ts"],   // the Pinia mirror over it, which imports it
+    rules: { "@typescript-eslint/no-restricted-imports": "off" }
   }
 ]
 ```
@@ -974,7 +972,7 @@ promise loses the tracking at its first await, so the query never re-runs when t
 | Table stays empty, no error | Domain not registered, or the table name differs between domain and schema | Worker entry; `checkDomainWiring` in `tests/db/appDbWiring.spec.ts` names the table |
 | Table empty and the status card says "none" | Class-B domain never ran — check `syncMeta` for its `loginSync:` marker | Force via `resyncDomain(name)` |
 | Snapshot wiped rows that still exist server-side | Envelope mis-declared, so the response unwrapped to `[]` | `collectionKey`; add `strictCollection: true` |
-| Rows stop updating after switching OMS instance | A captured Dexie handle instead of the late-binding client | Use `appDb.entity()` / `appDb.client()`, never a stored `BaseDB` handle |
+| Rows stop updating after switching OMS instance | A captured Dexie handle instead of the late-binding client | Use `useLiveEntity` in app code and `appDb.entity()` / `appDb.client()` in domains, never a stored `BaseDB` handle |
 | Empty state flashes on every load | Rendering off `records.length` instead of `hydrated` | §1b |
 | Old field shape persists after a deploy | `version` not bumped | §2 |
 | Class-A domain polls but writes nothing | Server ignores the cursor param, or `keep` trims everything | Probe the endpoint; log the page size |
@@ -997,9 +995,10 @@ names are what the lint rules, the worker bundling and the other docs expect.
 ```text
 apps/<app>/
 ├── src/
-│   ├── db/                              ← schema + database. Worker-safe: DEEP imports only
+│   ├── db/                              ← schema, database, sync facade. DEEP imports only
 │   │   ├── appSchema.ts                 the APP's own entities (defineEntity / defineSchema)
-│   │   └── appDb.ts                     defineAppDb(...): picked seed tables + appSchema
+│   │   ├── appDb.ts                     defineAppDb(...): picked seed tables + appSchema
+│   │   └── appDbSync.ts                 main-thread facade: setupAppDbSync(...) re-exports
 │   ├── workers/                         ← runs in the sync worker. Worker-safe: DEEP imports only
 │   │   ├── appSync.worker.ts            worker entry: registerDomains + exposeWorkerHarness
 │   │   ├── appSyncDomains.ts            the list of every domain the APP registers
@@ -1008,8 +1007,6 @@ apps/<app>/
 │   │       └── referenceDomains.ts      APP class-B domains + seed-domain overrides
 │   ├── config/
 │   │   └── appSyncConfig.ts             optional: polling scopes, windows, intervals
-│   ├── services/
-│   │   └── appDbSync.ts                 main-thread facade: setupAppDbSync(...) re-exports
 │   ├── main.ts                          registers the real OMS resolver
 │   ├── App.vue                          starts the sync when isAuthenticated turns true
 │   ├── store/user.ts                    postLogin / postLogout → stopAppDbSync / startAppDbSync
@@ -1027,7 +1024,7 @@ flowchart LR
     DOMS --> LIST["workers/appSyncDomains.ts"]
     DB --> LIST
     LIST --> W["workers/appSync.worker.ts"]
-    W -. "?worker&url" .-> SVC["services/appDbSync.ts"]
+    W -. "?worker&url" .-> SVC["db/appDbSync.ts"]
     DB --> SVC
     SVC --> BOOT["main.ts · App.vue · store/user.ts"]
     SVC --> PAGES["pages · composables · stores"]
@@ -1069,11 +1066,11 @@ the seed domain's name (the "same table, your own domain" case in §2).
 |---|---|
 | `registerDomains(appSyncDomains)`; `exposeWorkerHarness((oms) => { appDb.setOmsInstanceResolver(() => oms); return appDb.get(oms); })` | Nothing else. Deep imports only, never the `@common/db` barrel (it pulls in `vue`). The only file besides `src/db/**` allowed to call `appDb.get(...)` |
 
-### `src/services/appDbSync.ts`
+### `src/db/appDbSync.ts`
 
 | Contains | Rules |
 |---|---|
-| `setupAppDbSync({ db: appDb, getWorkerUrl: () => new URL(workerUrl, import.meta.url), createSyncService })` with `import workerUrl from "@/workers/appSync.worker.ts?worker&url"`, and re-exports: `startAppDbSync`, `stopAppDbSync`, `refreshAfterMutation`, `resyncDomain`, `resyncReferenceData`, `syncService`, `bootstrapState`; for page-level sync also `activateSyncDomains`, `deactivateSyncDomains`, `createSyncDomainOwner`, `syncDomainsReady`, `syncDomainsError`, `syncNow` | Main thread only; the `@common/db` barrel is fine here. Call `setupAppDbSync` exactly once (this module). Every other file imports sync functions from here, never from `@common/db/sync/*` |
+| `setupAppDbSync({ db: appDb, getWorkerUrl: () => new URL(workerUrl, import.meta.url), createSyncService })` with `import workerUrl from "../workers/appSync.worker.ts?worker&url"` (relative: the apps' alias-import check rejects a `?worker&url` suffix on an `@/` path), and re-exports: `startAppDbSync`, `stopAppDbSync`, `refreshAfterMutation`, `resyncDomain`, `resyncReferenceData`, `syncService`, `bootstrapState`; for page-level sync also `activateSyncDomains`, `deactivateSyncDomains`, `createSyncDomainOwner`, `syncDomainsReady`, `syncDomainsError`, `syncNow` | Main thread only, but deep imports like the rest of `src/db`. Call `setupAppDbSync` exactly once (this module). Every other file imports sync functions from here, never from `@common/db/sync/*` |
 
 ### `src/config/appSyncConfig.ts` (optional)
 
@@ -1091,7 +1088,7 @@ default `intervalMs` values. Imported by domains and by pages that build their a
 
 ### Everywhere else
 
-Pages, composables and stores never add files to this structure. They use the two patterns:
-`useLiveEntity(appDb.tables.x, ...)` and `appDb.entity(appDb.tables.x)`, plus `useSeedData` /
-`loadSeedData`, `refreshAfterMutation` and the page-activation functions from `services/appDbSync.ts`.
-The APP's build lints it first (§7).
+Pages, composables and stores never add files to this structure. Pages and composables read with
+`useLiveEntity(appDb.tables.x, ...)` and `useSeedData()`; stores hold server data and take any rows
+they need from their caller (§1e). Both use `refreshAfterMutation` and the page-activation functions
+from `db/appDbSync.ts`. The APP's build lints it first (§7).

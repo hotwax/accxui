@@ -36,8 +36,8 @@ only). Full reference: `docs/APP_DB_DEVELOPER_GUIDE.md`.
 8. **Class B is never activated from a page; class A always is,** and the page deactivates it with
    the same owner in `onIonViewDidLeave`.
 9. **Seed tables are picked, not redeclared.** Statuses, facilities, enums and the other reference
-   tables come from `commonSchema`; labels come from `useSeedData()` in the pages that show them
-   (never `App.vue`, which lint rejects) and `loadSeedData()` in stores.
+   tables come from `commonSchema`; labels come from `useSeedData()` in the pages and composables
+   that show them (never `App.vue`, which lint rejects). A store or util takes seed rows as arguments.
 
 ## Which sync class
 
@@ -57,7 +57,7 @@ only). Full reference: `docs/APP_DB_DEVELOPER_GUIDE.md`.
 | 3 | `src/workers/domains/<thing>Domain.ts` | one sync domain per file |
 | 4 | `src/workers/appSyncDomains.ts` | the single list: seed domains for the picked tables + own domains |
 | 5 | `src/workers/appSync.worker.ts` | `registerDomains(appSyncDomains)` + `exposeWorkerHarness(...)`, nothing else |
-| 6 | `src/services/appDbSync.ts` | `setupAppDbSync({...})` once; re-export its functions |
+| 6 | `src/db/appDbSync.ts` | `setupAppDbSync({...})` once; re-export its functions |
 | 7 | `src/main.ts` | `appDb.setOmsInstanceResolver(() => commonUtil.getOMSInstanceName())` |
 | 8 | `src/App.vue` + `src/store/user.ts` | the lifecycle wiring (below) |
 | 9 | `eslint.config.js` | `import { dbConfig } from "../../eslint.config.js"; export default [...dbConfig]`; `"build": "eslint src && vite build"` |
@@ -228,15 +228,18 @@ export const cycleCountNoteDomain = defineSyncDomain({
 });
 ```
 
-The screen side stays cache-first and only reads; `pk` may carry more than the key when the fetch
-needs it:
+The screen side stays cache-first and only reads, through `useLiveEntity` in a composable or `.vue`
+file; `pk` may carry more than the key when the fetch needs it:
 
 ```ts
-let rows = await appDb.entity(appDb.tables.cycleCountNotes).query({ equals: { cycleCountId } });
-if (!rows.length) {
-  await refreshAfterMutation("cycleCountNote", { cycleCountId });   // the domain fetches and stores
-  rows = await appDb.entity(appDb.tables.cycleCountNotes).query({ equals: { cycleCountId } });
-}
+const { records: notes, hydrated } = useLiveEntity<any>(
+  appDb.tables.cycleCountNotes,
+  () => ({ equals: { cycleCountId: props.cycleCountId } }),
+);
+// Once the read lands empty, the domain fetches and stores; the live read shows the rows.
+watch(hydrated, (ready) => {
+  if (ready && !notes.value.length) void refreshAfterMutation("cycleCountNote", { cycleCountId: props.cycleCountId });
+});
 ```
 
 ### A record built from several calls
@@ -283,10 +286,11 @@ exposeWorkerHarness((omsInstance) => {
 ### The main-thread facade
 
 ```ts
-// src/services/appDbSync.ts
-import { createSyncService, setupAppDbSync } from "@common/db";
+// src/db/appDbSync.ts — deep imports, like the rest of src/db
+import { setupAppDbSync } from "@common/db/sync/setupAppDbSync";
+import { createSyncService } from "@common/db/sync/syncService";
 import { appDb } from "@/db/appDb";
-import workerUrl from "@/workers/appSync.worker.ts?worker&url";
+import workerUrl from "../workers/appSync.worker.ts?worker&url";
 
 export const {
   startAppDbSync, stopAppDbSync, refreshAfterMutation, resyncDomain, resyncReferenceData,
@@ -300,7 +304,12 @@ export const {
 });
 ```
 
-Every other file imports sync functions from `@/services/appDbSync`, never from `@common/db/sync/*`.
+Every other file imports sync functions from `@/db/appDbSync`, never from `@common/db/sync/*`. The worker
+URL import stays relative: a `?worker&url` suffix on an `@/` path fails the apps' alias-import check.
+
+`src/db/` holds only the database objects, the schema, this facade and any app-local Dexie store.
+There is no `src/services/`: API calls live in worker domains, stores and composables, and pure logic
+in `src/utils/`.
 
 ### Lifecycle
 
@@ -382,7 +391,7 @@ it("stamps the parent id onto each note", async () => {
 
 A class B domain that checks `syncedThisLogin` also needs `client: () => ({ syncedThisLogin,
 markSyncedThisLogin, count })` on the mocked `appDb`. A composable that calls `refreshAfterMutation` mocks
-`@/services/appDbSync`.
+`@/db/appDbSync`.
 
 ## Common mistakes
 

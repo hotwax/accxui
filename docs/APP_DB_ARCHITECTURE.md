@@ -17,7 +17,7 @@ Framework code is in `common/db/`. Names used for the APP:
 | `{oms}-AppDB` | The IndexedDB database: OMS instance + the APP's `suffix` |
 | `appSyncDomains` | `src/workers/appSyncDomains.ts`: every sync domain the APP registers |
 | `appSync.worker.ts` | `src/workers/appSync.worker.ts`: the sync worker entry |
-| `appDbSync` | `src/services/appDbSync.ts`: the APP's `setupAppDbSync(...)` facade |
+| `appDbSync` | `src/db/appDbSync.ts`: the APP's `setupAppDbSync(...)` facade |
 
 ---
 
@@ -61,14 +61,14 @@ worker, goes down this one stack.
 
 ```mermaid
 flowchart TB
-    subgraph USE["APP code: the two patterns"]
+    subgraph USE["APP code: one read pattern"]
       direction LR
-      ULE["useLiveEntity(appDb.tables.x, opts)<br/>live rows as Vue refs<br/>(components, composables)"]
-      AE["appDb.entity(appDb.tables.x)<br/>.get · query · all · first · count ·<br/>upsertMany · remove …<br/>(anywhere)"]
+      ULE["useLiveEntity(appDb.tables.x, opts)<br/>live rows as Vue refs<br/>(composables, .vue)"]
+      USD["useSeedData()<br/>seed lookups<br/>(composables, .vue)"]
     end
-    subgraph CONV["Framework conveniences on the same layer"]
+    subgraph CONV["Framework and worker on the same layer"]
       direction LR
-      USD["useSeedData() / loadSeedData()<br/>seed lookups"]
+      AE["appDb.entity(appDb.tables.x)<br/>.get · query · upsertMany · remove …<br/>(worker sync domains)"]
       UDS["useDbStatus(appDb.client(), …)<br/>status card"]
       SYNC["Sync domains, harness,<br/>setupAppDbSync"]
     end
@@ -91,60 +91,64 @@ flowchart TB
 | **BaseDB** | `Dexie` subclass for one database | Adds the `syncMeta` store; `ensureDbReady` opens it and runs the version gate (§3.4) |
 | **appDb.client() / dbClient** | The one access layer, as the APP sees it | `defineAppDb` builds ONE `dbClient` from a resolver, so it resolves the signed-in OMS instance on every call and follows an instance switch. Every operation passes `ensureDbReady` first. Writes store only the entity's declared `fields` (coerced, plus `syncedAt`); a row missing a key member is dropped. `appDb.get(oms)` (raw handle) is for the worker entry only |
 | **useLiveEntity** | Vue form of `entity(t).live(opts)` | Returns `{ records, first, count, hydrated, error }` refs; re-subscribes when options change; unsubscribes on unmount |
-| **appDb.entity** | One-shot `EntityClient` | Plain async calls; nothing re-renders afterwards |
+| **appDb.entity** | One-shot `EntityClient` | Plain async calls, for worker sync domains (the only writers) and `src/db`; app code does not use it |
 
-### 2.1 The two patterns
+### 2.1 The read pattern
 
 ```ts
 import { useLiveEntity } from "@common";
 import { appDb } from "@/db/appDb";
 
-// 1. Live, on screen (components / composables, during setup)
+// App code: live, in a composable or .vue file, during setup
 const { records, first, hydrated } = useLiveEntity<any>(
   appDb.tables.facilities,
   () => ({ equals: { facilityId: props.facilityId } }),   // function → re-subscribes on change
 );
 
-// 2. One-shot read or write (anywhere: stores, services, utils, workers)
+// Worker sync domains only: one-shot reads and the table's writes
 const facilities = appDb.entity(appDb.tables.facilities);
-const facility = await facilities.get(facilityId);
-const some = await facilities.query({ equals: { facilityTypeId } });
+await facilities.upsertMany(rows);
 ```
 
-- **Query options** (same for both): `scope` / `equals` (equalities, resolved through the widest
+Stores, utils and the router never read the app db: they take rows from the composable or page
+that calls them, and a page or domain composable joins store data with `useLiveEntity` rows.
+
+- **Query options** (the same for `useLiveEntity` and `appDb.entity`): `scope` / `equals` (equalities, resolved through the widest
   matching index), `dateField` + `since` / `until` / `order` (newest first by default), `filter`,
   `limit`.
 - **`hydrated`** is true once the first emission arrived and either rows exist or no sync is
   running. It tells "not loaded yet" from "really empty".
-- **Seed lookups** (`useSeedData()` during setup, `await loadSeedData()` in stores): the first
+- **Seed lookups** (`useSeedData()` during setup, in a composable or `.vue` file): the first
   `useSeedData()` in a component tree provides one live read per seed table (through
   `useLiveEntity`, with its domain's login marker), opened on first use and shared by every
-  component below it, closed when that component unmounts; never in `App.vue`. `loadSeedData()` is
-  a one-shot snapshot. Label getters (`facilityName(id)`), list getters with `.withSync()` (is the
-  empty list real?), async `get*` getters.
+  component below it, closed when that component unmounts; never in `App.vue`. Label getters
+  (`facilityName(id)`), list getters with `.withSync()` (is the empty list real?), async `get*`
+  getters. A store action or util that needs seed rows takes them as arguments.
 - **Table names** always come from `appDb.tables.x`: typed, static, work in the worker and before
   sign-in.
 
 ### 2.2 Enforced by lint
 
 The root `eslint.config.js` rejects any other path in APP code, using core ESLint rules
-(`no-restricted-syntax`, `@typescript-eslint/no-restricted-imports`). The APP's
-`eslint.config.js` spreads the exported `dbConfig` (these DB rules, plus no API imports in `.vue` files), and the APP's build
-runs it before `vite build` (`eslint src && vite build`), so a violation fails the build:
+(`no-restricted-syntax`, `no-restricted-imports`, `@typescript-eslint/no-restricted-imports`). The
+APP's `eslint.config.js` spreads the exported `dbConfig` (these data-access and layer rules), and the
+APP's build runs it before `vite build` (`eslint src && vite build`), so a violation fails the build:
 
 | Not allowed | Use instead |
 |---|---|
-| `import … from "dexie"` | the two patterns |
-| `dbClient`, `getAppDb`, `ensureDbReady`, `BaseDB` value imports | `appDb.entity(...)` / `useLiveEntity` |
+| `import … from "dexie"` | `useLiveEntity` |
+| `dbClient`, `getAppDb`, `ensureDbReady`, `BaseDB` value imports | `useLiveEntity` |
 | a string table name | `appDb.tables.x` |
-| `useLiveEntity` outside `.vue`, `src/components`, `src/views`, `src/composables` | `appDb.entity(...)` |
-| `.live()` / `.liveRead()` in setup code | `useLiveEntity`, which owns the subscription |
+| `appDb.entity(...)` or `loadSeedData()` outside `src/workers/**` and `src/db/**` | `useLiveEntity` / `useSeedData` in a composable or `.vue` file |
+| `useLiveEntity` / `useSeedData` / an app composable outside composables and `.vue` files | the caller passes the rows |
 | `.live()` / `.liveRead()` in the sync worker | a one-shot `appDb.entity(...)` read |
-| a `.live(...).subscribe(...)` whose result is discarded | keep it and `unsubscribe()` it on logout teardown |
+| an app db module imported in a store; a store imported in a util, `src/db` or a worker | a page or domain composable joins them |
+| `api` / `client` imported outside composables, stores and worker domains | the composable or store action that owns the request |
 | `activateSyncDomains` with no `deactivateSyncDomains` in the file, or in a page with no `onIonViewDidLeave` | deactivate with the same owner on leave |
 | `deactivateSyncDomains()` with no owner | `deactivateSyncDomains(SYNC_OWNER)` |
-| `appDb.get(oms)` outside `src/db/**` and the worker entry | `appDb.entity(...)` |
-| `appDb.client()` outside `src/workers/**` and `useDbStatus(...)` | `appDb.entity(...)` |
+| `appDb.get(oms)` outside `src/db/**` and the worker entry | `useLiveEntity` |
+| `appDb.client()` outside `src/workers/**` and `useDbStatus(...)` | `useLiveEntity` |
+| a write on `appDb.entity(...)` outside `src/workers/**` | `refreshAfterMutation` / `resyncDomain` |
 
 ---
 
@@ -353,4 +357,4 @@ The APP's folder structure, with what each file must contain, is in
 | Read surface | `composables/useLiveEntity.ts`, `useSeedData.ts`, `useDbStatus.ts` | pages, composables, stores; `views/Settings.vue` |
 | Domains | `sync/defineSnapshotDomain.ts`, `defineCursorDomain.ts`, `defineSyncDomain.ts`, `cachedEntity.ts`, `seed/seedDomains.ts` | `workers/domains/*.ts`, `workers/appSyncDomains.ts` |
 | Worker runtime | `sync/pollingWorkerHarness.ts`, `sync/syncRegistry.ts`, `core/workerRemoteApi.ts` | `workers/appSync.worker.ts` |
-| Main-thread runtime | `sync/syncService.ts`, `sync/setupAppDbSync.ts`, `sync/channels.ts`, `sync/reconciliation.ts` | `services/appDbSync.ts`, `main.ts`, `App.vue`, `store/user.ts` |
+| Main-thread runtime | `sync/syncService.ts`, `sync/setupAppDbSync.ts`, `sync/channels.ts`, `sync/reconciliation.ts` | `db/appDbSync.ts`, `main.ts`, `App.vue`, `store/user.ts` |
