@@ -37,8 +37,10 @@ page. Writing the domain itself is **accxui-app-db-setup**; reading its rows is
 3. **Only class A domains** go in the list.
 4. **When args change, activate again with the full list and the same owner** (a `watch` on the
    args). While an arg isn't known yet, activate `[]` rather than an unscoped domain.
-5. **Show "loading" until this visit's first pass lands**, not until `useLiveEntity` is `hydrated`:
-   the table may hold nothing (or an earlier visit's rows) until the worker's first pass ends.
+5. **Show "empty" only after this visit's first pass lands**, not when `useLiveEntity` is `hydrated`:
+   until the worker's first pass ends the table may hold nothing, or an earlier visit's rows. Cached
+   rows may show straight away (cache-first), with a "refreshing" indicator from
+   `firstPassPending(name)`; with no rows, show the skeleton until the pass lands or fails.
 6. **After a write, reconcile through the worker**: `refreshAfterMutation(domain, pk)` for one record,
    `syncNow()` to re-poll everything on screen. Activating the same list again does not re-run it.
 
@@ -97,6 +99,7 @@ const { records: returns, hydrated } = useLiveEntity<any>(
 const firstPassPending = (domain: string) => !serviceState.syncedAt[domain] && !serviceState.errors[domain];
 const isLoading = computed(() => !hydrated.value || (!returns.value.length && firstPassPending("return")));
 const isEmpty = computed(() => !isLoading.value && !returns.value.length);
+const isRefreshing = computed(() => returns.value.length > 0 && firstPassPending("return")); // cached rows shown, this visit's pass still running
 const errorBanner = syncDomainsError;                                  // "" when every active domain is fine
 
 const refreshing = ref(false);
@@ -169,6 +172,6 @@ from parameters (Company's `utils/shopifyFulfillment.ts`); the calls stay in the
 - [ ] Every class A domain the screen and its children show is in the page's one list; no class B domain is.
 - [ ] Owner from `createSyncDomainOwner`, activate in `onIonViewWillEnter`, deactivate with it in `onIonViewDidLeave`.
 - [ ] Arg changes re-activate the full list with the same owner, only while the page is active.
-- [ ] Loading waits on `serviceState.syncedAt[name]` (or an error); empty shows only after it.
+- [ ] The empty state waits on `serviceState.syncedAt[name]` (or an error); cached rows may show meanwhile, marked as refreshing.
 - [ ] Refresh calls `syncNow()`; writes reconcile with `refreshAfterMutation` / `syncNow()`.
 - [ ] `pnpm build` passes in the app.
