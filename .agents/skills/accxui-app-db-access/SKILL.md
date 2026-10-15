@@ -1,55 +1,41 @@
 ---
-name: accxui-data-access
-description: How AccxUI app code reads and writes local app data (IndexedDB) and where each kind of code lives (composables, Pinia stores, utils, worker domains). Use whenever you read, list, look up, cache, store, upsert or delete server data in any AccxUI app (apps/company, apps/order-manager or a new one), add an API call, write a composable, Pinia store or util, touch useLiveEntity, companyDb / orderManagerDb, appDb.tables, useSeedData, refreshAfterMutation or resyncDomain, a worker sync domain, Dexie, liveQuery or IndexedDB, send a POST / PUT / DELETE that changes server data, or fix a data-access or layer lint error (one ending "See docs/APP_DB_DEVELOPER_GUIDE.md §7" or "See AGENTS.md (App layout)").
+name: accxui-app-db-access
+description: Use when AccxUI app code reads or writes the local app database (IndexedDB) in an app that has one (apps/company, apps/order-manager or a new one): showing synced rows, looking up a record, reconciling after a POST / PUT / DELETE, or fixing a data-access lint error. Triggers include useLiveEntity, companyDb / orderManagerDb, appDb.tables, appDb.entity, appDb.client, hydrated, refreshAfterMutation, resyncDomain, CacheReconciliationError, which domain name or pk to pass, a refresh that resolves 0, a record missing from the db, Dexie, liveQuery, IndexedDB, upsertMany / snapshotReplace outside a worker, and lint errors ending "See docs/APP_DB_DEVELOPER_GUIDE.md §7".
 ---
 
-# AccxUI data access and app layers
+# AccxUI app database: reading and writing local data
 
 Every app keeps server data in one IndexedDB database per OMS instance, filled by a background sync
 worker. `appDb` below is the app's database object: `companyDb` (`@/db/companyDb`) in Company,
 `orderManagerDb` (`@/db/orderManagerDb`) in Order Manager. Building the database itself (tables,
-domains, worker) is the **accxui-app-db-setup** skill.
+domains, worker) is **accxui-app-db-setup**; which folder may call the API or a composable is
+**accxui-app-layers**.
 
 ## Rules
 
-1. **App composables are used only by other composables and `.vue` files.** A store, util, router
-   or worker never imports `@/composables/*` (type-only imports are fine). *Why:* a composable may
-   hold setup-time effects and per-tree state; outside setup it leaks or misbehaves. The framework's
-   plain helpers (`useAuth`, `useSolrSearch`, …) are not affected.
-2. **`useSeedData()` and `useLiveEntity()` are composables too:** call them only in a composable or a
-   `.vue` file, during setup, and never `useSeedData()` in `App.vue`.
-3. **App code reads the app db only through `useLiveEntity` (and `useSeedData` for seed tables).** No
-   `appDb.entity(...)`, `appDb.client()`, `loadSeedData()`, Dexie or `dbClient` outside
-   `src/workers/**` and `src/db/**`. *Why:* one read pattern, live by default; the worker owns
+1. **App code reads the app db only through `useLiveEntity`** (and `useSeedData` for seed tables:
+   **accxui-seed-data**), in a composable or a `.vue` file, during setup. No `appDb.entity(...)`,
+   `appDb.client()` (except as the `useDbStatus(...)` argument), `loadSeedData()`, Dexie or `dbClient`
+   outside `src/workers/**` and `src/db/**`. *Why:* one read pattern, live by default; the worker owns
    everything else.
-4. **API calls live in three places only:** composables, Pinia stores (when a store needs the data),
-   and worker sync domains. Never in a `.vue` file, util, router or `src/db`. A request a store needs
-   is a store action, and composables call it.
-5. **Utils are pure.** No API calls, no Pinia stores, no app db, no composables. A util that needs
-   store data or seed rows takes them as parameters; the caller passes them.
-6. **Pinia stores never read the app db, and the app db never reaches a store.** Stores hold server
-   data. When a page needs both, a page or domain composable joins them (store data + `useLiveEntity`
-   / `useSeedData` rows). A store action that needs seed rows (facility types, …) takes them as an
-   argument from that composable or page. `src/db/**` and `src/workers/**` never import a store.
-7. **Only worker sync domains write the app db.** A record the db is missing: `refreshAfterMutation`
+2. **Stores, utils and the router never read the app db.** They take rows from their caller; a page or
+   domain composable joins store data with `useLiveEntity` / `useSeedData` rows.
+3. **Only worker sync domains write the app db.** A record the db is missing: `refreshAfterMutation`
    (it runs the domain's `refetchOne`). After a server write: `refreshAfterMutation` /
    `resyncDomain`. Never write a response into a table.
-8. **Table names from `appDb.tables`, never a string,** and **no server fetch on mount for synced
-   data** (read what the worker stored; the worker owns the cadence).
+4. **Table names from `appDb.tables`, never a string.**
+5. **No server fetch on mount for synced data**: read what the worker stored; the worker owns the
+   cadence (class A data the page polls: **accxui-page-sync**).
 
-## Where code goes
+## Where app-db code goes
 
 | Code | Lives in | May use |
 |---|---|---|
 | Reading app-db rows, seed labels | a composable or `.vue` file | `useLiveEntity`, `useSeedData` |
-| An API call a store needs | a Pinia store action | `api()`, other stores, utils |
-| An API call only components need | a composable | `api()`, stores, other composables, utils |
 | Joining store data with app-db / seed rows | a page or domain composable | stores + `useLiveEntity` / `useSeedData` |
-| Mapping, payload building, formatting | `src/utils/` | parameters only (no stores, db, API, composables) |
+| Reconciling after a server write | the composable or store action that made the write | `refreshAfterMutation`, `resyncDomain` from `@/db/appDbSync` |
 | Writing the app db, polling the server | a worker sync domain (`src/workers/**`) | `appDb.entity(...)`, `appDb.client()`, `workerRemoteApi` |
 | The database, schema, sync facade, app-local Dexie stores | `src/db/` | deep `@common/db/*` imports only |
-
-There is no `src/services/`.
 
 ## Which call
 
@@ -60,6 +46,7 @@ There is no `src/services/`.
 | Seed rows inside a store action or util | take them as an argument; the composable / page passes `await seed.getFacilityTypes()`, `seed.facilities()`, … | the caller |
 | A record the db **doesn't have** | `refreshAfterMutation(domain, pk)`; the `useLiveEntity` on it then shows it | composables, stores |
 | To **change** server data | `api()`, check it, then `refreshAfterMutation` / `resyncDomain` | composables, stores |
+| Rows a class A domain polls while the screen is open | activate it from the page: **accxui-page-sync** | the page (or a composable it calls) |
 
 ## Recipes
 
@@ -83,7 +70,7 @@ const { records, first, hydrated } = useLiveEntity<any>(
   matches when any value does), `dateField` + `since` / `until` / `order` (newest first by default),
   `filter`, `limit`.
 
-**Seed labels and option lists:**
+**Seed labels and option lists** (every getter, `.withSync`, and stores that need seed rows: **accxui-seed-data**):
 
 ```ts
 import { useSeedData } from "@common/db";
@@ -117,14 +104,6 @@ export function useOrderQueue() {
 
   return { rows, search };
 }
-```
-
-**A util that needs store data or seed rows:** parameterize it.
-
-```ts
-// utils/index.ts — pure: the caller passes the cached product
-export const isKit = (product?: any): boolean => product?.productTypeId === "MARKETING_PKG_PICK";
-// .vue: isKit(getProduct(item.productId))
 ```
 
 **A record the db is missing:**
@@ -166,27 +145,57 @@ await resyncDomain("facilityGroup");                     // re-snapshots the who
 - A `CacheReconciliationError` means the write succeeded and only the local refresh failed: warn
   ("saved, refresh to see it"), don't retry the write.
 
+### `refreshAfterMutation(domain, pk)` exactly
+
+It asks the worker to run that domain's `refetchOne(ctx, pk, activeArgs)` and resolves with the
+number of rows written. The `useLiveEntity` reading the table then re-renders by itself; never read
+the return value to update the screen.
+
+| Situation | Result |
+|---|---|
+| The worker has not finished starting | waits for it (it starts the sync if nothing has) |
+| The sync failed to start, or the service is down | rejects `CacheReconciliationError` |
+| Unknown domain name (typo, a **table** name), or a domain with no `refetchOne` | after the start wait, rejects `CacheReconciliationError` (cause `domain has no refetchOne`) and shows on the status card |
+| A snapshot domain with no `byPk` / `refetchScope` / `fanOut` (`status`, `geo`, `carrier` and most other seed type tables) | resolves `0`: **nothing refreshed**. Use `resyncDomain(name)` for these |
+| The refetch request failed | rejects `CacheReconciliationError` |
+| The server no longer has the record | `byPk`: the stored row is removed. `refetchScope` / `fanOut`: that scope is replaced, so the row is pruned. `defineCursorDomain` and most hand-written domains: only upsert, the row stays |
+| Two calls for the same domain and pk | run one after the other, never in parallel |
+
+**`pk`** carries what the domain's refetch reads: the primary-key fields (`{ facilityId }`,
+`{ cycleCountId, itemSeqId }`), the scope field for a `refetchScope` domain, the parent key for a
+`fanOut` domain (`{ productStoreId }`), or extra fields a class C fetch needs. Names are **domain
+names** (`facility`, `productStore`, `enum`, `status`), not table names (`facilities`). The seed
+domains and which ones can refetch are listed in **accxui-app-db-setup** ("Framework (seed)
+entities"); an app's own domains are in `src/workers/appSyncDomains.ts`.
+
+| After the write… | Call |
+|---|---|
+| One record of a domain that can refetch changed | `refreshAfterMutation(domain, pk)` |
+| Several records, a delete you can't name by key, or a domain that can't refetch | `resyncDomain(domain)`: clears its "synced this login" marker and re-runs the full sync now |
+| Records of several domains changed (an association and both sides) | one call per domain, `await Promise.all([...])` |
+| Everything (Settings "Refresh all") | `resyncReferenceData()` |
+
+`resyncDomain` rejects with a plain `Error` (not `CacheReconciliationError`) when the service is
+down. Check the error with `isCacheReconciliationError(error)` from
+`@common/db/sync/reconciliation` (Company re-exports it from `@/utils/db/cacheReconciliationError`).
+
 ## Lint errors and their fix
 
-Data-access messages end with "See docs/APP_DB_DEVELOPER_GUIDE.md §7"; layer messages end with "See
-AGENTS.md (App layout)".
+Data-access messages end with "See docs/APP_DB_DEVELOPER_GUIDE.md §7". Layer messages ("See
+AGENTS.md (App layout)": API calls, composables, stores in utils) are in **accxui-app-layers**.
 
 | Rejected | Do instead |
 |---|---|
-| `import { api, client } from "@common"` outside composables, stores and workers | call the composable or store action that owns the request |
-| `@/composables/*` imported in a store, util, router, `src/db` or a worker | take what it needs as arguments; a page or composable passes it |
 | `useLiveEntity` / `useSeedData` / `useDbStatus` outside composables and `.vue` files | the caller passes the rows |
 | `useSeedData` in `App.vue` | call it in the page or component that shows the labels |
 | `appDb.entity(...)` or `loadSeedData()` outside `src/workers/**` and `src/db/**` | `useLiveEntity` / `useSeedData` in a composable or `.vue`; elsewhere take the rows as arguments |
 | an app db module (`@/db/companyDb`, …) imported in a store | a page or domain composable joins store data with `useLiveEntity` rows (a store may import `@/db/appDbSync`) |
-| a store (`@/store/*`, `pinia`) imported in a util, `src/db` or a worker | utils take the data as parameters; the db and workers stay independent of stores |
-| a `use…Store()` call in a util | take the data as a parameter |
 | `import Dexie / liveQuery from "dexie"`; `dbClient`, `getAppDb`, `ensureDbReady`, `hasSyncedThisLogin` …, or value imports from `@common/db/storage/dbClient` / `baseDb` / `schema/appDbRegistry` | `useLiveEntity` (type-only imports are fine) |
 | `appDb.raw()` | doesn't exist: `useLiveEntity` |
 | `appDb.get(oms)` | worker entry (`src/workers/*.worker.ts`) and `src/db/**` only |
 | `appDb.client()` | worker sync domains, and as the `useDbStatus(...)` argument only |
 | `.live()` / `.liveRead()` in `src/workers/**` | a one-shot `appDb.entity(...).get / query / all` |
-| `activateSyncDomains` without `deactivateSyncDomains` in the file, or in a page without `onIonViewDidLeave` | deactivate with the same owner in `onIonViewDidLeave` |
+| `activateSyncDomains` without `deactivateSyncDomains` in the file, or in a page without `onIonViewDidLeave` | deactivate with the same owner in `onIonViewDidLeave` (**accxui-page-sync** has the page recipe) |
 | `deactivateSyncDomains()` with no owner | `deactivateSyncDomains(SYNC_OWNER)` |
 | a string-literal table name | `appDb.tables.x` |
 | `upsertMany` / `snapshotReplace` anywhere, or `put` / `bulkPut` / `remove` / `bulkRemove` / `clear` on `appDb.entity(...)`, outside `src/workers/**` | `refreshAfterMutation` for a missing record; `refreshAfterMutation` / `resyncDomain` after a server write |
@@ -198,13 +207,11 @@ Exempt: an app-local Dexie store outside the app database, switched off in that 
 ## Before you finish
 
 - [ ] App-db reads use `useLiveEntity` / `useSeedData` in a composable or `.vue` file, table names from `appDb.tables`.
-- [ ] No app composable, `useLiveEntity` or `useSeedData` in a store, util, router or worker.
-- [ ] API calls only in composables, store actions or worker domains; none in `.vue`, utils or the router.
-- [ ] Utils take what they need as parameters: no store, app db, API or composable.
-- [ ] Stores import no app db module; a composable joins store data with app-db rows.
+- [ ] No `useLiveEntity` / `useSeedData` in a store, util, router or worker; stores import no app db module.
 - [ ] No app-db writes outside `src/workers/**`; missing records go through `refreshAfterMutation`.
 - [ ] Every server write reconciles with `refreshAfterMutation` / `resyncDomain` for each domain it touches.
 - [ ] A new table or domain went through accxui-app-db-setup (schema, `version` bump, registered domain).
-- [ ] `pnpm lint` (or `pnpm build`, which lints first) and `pnpm test:unit` pass in the app.
+- [ ] Every `refreshAfterMutation` names a domain that can refetch; `resyncDomain` for the ones that can't.
+- [ ] `pnpm build` (runs `eslint src` and the wiring spec first) and `pnpm test:unit` pass in the app.
 
 Reference: `docs/APP_DB_DEVELOPER_GUIDE.md` (§1 patterns, §4 writes, §7 rules) and `AGENTS.md`.

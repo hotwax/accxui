@@ -934,7 +934,7 @@ export default [
 ]
 ```
 
-AI agents get the same guidance from the `accxui-data-access` skill (`.agents/skills/accxui-data-access/SKILL.md`).
+AI agents get the same guidance from the `accxui-app-db-access` skill (`.agents/skills/accxui-app-db-access/SKILL.md`), and the layer rules from `accxui-app-layers`.
 
 **`fields` is the whitelist.** Undeclared fields are dropped. Stored rows carry the declared fields
 plus `syncedAt` — nothing else. There is no `raw` copy of the server payload to fall back on.

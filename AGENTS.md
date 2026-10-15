@@ -16,7 +16,7 @@ sync worker. The build's lint (`dbConfig` in `eslint.config.js`) enforces most o
    `refreshAfterMutation(domain, pk)`, and the `useLiveEntity` on it shows it. A server change:
    `api()`, then `refreshAfterMutation(domain, pk)` or `resyncDomain(domain)` once the write has
    landed. Never write a response into a table.
-3. **No Dexie, `dbClient`, `appDb.raw()` / `.get()` in app code; `appDb.client()` only in workers.**
+3. **No Dexie, `dbClient`, `appDb.raw()` / `.get()` in app code; `appDb.client()` only in workers** (and as the `useDbStatus(...)` argument).
    Table names always from `appDb.tables`, never a string.
 4. **Worker code (`src/db/**`, `src/workers/**`) uses deep imports only** (`@common/db/schema/*`,
    `@common/db/sync/*`, `@common/core/workerRemoteApi`, …): never `@common`, `@common/db`,
@@ -30,13 +30,25 @@ sync worker. The build's lint (`dbConfig` in `eslint.config.js`) enforces most o
    activates class A domains deactivates them with the same owner in `onIonViewDidLeave`.
 7. **Any schema change bumps the app db `version`.** Nothing detects a forgotten bump.
 
-**Load the skill before the work:** reading or writing app data → `accxui-data-access`; a new app
-database, table, sync domain or seed table → `accxui-app-db-setup`. Full reference:
+**Load the skill before the work:** where code goes (API calls, composables, stores, utils) →
+`accxui-app-layers`; reading or writing the local app db → `accxui-app-db-access`; a new app
+database, table, sync domain or seed table, or extending / overriding a framework entity →
+`accxui-app-db-setup`; a page that polls class A domains (activate / deactivate, Refresh, loading
+state) → `accxui-page-sync`; seed labels and option lists (`useSeedData`) or the Settings status card
+(`useDbStatus`) → `accxui-seed-data`; login, logout, guards and session state (`useAuth`) →
+`accxui-auth`; Solr product or order search (`useSolrSearch`) → `accxui-solr-search`; Firebase push
+notifications and notification preferences → `accxui-push-notifications`; route or button
+permissions (`hasPermission`, `src/authorization`) → `accxui-permissions`; product details by id or product
+search (`useProducts`) → `accxui-product-search`; Shopify embedded / POS (`useShopify`, `ShopifyLogin`) →
+`accxui-shopify-embedded`; packages, env variables, running, releasing or deploying →
+`accxui-dependencies-and-config`. Toasts, loader, logging, translations, date / status / product-id
+formatting (`commonUtil`, `logger`, `translate`, `emitter`) → `accxui-common-helpers`. Full reference:
 `docs/APP_DB_DEVELOPER_GUIDE.md`.
 
 ## App layout
 
-The build's lint enforces these too; the `accxui-data-access` skill has the recipes.
+The build's lint enforces these too (the `use…` / `use…Store` naming rules only in the root `pnpm lint`); the
+`accxui-app-layers` skill has the recipes.
 
 - **Composables** (`@/composables/*`, plus `useLiveEntity` and `useSeedData`) are used only by other
   composables and `.vue` files: never in a store, util, router, `src/db` or a worker. The framework's
