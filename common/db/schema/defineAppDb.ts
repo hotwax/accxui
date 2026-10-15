@@ -9,7 +9,7 @@
  * imported by sync workers whose chunk Vite emits as a single iife.
  */
 
-import type { AppSchema } from "./defineSchema";
+import type { AppSchema, TableNames } from "./defineSchema";
 import type { Entity } from "./defineEntity";
 import type { SyncDomainCatalogItem } from "../composables/useDbStatus";
 import { commonDomainsByTable } from "../seed/seedDomains";
@@ -17,7 +17,7 @@ import { BaseDB } from "../storage/baseDb";
 import { type DbClient, type EntityClient, dbClient } from "../storage/dbClient";
 import { setAppDb } from "./appDbRegistry";
 
-export interface AppDbDefinition {
+export interface AppDbDefinition<Tables extends string = string> {
   /** Name suffix: "CompanyDB" produces `{omsInstance}-CompanyDB`. */
   suffix: string;
   /**
@@ -30,35 +30,48 @@ export interface AppDbDefinition {
    */
   version?: number;
   /** The composed schema: `commonSchema.pick([...])` merged with the app's own via `mergeSchemas`. */
-  schema: AppSchema;
+  schema: AppSchema<Tables>;
 }
 
-export interface AppDb {
+/**
+ * An app's database. `Tables` is the table names the app's schema declared, so `entity(...)` and
+ * every table-taking `client()` method reject a name the app does not have at compile time.
+ *
+ * There is deliberately no raw Dexie handle here: every read and write goes through `client()` /
+ * `entity()`, the one access layer.
+ */
+export interface AppDb<Tables extends string = string> {
   /** `{omsInstance}-{suffix}`. Throws on an empty instance. */
   name(omsInstance: string): string;
-  /** The database for an instance. Worker-safe: the instance is a parameter. */
+  /**
+   * The database for an instance. For the WORKER ENTRY only, which hands it to the sync harness
+   * (`exposeWorkerHarness`); app code reads and writes through `client()` / `entity()`.
+   */
   get(omsInstance: string): BaseDB;
   /** Register how the app finds the signed-in instance. Called once per JS realm at boot. */
   setOmsInstanceResolver(resolve: () => string): void;
-  /** Raw Dexie handle for the signed-in instance. Main thread, or a worker after start(). */
-  raw(): BaseDB;
   /** DbClient for the signed-in instance, resolved per call so reads follow a switch. */
-  client(): DbClient;
+  client(): DbClient<Tables>;
   /** EntityClient for the signed-in instance and named table. */
-  entity<T = Record<string, any>>(table: string): EntityClient<T>;
-  readonly schema: Record<string, string>;
-  readonly entities: Record<string, Entity>;
+  entity<T = Record<string, any>>(table: Tables): EntityClient<T>;
+  readonly schema: Record<Tables, string>;
+  readonly entities: Record<Tables, Entity>;
+  /** The table names: `companyDb.tables.facilities`. Static, like `entities`; no database involved. */
+  readonly tables: TableNames<Tables>;
   /** The declared schema version. A database recording a different one is rebuilt on first use. */
   readonly version: number;
   /** The composed data tables. Excludes `syncMeta`, which BaseDB injects. */
-  readonly tableNames: string[];
+  readonly tableNames: Tables[];
   /** One entry per composed table that has a seed source. The app's own tables are absent. */
   readonly statusCatalog: SyncDomainCatalogItem[];
   /** Tables that came from the framework seed schema. The app's own tables are absent. */
   readonly seedTables: ReadonlySet<string>;
 }
 
-export function defineAppDb(def: AppDbDefinition): AppDb {
+/** The table names of an app database, e.g. `AppDbTables<typeof companyDb>` for a helper's `table` parameter. */
+export type AppDbTables<Db> = Db extends AppDb<infer Tables> ? Tables : never;
+
+export function defineAppDb<Tables extends string>(def: AppDbDefinition<Tables>): AppDb<Tables> {
   if(!def.suffix) {
     throw new Error("[db] defineAppDb: a non-empty `suffix` is required.");
   }
@@ -104,6 +117,7 @@ export function defineAppDb(def: AppDbDefinition): AppDb {
     return activeDb;
   }
 
+  /** The signed-in instance's database. Internal: the client resolves through it, nothing else. */
   function raw(): BaseDB {
     if(!resolveOmsInstance) {
       throw new Error(
@@ -120,21 +134,21 @@ export function defineAppDb(def: AppDbDefinition): AppDb {
    * database on every operation. Capturing a handle instead pinned those callers to the handle
    * `get()` closes on an instance switch, and every later read threw DatabaseClosedError.
    */
-  const lateClient = dbClient(raw, def.schema.entities);
+  const lateClient = dbClient<Tables>(raw, def.schema.entities);
 
-  const appDb: AppDb = {
+  const appDb: AppDb<Tables> = {
     name,
     get,
     setOmsInstanceResolver(resolve) {
       resolveOmsInstance = resolve;
     },
-    raw,
     client: () => lateClient,
     entity: (table) => lateClient.entity(table),
     schema: stores,
     entities: def.schema.entities,
+    tables: def.schema.tables,
     version,
-    tableNames: Object.keys(stores),
+    tableNames: Object.keys(stores) as Tables[],
     statusCatalog,
     seedTables: def.schema.seedTables,
   };

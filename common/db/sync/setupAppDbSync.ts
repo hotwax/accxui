@@ -1,7 +1,5 @@
 import { computed, reactive, ref, type ComputedRef, type Ref } from "vue";
 import type { AppDb } from "../schema/defineAppDb";
-import { clearDatabaseTables } from "../storage/baseDb";
-import { clearSeedTables } from "../composables/useSeedData";
 import {
   clearDomainErrors,
   clearScopeError,
@@ -24,6 +22,12 @@ export interface AppDbSync {
   syncService: () => SyncService | null;
   startAppDbSync: (onSynced?: () => void) => Promise<void>;
   stopAppDbSync: () => Promise<void>;
+  /**
+   * Fetch one record into the local db through its domain's `refetchOne`: after a server write, or
+   * for a record the db is missing. Waits for the worker's first sync pass, and rejects with a
+   * `CacheReconciliationError`. Resolves with the rows written; read the record back with
+   * `appDb.entity(table).get(...)`.
+   */
   refreshAfterMutation: (domain: string, pk: Record<string, unknown>) => Promise<number>;
   resyncDomain: (domain: string) => Promise<void>;
   resyncReferenceData: () => Promise<void>;
@@ -176,13 +180,13 @@ export function setupAppDbSync(config: AppDbSyncConfig): AppDbSync {
 
   async function clearSyncMarkers(): Promise<void> {
     try {
-      const syncMeta = config.db.raw().syncMeta;
-      const keys = await syncMeta.toCollection().primaryKeys();
-      const domainKeys = (keys as string[]).filter(
+      const client = config.db.client();
+      const keys = (await client.all<{ key: string }>("syncMeta")).map((marker) => String(marker.key));
+      const domainKeys = keys.filter(
         (key) => key.startsWith("domain:") || key.startsWith("loginSync:")
       );
       if (domainKeys.length) {
-        await syncMeta.bulkDelete(domainKeys);
+        await client.bulkRemove("syncMeta", domainKeys);
       }
     } catch {
       // Ignore if table unavailable
@@ -210,7 +214,7 @@ export function setupAppDbSync(config: AppDbSyncConfig): AppDbSync {
     const workerUrl = config.getWorkerUrl ? config.getWorkerUrl() : (undefined as any);
     const attemptService = factory({
       workerUrl,
-      db: config.db.raw(),
+      db: config.db.client(),
       /**
        * Error bookkeeping lives in ONE place — `syncService`'s maps, reached through the helpers
        * imported above. This handler routes the same statuses because a caller may supply its own
@@ -275,10 +279,9 @@ export function setupAppDbSync(config: AppDbSyncConfig): AppDbSync {
     }
     starting = null;
     bootstrapState.running = false;
-    clearSeedTables();
     // Chained so a start waiting on `clearing` also waits out an earlier wipe still running.
     const clear: Promise<void> = (clearing ?? Promise.resolve())
-      .then(() => clearDatabaseTables(config.db.raw()))
+      .then(() => config.db.client().clearAllTables())
       .catch(() => {});
     clearing = clear;
     await clear;
@@ -322,7 +325,7 @@ export function setupAppDbSync(config: AppDbSyncConfig): AppDbSync {
 
   async function resyncDomain(domain: string): Promise<void> {
     try {
-      await config.db.raw().syncMeta.delete(`loginSync:${domain}`);
+      await config.db.client().clearSyncedThisLogin(domain);
     } catch {}
     await whenReady();
     if (!service) {

@@ -1,6 +1,7 @@
 import { computed, getCurrentInstance, onUnmounted, ref, watch } from "vue";
-import { liveQuery, type Subscription } from "dexie";
-import { type BaseDB, ensureDbReady } from "../storage/baseDb";
+import type { Subscription } from "dexie";
+import type { BaseDB } from "../storage/baseDb";
+import { type DbClient, type TxReader, dbClient } from "../storage/dbClient";
 import { DB_SYNC_CHANNEL } from "../sync/channels";
 import { COMMON_TABLE_NAMES, commonDomainsByTable } from "../seed/seedDomains";
 import type { CatalogItem } from "../sync/pollingWorkerHarness";
@@ -49,11 +50,18 @@ const noopActions: DbStatusActions = {
   resyncAll: async () => {},
 };
 
+/**
+ * `source` is the app database's client. A `BaseDB` is still accepted, and wrapped, for callers
+ * not yet moved to `appDb.client()`.
+ */
 export function useDbStatus(
-  db: BaseDB,
+  source: DbClient | BaseDB,
   catalogSource: DbStatusCatalogSource = DEFAULT_COMMON_SYNC_CATALOG,
   actions: DbStatusActions = noopActions,
 ) {
+  const client: DbClient = typeof (source as DbClient).liveRead === "function"
+    ? (source as DbClient)
+    : dbClient(source as BaseDB);
   const domains = ref<SyncDomainStatus[]>([]);
   const loaded = ref(false);
   const refreshing = ref<string | null>(null);
@@ -97,48 +105,41 @@ export function useDbStatus(
     return map;
   };
 
+  /** A registry-derived `CatalogItem` has no `table` — it's domain-keyed, not table-keyed. */
+  const tableOf = (entry: SyncDomainCatalogItem | CatalogItem) =>
+    (entry as SyncDomainCatalogItem).table ?? (entry as CatalogItem).table ?? entry.name;
+
   /**
-   * A registry-derived `CatalogItem` has no `table` — it's domain-keyed, not table-keyed. Fall
-   * back to the domain name, and swallow an unknown-table error into a `0` count rather than
-   * letting it blank the whole card. Task 11 reconciles domain names with table names.
+   * The catalog's tables this database has, plus `syncMeta`, as ONE read: counts and markers are
+   * seen at the same point. A catalog entry naming a table the database lacks counts `0` rather
+   * than failing the transaction and blanking the whole card. Task 11 reconciles domain names with
+   * table names.
    */
-  const countForEntry = async (entry: SyncDomainCatalogItem | CatalogItem) => {
-    const tableName = (entry as SyncDomainCatalogItem).table ?? (entry as CatalogItem).table ?? entry.name;
-    try {
-      if (!db.isOpen()) {
-        await ensureDbReady(db);
+  const statusRead = (): [string[], (tx: TxReader) => Promise<SyncDomainStatus[]>] => {
+    const catalog = resolvedCatalog.value;
+    const known = new Set(client.tableNames());
+    const tables = [...new Set(catalog.map(tableOf).filter((table) => known.has(table)))];
+
+    return [["syncMeta", ...tables], async (tx) => {
+      const syncedAtByDomain = parseSyncedAt(await tx.entity("syncMeta").all());
+      const rows: SyncDomainStatus[] = [];
+      for (const entry of catalog) {
+        const table = tableOf(entry);
+        const count = known.has(table) ? await tx.entity(table).count() : 0;
+        const syncedAt = syncedAtByDomain.get(entry.name) ?? null;
+        rows.push({
+          ...entry,
+          count,
+          syncedAt,
+          status: count > 0 ? "success" : (syncedAt || entry.syncClass === "A" ? "empty" : "none"),
+        } as SyncDomainStatus);
       }
-      return await db.table(tableName).count();
-    } catch {
-      return 0;
-    }
-  };
-
-  const computeRows = async (): Promise<SyncDomainStatus[]> => {
-    try {
-      await ensureDbReady(db);
-    } catch {
-      // Ignore if open/rebuild fails; subsequent table calls will handle gracefully
-    }
-    const markers = await db.syncMeta.toArray();
-    const syncedAtByDomain = parseSyncedAt(markers);
-
-    const rows: SyncDomainStatus[] = [];
-    for (const entry of resolvedCatalog.value) {
-      const count = await countForEntry(entry);
-      const syncedAt = syncedAtByDomain.get(entry.name) ?? null;
-      rows.push({
-        ...entry,
-        count,
-        syncedAt,
-        status: count > 0 ? "success" : (syncedAt || entry.syncClass === "A" ? "empty" : "none"),
-      } as SyncDomainStatus);
-    }
-    return rows;
+      return rows;
+    }];
   };
 
   const subscribeToRows = (): Subscription =>
-    liveQuery(computeRows).subscribe({
+    client.liveRead(...statusRead()).subscribe({
       next: (rows) => {
         domains.value = rows;
         loaded.value = true;
@@ -163,7 +164,7 @@ export function useDbStatus(
     try {
       const channel = new BroadcastChannel(DB_SYNC_CHANNEL);
       channel.onmessage = async () => {
-        domains.value = await computeRows();
+        domains.value = await client.read(...statusRead());
       };
     } catch {
       // Ignore

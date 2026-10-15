@@ -4,8 +4,8 @@
  * Deliberately free of Dexie and Vue so every rule here is unit-testable without IndexedDB.
  */
 
-import type { Entity } from "../schema/defineEntity";
-import type { DbKey, DbRow, FieldKind } from "../types";
+import { isFieldKind, isListSpec, type Entity } from "../schema/defineEntity";
+import type { DbKey, DbRow, FieldKind, FieldSpec, NestedFields } from "../types";
 
 /** Coerce a server date field (epoch-millis number, numeric string, or ISO string) to millis. */
 export function toMillis(value: unknown): number | undefined {
@@ -40,12 +40,86 @@ const COERCE: Record<FieldKind, (value: unknown) => unknown> = {
   structured: (value) => value ?? undefined,
 };
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Project the declared fields of one object. `path` is the stored path of `source` itself ("" at
+ * the top level), so a nested rename is looked up as `customer.fullName`.
+ */
+function projectFields(
+  source: Record<string, unknown>,
+  fields: NestedFields,
+  path: string,
+  rename: Record<string, string> | undefined,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+
+  for (const [field, spec] of Object.entries(fields)) {
+    const at = path ? `${path}.${field}` : field;
+    const key = source[field] !== undefined ? field : rename?.[at] ?? field;
+    const value = projectValue(source[key], spec, at, rename);
+    if (value !== undefined) out[field] = value;
+  }
+
+  return out;
+}
+
+/** Coerce one value by its declaration, recursing into nested objects and lists. */
+function projectValue(
+  value: unknown,
+  spec: FieldSpec,
+  path: string,
+  rename: Record<string, string> | undefined,
+): unknown {
+  if (isFieldKind(spec)) return COERCE[spec](value);
+
+  if (isListSpec(spec)) {
+    if (!Array.isArray(value)) return undefined;
+    // An item that cannot be projected (a non-object where objects are declared, an empty text) is
+    // dropped; the list itself stays, even when empty, for the same reason `structured` keeps `[]`.
+    const items: unknown[] = [];
+    for (const item of value) {
+      const projected = projectValue(item, spec[0], path, rename);
+      if (projected !== undefined) items.push(projected);
+    }
+    return items;
+  }
+
+  return isPlainObject(value) ? projectFields(value, spec, path, rename) : undefined;
+}
+
+/**
+ * Every value at a dotted path, with lists fanned out: `identifications.idValue` on a row with two
+ * identifications yields both ids. A plain path to a single value yields that one value.
+ */
+export function valuesAtPath(source: unknown, path: string): unknown[] {
+  let current: unknown[] = [source];
+
+  for (const segment of path.split(".")) {
+    const next: unknown[] = [];
+    for (const value of current) {
+      for (const item of Array.isArray(value) ? value : [value]) {
+        if (isPlainObject(item) && item[segment] !== undefined) next.push(item[segment]);
+      }
+    }
+    current = next;
+  }
+
+  return current.flatMap((value) => (Array.isArray(value) ? value : [value]));
+}
+
 /**
  * Project one raw server record into a stored row.
  *
- * The stored row is the DECLARED fields plus `syncedAt` — nothing else. The untouched server
- * payload is deliberately not kept alongside it: storing both doubles every row, and a field a
- * screen needs belongs in `fields` where the schema can index and coerce it.
+ * The stored row is the DECLARED fields plus `syncedAt` — nothing else, at every level: a nested
+ * object keeps only its declared fields, and its leaves are coerced by kind like top-level ones.
+ * The untouched server payload is deliberately not kept alongside it: storing both doubles every
+ * row, and a field a screen needs belongs in `fields` where the schema can index and coerce it.
+ *
+ * A multi-value index on a field inside a list of objects also writes its hidden flattened field
+ * (`identifications$idValue`), the only thing IndexedDB can index for it.
  *
  * Returns null when the record cannot be keyed — for a compound key that means ANY member failed to
  * project. There is no synthetic key to build: the key members are ordinary declared fields, so
@@ -56,13 +130,7 @@ export function projectRow(
   entity: Entity,
   now: number,
 ): DbRow | null {
-  const row: Record<string, unknown> = {};
-
-  for (const [field, kind] of Object.entries(entity.fields)) {
-    const source = raw?.[field] !== undefined ? field : entity.rename?.[field] ?? field;
-    const value = COERCE[kind](raw?.[source]);
-    if (value !== undefined) row[field] = value;
-  }
+  const row = projectFields(isPlainObject(raw) ? raw : {}, entity.fields, "", entity.rename);
 
   // A key member the server legitimately leaves empty takes its declared stand-in, so the row is
   // kept rather than dropped as unkeyable.
@@ -72,6 +140,10 @@ export function projectRow(
 
   for (const field of entity.primaryKeyFields) {
     if (row[field] === undefined) return null;
+  }
+
+  for (const [path, field] of Object.entries(entity.listIndexes ?? {})) {
+    row[field] = [...new Set(valuesAtPath(row, path))];
   }
 
   return { ...row, syncedAt: now } as DbRow;

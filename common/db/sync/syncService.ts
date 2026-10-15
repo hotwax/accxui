@@ -5,8 +5,8 @@
  *   - `pollingService.ts`'s worker lifecycle (spawn via `WorkerFactory`, token push over
  *     BroadcastChannel, status routing, the auth-error hook);
  *   - `appDbBootstrap.ts`'s readiness check: `ensureDbReady` lives on `baseDb.ts` (a database
- *     concern, shared with `clearDatabaseTables`) and this service runs it against the caller's
- *     `BaseDB`, when one is given, before spawning the worker — see `SyncServiceOptions.db`;
+ *     concern, shared with `clearDatabaseTables`) and this service runs it, through the caller's
+ *     `DbClient.ready()`, before spawning the worker — see `SyncServiceOptions.db`;
  *   - Company's `appCacheBootstrap.ts` idempotent once-per-login `start()`: the in-flight
  *     `starting` promise plus a `startGeneration` counter so a terminated attempt's last queued
  *     worker message can never mutate state after teardown.
@@ -16,14 +16,15 @@
  * pull `vue` into a worker chunk Vite must emit as a single iife.
  */
 
-import { reactive } from "vue";
+import { reactive, toRaw } from "vue";
 import type { Remote } from "comlink";
 import { commonUtil } from "../../utils/commonUtil";
 import { WorkerFactory } from "../../core/workerFactory";
 import { createTokenPublisher } from "./channels";
 import type { ActiveDomain } from "./syncRegistry";
 import type { CatalogItem, SyncHarness } from "./pollingWorkerHarness";
-import { type BaseDB, ensureDbReady } from "../storage/baseDb";
+import type { BaseDB } from "../storage/baseDb";
+import { type DbClient, dbClient } from "../storage/dbClient";
 
 export interface SyncServiceOptions {
   /** The Web Worker URL or instance (e.g. `new URL('./appSync.worker.ts', import.meta.url)`) */
@@ -37,13 +38,14 @@ export interface SyncServiceOptions {
   /** Called when the worker reports an auth failure; wire to the app's re-auth/logout. */
   onAuthError?: (message: string) => void;
   /**
-   * The app's database, opened and version-checked (`ensureDbReady`) before the worker spawns.
+   * The app's database client, opened and version-checked (`ready()`, over `ensureDbReady`) before
+   * the worker spawns. A `BaseDB` is still accepted, and wrapped.
    *
    * The check is idempotent and every read reaches it anyway, so this is an ORDERING guarantee
    * rather than the only opportunity: doing it here means a rebuild happens while this realm holds
    * the only connection, before the worker opens its own.
    */
-  db?: BaseDB;
+  db?: DbClient | BaseDB;
   /** App-local token-change watcher cadence (default 15s). */
   tokenWatchMs?: number;
 }
@@ -60,6 +62,12 @@ export interface SyncService {
   syncDomainNow: (domain: string) => Promise<number>;
   /** After a successful mutation: refetch that record by PK and upsert it into the cache. */
   refetchOne: (domain: string, pk: Record<string, unknown>) => Promise<number>;
+  /**
+   * Resolves once the worker exists and has been handed its start payload — WITHOUT waiting for its
+   * first sync pass, which after login covers every seed domain. The worker serves calls while that
+   * pass runs, so a targeted refetch needs only this. Optional: a test double may omit it.
+   */
+  whenOpen?: () => Promise<void>;
   /** Status-card data: every registered domain, with its declared label and sync class. */
   catalog: () => Promise<CatalogItem[]>;
   /** Diagnostics: domains this worker build knows about. */
@@ -182,6 +190,20 @@ export function clearScopeError(domain: string, scope: string): void {
 }
 
 /**
+ * A deep plain copy of what goes to the worker. postMessage structured-clones it and throws
+ * DataCloneError on a Vue reactive proxy at any depth — the held set is a `ref`'s value, and a
+ * screen's args are often reactive — which used to kill the whole start on a reload or deep link.
+ */
+function toPlain<T>(value: T): T {
+  const raw = toRaw(value) as unknown;
+  if (Array.isArray(raw)) return raw.map(toPlain) as T;
+  if (raw && typeof raw === "object" && Object.getPrototypeOf(raw) === Object.prototype) {
+    return Object.fromEntries(Object.entries(raw).map(([key, item]) => [key, toPlain(item)])) as T;
+  }
+  return raw as T;
+}
+
+/**
  * Main-thread half of the sync service (framework-wide).
  *
  * Framework-owned so no single app dev can break the dangerous parts:
@@ -208,6 +230,13 @@ export function createSyncService(opts: SyncServiceOptions): SyncService {
   // Bumped on every start()/stop() so a terminated attempt's late worker message (queued before
   // teardown, delivered after) is ignored rather than mutating state past that teardown.
   let startGeneration = 0;
+  /** Released when the worker has its start payload; replaced on stop() so the next start re-arms it. */
+  let opened = openSignal();
+  function openSignal() {
+    let resolve!: () => void;
+    const promise = new Promise<void>((done) => { resolve = done; });
+    return { promise, resolve };
+  }
 
   function pushTokenIfChanged() {
     const current = commonUtil.getToken() || "";
@@ -261,9 +290,14 @@ export function createSyncService(opts: SyncServiceOptions): SyncService {
     serviceState.running = true;
 
     const attempt = (async () => {
-      // Runs first, before the worker exists to race it. `ensureDbReady` never throws (it swallows
+      // Runs first, before the worker exists to race it. `ready()` never throws (`ensureDbReady` swallows
       // and warns) — a failed check must never block boot.
-      if (opts.db) await ensureDbReady(opts.db);
+      if (opts.db) {
+        const client = typeof (opts.db as DbClient).ready === "function"
+          ? (opts.db as DbClient)
+          : dbClient(opts.db as BaseDB);
+        await client.ready();
+      }
       if (generation !== startGeneration) return; // terminated (stop()) while the shape check ran
 
       const targetUrl = typeof opts.workerUrl === "string"
@@ -280,13 +314,16 @@ export function createSyncService(opts: SyncServiceOptions): SyncService {
       // Before start(): the worker handles calls in order, so its first pass already covers them.
       if (viewDomains) await api.setDomains(viewDomains);
 
-      await api.start({
+      const started = api.start({
         maargUrl: commonUtil.getMaargURL(),
         token: lastToken,
         omsInstance: commonUtil.getOMSInstanceName(),
         baseTickMs: opts.baseTickMs,
         domains: opts.domains,
       });
+      // The start payload is posted: calls made from here are handled after it, with its context.
+      opened.resolve();
+      await started;
 
       if (generation !== startGeneration) return; // terminated (stop()) while starting
 
@@ -311,6 +348,9 @@ export function createSyncService(opts: SyncServiceOptions): SyncService {
     if (publisher) { publisher.close(); publisher = null; }
     if (terminate) { terminate(); terminate = null; } // kills the worker + its timer
     harness = null;
+    // Release anyone waiting on the old worker; they find no harness and fail fast.
+    opened.resolve();
+    opened = openSignal();
     viewDomains = null;
     serviceState.running = false;
     // The next login's passes, not this session's, decide what has been fetched.
@@ -320,8 +360,8 @@ export function createSyncService(opts: SyncServiceOptions): SyncService {
   return {
     start,
     setDomains: async (domains) => {
-      viewDomains = domains;
-      if (harness) await harness.setDomains(domains);
+      viewDomains = toPlain(domains);
+      if (harness) await harness.setDomains(viewDomains);
     },
     syncNow: async () => {
       // Wait out a start in flight: its handle is not usable yet, and the refresh must not vanish.
@@ -334,6 +374,7 @@ export function createSyncService(opts: SyncServiceOptions): SyncService {
     },
     syncDomainNow: async (domain) => (harness ? harness.syncDomainNow(domain) : 0),
     refetchOne: async (domain, pk) => (harness ? harness.refetchOne({ domain, pk }) : 0),
+    whenOpen: () => opened.promise,
     catalog: async () => (harness ? harness.catalog() : []),
     registeredDomains: async () => (harness ? harness.domains() : []),
     clearDomainError: clearDomainErrors,

@@ -1,129 +1,192 @@
 /**
- * Framework seed reference data lookups over the local database.
+ * Framework seed reference data lookups over the local database: labels, option lists and joined
+ * lookups (`statusDescription`, `enumsByType`, `statesForCountry`, ...), with every lookup rule
+ * kept here so callers never repeat one.
  *
- * Each seed table gets one live query per signed-in database, opened the first time any getter
- * needs it and kept for the session, so every caller shares one read. The query re-emits whenever
- * the table changes: the login sync filling it, a `refreshAfterMutation`, or a resync. There is no
- * init step: a table nobody asks for is never read.
+ * Two ways in, with the same getters:
  *
- * Two kinds of getter, told apart by name:
+ * - `useSeedData()`, during setup. The first call in a component tree opens the live reads and
+ *   provides them; every component below it (a page's cards, rows, segments) injects the same
+ *   instance. Each table is opened through `useLiveEntity` the first time a getter needs it and
+ *   closes when the providing component unmounts, so a page with 200 cards still holds one query
+ *   per table. Never call it in `App.vue` or a layout: everything would inject that one instance,
+ *   for the whole session (lint rejects it in `App.vue`).
+ * - `await loadSeedData()`, outside components (stores, services, utils). A one-shot snapshot of
+ *   the seed tables, read in one transaction. It does not follow later changes: read it again
+ *   when the rows must be current.
  *
- * - Reactive getters (no prefix: `statusDescription`, `enumsByType`, ...) are synchronous. They
- *   read the table's ref, so a template or `computed` calling them re-renders whenever the table
- *   changes. On a cold table they answer with the raw id or an empty list for that first render.
- *   List getters also offer `.withSync(...)`, which answers `{ data, synced }`: `synced` turns
- *   true once the tables behind the getter hold this login's sync, so an empty `data` is real.
- * - Async getters (`get` prefix: `getFacilities`, ...) wait for the table's first read and return
- *   its current rows. They are kept for stores and for code that must act on the real rows, such
- *   as building a request from them.
+ * Kinds of getter, told apart by name:
+ *
+ * - Reactive getters (no prefix: `statusDescription`, `enumsByType`, ...) are synchronous. From
+ *   `useSeedData()` they read the table's live rows, so a template or `computed` calling them
+ *   re-renders whenever the table changes; on a cold table they answer with the raw id or an empty
+ *   list for that first render. List getters also offer `.withSync(...)`, which answers
+ *   `{ data, synced }`: `synced` turns true once the tables behind the getter hold this login's
+ *   sync, so an empty `data` is real.
+ * - Async getters (`get` prefix: `getFacilities`, ...) read the table's current rows once.
  */
 
-import { shallowRef, type ShallowRef } from "vue";
-import { liveQuery, type Subscription } from "dexie";
+import { getCurrentInstance, getCurrentScope, inject, provide, type EffectScope, type InjectionKey } from "vue";
 import { getAppDb } from "../schema/appDbRegistry";
 import { commonDomainsByTable } from "../seed/seedDomains";
-import { ensureDbReady } from "../storage/baseDb";
+import { loginMarkerKey } from "../storage/baseDb";
+import { type DbListResult, useLiveEntity } from "./useLiveEntity";
 
 export type Row = Record<string, any>;
 
 /** Seed ids on records are often optional; a missing id reads as no match. */
 type Id = string | null | undefined;
 
-interface SeedTable {
-  rows: ShallowRef<Row[]>;
-  /** Whether `rows` were read after the table's sync landed this login; see `readSeedTable`. */
-  synced: ShallowRef<boolean>;
-  /** Settles on the first emission, so async getters can wait for a cold table. */
-  loaded: Promise<void>;
-  /** Kept only so logout can close it. */
-  subscription: Subscription;
+/** Every table the seed getters read. */
+export const SEED_TABLES = [
+  "carrierShipmentMethods", "carriers", "communicationEventTypes", "contactMechPurposeTypes", "enumTypes",
+  "enums", "facilities", "facilityTypes", "geoAssocs", "geos", "orderAdjustmentTypes", "partyRelationshipTypes",
+  "paymentMethodTypes", "productStoreFacilities", "productStores", "returnItemTypes", "returnReasons",
+  "returnTypes", "roleTypes", "shipmentMethodTypes", "shopifyShopLocations", "shopifyShops",
+  "statusFlowTransitions", "statuses",
+] as const;
+
+export type SeedTable = (typeof SEED_TABLES)[number];
+
+/** Where the getters' rows come from: live reads for a component tree, or a one-shot snapshot. */
+interface SeedSource {
+  /** The table's rows; reactive for live reads. */
+  rows(table: string): Row[];
+  /** Whether `rows` were read after the table's sync landed this login. */
+  synced(table: string): boolean;
+  /** The table's current rows, read once. */
+  load(table: string): Promise<Row[]>;
 }
 
-/**
- * Live tables, keyed by database name and table. At most one entry per seed table: an entry is
- * created on first use and lives until logout, so a long session never adds subscriptions.
- */
-const tables = new Map<string, SeedTable>();
-
-/** Close every live table. Called when sync stops on logout, which wipes the database. */
-export function clearSeedTables(): void {
-  tables.forEach((entry) => entry.subscription.unsubscribe());
-  tables.clear();
-}
-
-/** Test-only: how many tables are live. */
-export function __seedTableCount(): number {
-  return tables.size;
-}
-
-/** The prefix `markSyncedThisLogin` gives its once-per-login markers in `syncMeta`. */
-const LOGIN_MARKER_PREFIX = "loginSync:";
-
-/**
- * One read of a seed table: its rows and its sync domain's once-per-login marker, in ONE
- * transaction. An empty table alone cannot tell "not synced yet" (a fresh login, before the
- * background sync lands) from "genuinely empty". The sync commits a domain's rows before its
- * marker and logout clears both, so a read that sees the marker also sees the rows.
- *
- * `get` on one key keeps the live query scoped to that marker, so the other domains' markers
- * landing during the login sync do not re-read this table.
- */
-async function readSeedTable(table: string): Promise<{ rows: Row[]; synced: boolean }> {
-  const db = getAppDb().raw();
-  await ensureDbReady(db);
-  const domain = commonDomainsByTable[table]?.name;
-  return db.transaction("r", [table, "syncMeta"], async () => {
-    const [rows, marker] = await Promise.all([
-      db.table(table).toArray(),
-      // A table no seed domain fills has nothing to wait for.
-      domain ? db.syncMeta.get(`${LOGIN_MARKER_PREFIX}${domain}`) : { synced: true },
-    ]);
-    return { rows, synced: Boolean(marker?.synced) };
-  });
-}
-
-/** The table's live entry, opening its query on first use. Undefined when no database is signed in. */
-function seedTable(table: string): SeedTable | undefined {
-  let key: string;
+/** The app database's client, or undefined when none is signed in. */
+function appClient() {
   try {
-    key = `${getAppDb().raw().name}/${table}`;
+    const client = getAppDb().client();
+    client.name();
+    return client;
   } catch {
     return undefined;
   }
-
-  let entry = tables.get(key);
-  if (!entry) {
-    const rows = shallowRef<Row[]>([]);
-    const synced = shallowRef(false);
-    let settle!: () => void;
-    const loaded = new Promise<void>((resolve) => { settle = resolve; });
-
-    // The querier must itself be `async`: Dexie only carries its read tracking across the awaits in
-    // `readSeedTable` for an async querier. A plain arrow returning the promise loses it at the
-    // first await, records no tables, and so never re-runs when the table changes.
-    const subscription = liveQuery(async () => await readSeedTable(table)).subscribe({
-      next: (read) => {
-        rows.value = read.rows;
-        synced.value = read.synced;
-        settle();
-      },
-      error: (error) => {
-        console.warn(`[seed] Live read of ${table} failed:`, error);
-        // A failed query has closed itself; the next use opens a fresh one.
-        tables.delete(key);
-        settle();
-      },
-    });
-
-    entry = { rows, synced, loaded, subscription };
-    tables.set(key, entry);
-  }
-  return entry;
 }
 
-/** Reactive: whether every named table holds this login's synced rows. */
-function tablesSynced(tables: string[]): boolean {
-  return tables.every((table) => seedTable(table)?.synced.value ?? false);
+/** Whether the signed-in database has `table`; an app may not keep every seed table. */
+function hasTable(table: string): boolean {
+  try {
+    return appClient()?.tableNames().includes(table) ?? false;
+  } catch {
+    return false;
+  }
+}
+
+/** One read of a table's current rows; empty when no database is signed in or it has no such table. */
+async function readTable(table: string): Promise<Row[]> {
+  const client = appClient();
+  if (!client || !hasTable(table)) return [];
+  return client.entity<Row>(table).all();
+}
+
+/**
+ * Live reads for one component tree. A table opens through `useLiveEntity` the first time a getter
+ * needs it, usually from a template during render, so it is opened inside the scope captured at
+ * setup: it closes when that scope does. Its seed domain's login marker is read with the rows,
+ * which is what `synced` reports; a table no seed domain fills reports `useLiveEntity`'s `hydrated`.
+ */
+function liveSource(scope: EffectScope): SeedSource {
+  const opened = new Map<string, DbListResult<Row>>();
+
+  function live(table: string): DbListResult<Row> | undefined {
+    let entry = opened.get(table);
+    if (!entry) {
+      if (!hasTable(table)) return undefined;
+      // Undefined once the scope has stopped (a getter called after unmount): nothing to open.
+      entry = scope.run(() => useLiveEntity<Row>(table, { syncDomain: commonDomainsByTable[table]?.name }));
+      if (!entry) return undefined;
+      opened.set(table, entry);
+    }
+    return entry;
+  }
+
+  return {
+    rows: (table) => live(table)?.records.value ?? [],
+    synced: (table) => live(table)?.synced.value ?? false,
+    load: readTable,
+  };
+}
+
+/** A snapshot's rows and login markers, read once in one transaction. */
+function snapshotSource(read: Map<string, { rows: Row[]; synced: boolean }>, tables: ReadonlySet<string>): SeedSource {
+  const entryOf = (table: string) => {
+    if (!tables.has(table)) {
+      throw new Error(`[seed] "${table}" is not in this snapshot: add it to loadSeedData([...]).`);
+    }
+    return read.get(table);
+  };
+  return {
+    rows: (table) => entryOf(table)?.rows ?? [],
+    synced: (table) => entryOf(table)?.synced ?? false,
+    load: readTable,
+  };
+}
+
+/**
+ * A one-shot snapshot of the seed tables, for stores, services and utils, which cannot hold a live
+ * read. All of `tables` (by default every seed table) and their login markers are read in ONE
+ * transaction, so `.withSync()` on it is as reliable as on the live getters. The getters are the
+ * same as `useSeedData()`'s, but they answer from this read and never change: read again when the
+ * rows must be current. A getter over a table not in `tables` throws, naming it.
+ */
+export async function loadSeedData(tables: readonly SeedTable[] = SEED_TABLES): Promise<SeedData> {
+  const requested = new Set<string>(tables);
+  const client = appClient();
+  const present = client ? [...requested].filter(hasTable) : [];
+  const read = new Map<string, { rows: Row[]; synced: boolean }>();
+  if (client && present.length) {
+    const entries = await client.read([...present, "syncMeta"], (tx) => Promise.all(present.map((table) => {
+      const domain = commonDomainsByTable[table]?.name;
+      return Promise.all([
+        tx.entity<Row>(table).all(),
+        // A table no seed domain fills has nothing to wait for.
+        domain ? tx.entity("syncMeta").get(loginMarkerKey(domain)) : { synced: true },
+      ]).then(([rows, marker]) => [table, { rows, synced: Boolean(marker?.synced) }] as const);
+    })));
+    entries.forEach(([table, entry]) => read.set(table, entry));
+  }
+  return createSeedLookups(snapshotSource(read, requested));
+}
+
+/**
+ * Getters over no rows: labels answer the raw id, lists are empty and nothing is synced. For a store
+ * getter that runs before its `loadSeedData()` snapshot has been read, as a cold table answers.
+ */
+export const emptySeedData: SeedData = createSeedLookups(snapshotSource(new Map(), new Set(SEED_TABLES)));
+
+const SEED_KEY: InjectionKey<SeedData> = Symbol("seedData");
+
+/** The instance each component created, so a second call in the same setup reuses it. */
+const ownByInstance = new WeakMap<object, SeedData>();
+
+/**
+ * The seed lookup API for components and composables: `const seed = useSeedData()` during setup,
+ * then `seed.statusDescription(id)` in a template or `computed`. Shares the nearest ancestor's
+ * instance when there is one; otherwise opens this component's own and provides it to its
+ * descendants. Outside setup use `await loadSeedData()`.
+ */
+export function useSeedData(): SeedData {
+  const scope = getCurrentScope();
+  if (!scope) {
+    throw new Error("[seed] useSeedData() only works during setup (components, views, composables). Outside them, use await loadSeedData().");
+  }
+  const instance = getCurrentInstance();
+  if (instance) {
+    const shared = ownByInstance.get(instance) ?? inject(SEED_KEY, null);
+    if (shared) return shared;
+  }
+  const seed = createSeedLookups(liveSource(scope));
+  if (instance) {
+    provide(SEED_KEY, seed);
+    ownByInstance.set(instance, seed);
+  }
+  return seed;
 }
 
 /** A list getter's result together with whether the tables it reads have synced this login. */
@@ -140,26 +203,6 @@ export interface WithSync<T> {
 export type ListGetter<Args extends unknown[], T> = ((...args: Args) => T) & {
   withSync: (...args: Args) => WithSync<T>;
 };
-
-/** Declares the tables a list getter reads, once, so callers never name them. */
-function listGetter<Args extends unknown[], T>(tables: string[], read: (...args: Args) => T): ListGetter<Args, T> {
-  return Object.assign(read, {
-    withSync: (...args: Args): WithSync<T> => ({ data: read(...args), synced: tablesSynced(tables) }),
-  });
-}
-
-/** Reactive: the table's rows, empty until its first read lands. */
-function rowsOf(table: string): Row[] {
-  return seedTable(table)?.rows.value ?? [];
-}
-
-/** Async: the table's current rows, once its first read has landed. */
-async function loadRows(table: string): Promise<Row[]> {
-  const entry = seedTable(table);
-  if (!entry) return [];
-  await entry.loaded;
-  return entry.rows.value;
-}
 
 /** Rows by primary key, built once per loaded array. */
 const indexes = new WeakMap<Row[], Map<string, Row>>();
@@ -178,17 +221,6 @@ const DEFAULT_LABEL_FIELDS = ["description", "enumName", "name", "groupName", "f
 /** First non-empty value among `fields`, else the raw id. */
 function labelOf(record: Row | undefined, id: string, fields = DEFAULT_LABEL_FIELDS): string {
   return (fields.map((field) => record?.[field]).find(Boolean) as string) || id;
-}
-
-/** Reactive: one row by primary key. */
-function row(table: string, keyField: string, id: Id): Row | undefined {
-  return id ? byKey(rowsOf(table), keyField).get(id) : undefined;
-}
-
-/** Reactive: one label by primary key. */
-function label(table: string, keyField: string, id: Id, fields?: string[]): string {
-  if (!id) return "";
-  return labelOf(row(table, keyField, id), id, fields);
 }
 
 const byGeoName = (left: Row, right: Row) => (left.geoName || "").localeCompare(right.geoName || "");
@@ -220,11 +252,29 @@ const byTransitionSequence = (left: Row, right: Row) => {
   return (left.toStatusId || "").localeCompare(right.toStatusId || "");
 };
 
-/**
- * The seed lookup API: `const seed = useSeedData()`, then `seed.statusDescription(id)` in a
- * template or computed, or `await seed.getFacilities()` where the rows must be in hand.
- */
-export function useSeedData() {
+/** The getters over a source of rows. Every lookup rule lives here, once. */
+function createSeedLookups(source: SeedSource) {
+  const rowsOf = (table: string): Row[] => source.rows(table);
+  const loadRows = (table: string): Promise<Row[]> => source.load(table);
+
+  /** Declares the tables a list getter reads, once, so callers never name them. */
+  function listGetter<Args extends unknown[], T>(tables: string[], read: (...args: Args) => T): ListGetter<Args, T> {
+    return Object.assign(read, {
+      withSync: (...args: Args): WithSync<T> => ({ data: read(...args), synced: tables.every((table) => source.synced(table)) }),
+    });
+  }
+
+  /** One row by primary key. */
+  function row(table: string, keyField: string, id: Id): Row | undefined {
+    return id ? byKey(rowsOf(table), keyField).get(id) : undefined;
+  }
+
+  /** One label by primary key. */
+  function label(table: string, keyField: string, id: Id, fields?: string[]): string {
+    if (!id) return "";
+    return labelOf(row(table, keyField, id), id, fields);
+  }
+
   // ── Reactive getters ──────────────────────────────────────────────────────────────────
 
   // List getters are built with `listGetter`, so each also offers `.withSync(...)`. Label getters
@@ -417,11 +467,4 @@ export function useSeedData() {
   };
 }
 
-export type SeedData = ReturnType<typeof useSeedData>;
-
-/**
- * The seed lookups as a plain object, for stores, services and utils, which do not call
- * composables. Every getter reads the shared module-level tables, so this and `useSeedData()`
- * answer the same.
- */
-export const seedData: SeedData = useSeedData();
+export type SeedData = ReturnType<typeof createSeedLookups>;

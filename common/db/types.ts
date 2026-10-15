@@ -16,6 +16,19 @@ export type DbKey = string | number | Array<string | number>;
 
 export type FieldKind = "text" | "count" | "date" | "structured";
 
+/**
+ * What one stored field holds: a scalar `FieldKind`, a nested object whose own fields are declared
+ * the same way, or a list of either — written as a one-element array, `[{ idValue: "text" }]` or
+ * `["text"]`. A nested declaration is a whitelist like the top level: undeclared keys are dropped
+ * and every leaf is coerced by its kind. `structured` stays the escape hatch for data stored as-is.
+ */
+export type FieldSpec = FieldKind | NestedFields | readonly [FieldKind | NestedFields];
+
+/** The fields of a nested object, or of the entity itself. */
+export interface NestedFields {
+  [field: string]: FieldSpec;
+}
+
 export interface QueryOptions {
   /** The primary partition. Combined with `equals`: every equality holds on the result. */
   scope?: { field: string; value: unknown };

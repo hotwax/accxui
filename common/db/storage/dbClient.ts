@@ -10,10 +10,17 @@
  */
 
 import { liveQuery, type Observable, type Table } from "dexie";
-import { type BaseDB, ensureDbReady } from "./baseDb";
+import {
+  type BaseDB,
+  clearDatabaseTables,
+  clearSyncedThisLogin,
+  ensureDbReady,
+  hasSyncedThisLogin,
+  markSyncedThisLogin,
+} from "./baseDb";
 import type { DbKey, QueryOptions } from "../types";
-import type { Entity } from "../schema/defineEntity";
-import { diffStaleKeys, entityKeyOf, newestValue, projectRows } from "./projection";
+import { listIndexField, type Entity } from "../schema/defineEntity";
+import { diffStaleKeys, entityKeyOf, newestValue, projectRows, valuesAtPath } from "./projection";
 
 function keysOfRows(rows: Array<Record<string, unknown>>, entity: Entity): DbKey[] {
   const keys: DbKey[] = [];
@@ -64,22 +71,140 @@ export interface EntityClient<T = Record<string, any>> {
   ): Promise<T[]>;
 }
 
-export interface DbClient {
-  get<T = any>(table: string, key: DbKey): Promise<T | undefined>;
-  getMany<T = any>(table: string, keys: DbKey[]): Promise<T[]>;
-  all<T = any>(table: string): Promise<T[]>;
-  query<T = any>(table: string, options?: QueryOptions): Promise<T[]>;
-  first<T = any>(table: string, options?: QueryOptions): Promise<T | undefined>;
-  count(table: string, options?: QueryOptions): Promise<number>;
-  put<T = any>(table: string, record: T): Promise<void>;
-  bulkPut<T = any>(table: string, records: T[]): Promise<void>;
-  remove(table: string, key: DbKey): Promise<void>;
-  bulkRemove(table: string, keys: DbKey[]): Promise<void>;
-  clear(table: string): Promise<void>;
-  entity<T = Record<string, any>>(table: string): EntityClient<T>;
-  transaction<T>(mode: "r" | "rw", tables: string[], fn: () => Promise<T>): Promise<T>;
+/** The reads of an `EntityClient`, run inside a `liveRead` transaction. */
+export interface TxEntityReader<T = Record<string, any>> {
+  get(key: DbKey): Promise<T | undefined>;
+  getMany(keys: DbKey[]): Promise<T[]>;
+  all(): Promise<T[]>;
+  query(options?: QueryOptions): Promise<T[]>;
+  first(options?: QueryOptions): Promise<T | undefined>;
+  count(options?: QueryOptions): Promise<number>;
+}
+
+/**
+ * A table this client can address: one the schema declared, or `syncMeta`, which `BaseDB` adds
+ * to every database. `Tables` defaults to `string`, so an untyped client takes any name.
+ */
+export type TableName<Tables extends string = string> = Tables | "syncMeta";
+
+/**
+ * Read-only access to the tables a `liveRead` opened. Its reads skip `ensureDbReady`: the gate
+ * already passed before the transaction began, and awaiting it again inside could let the
+ * transaction commit early.
+ */
+export interface TxReader<Tables extends string = string> {
+  entity<T = Record<string, any>>(table: TableName<Tables>): TxEntityReader<T>;
+}
+
+export interface DbClient<Tables extends string = string> {
+  get<T = any>(table: TableName<Tables>, key: DbKey): Promise<T | undefined>;
+  getMany<T = any>(table: TableName<Tables>, keys: DbKey[]): Promise<T[]>;
+  all<T = any>(table: TableName<Tables>): Promise<T[]>;
+  query<T = any>(table: TableName<Tables>, options?: QueryOptions): Promise<T[]>;
+  first<T = any>(table: TableName<Tables>, options?: QueryOptions): Promise<T | undefined>;
+  count(table: TableName<Tables>, options?: QueryOptions): Promise<number>;
+  put<T = any>(table: TableName<Tables>, record: T): Promise<void>;
+  bulkPut<T = any>(table: TableName<Tables>, records: T[]): Promise<void>;
+  remove(table: TableName<Tables>, key: DbKey): Promise<void>;
+  bulkRemove(table: TableName<Tables>, keys: DbKey[]): Promise<void>;
+  clear(table: TableName<Tables>): Promise<void>;
+  entity<T = Record<string, any>>(table: TableName<Tables>): EntityClient<T>;
+  transaction<T>(mode: "r" | "rw", tables: TableName<Tables>[], fn: () => Promise<T>): Promise<T>;
+  /**
+   * Live read across several tables: pass the gate once, then run `fn` in ONE "r" transaction over
+   * `tables`, so it sees them all at the same point. Re-emits when any row it read is written.
+   */
+  liveRead<R>(tables: TableName<Tables>[], fn: (tx: TxReader<Tables>) => Promise<R>): Observable<R>;
+  /** One-shot `liveRead`: the same gate and transaction, answered once. */
+  read<R>(tables: TableName<Tables>[], fn: (tx: TxReader<Tables>) => Promise<R>): Promise<R>;
+  /** Name of the database the client resolves to now. Throws when none can be resolved. */
+  name(): string;
+  /** Whether `domain` has synced since this login (its `loginSync:` marker in `syncMeta`). */
+  syncedThisLogin(domain: string): Promise<boolean>;
+  /** Record that `domain` synced this login. A failure is logged, not thrown. */
+  markSyncedThisLogin(domain: string): Promise<void>;
+  /** Drop `domain`'s login marker, so its next pass re-seeds it. */
+  clearSyncedThisLogin(domain: string): Promise<void>;
+  /**
+   * Open and version-check the database now (`ensureDbReady`). Every operation does this anyway;
+   * calling it first is an ORDERING guarantee, e.g. a rebuild before a worker opens its own handle.
+   */
+  ready(): Promise<void>;
+  /** Empty every data table and the sync markers, keeping the schema version record (logout). */
+  clearAllTables(): Promise<void>;
   tableNames(): string[];
   raw(): BaseDB;
+}
+
+function isMissingKey(key: DbKey): boolean {
+  return key === undefined || key === null || key === ""
+    || (Array.isArray(key) && key.length === 0);
+}
+
+/**
+ * `EntityClient`'s reads, each after the readiness gate `tableRef` awaits. Never inside a
+ * transaction — see `txReadsOf`.
+ */
+function readsOf<T>(tableRef: () => Promise<Table<any, DbKey>>): TxEntityReader<T> {
+  return {
+    async get(key) {
+      if (isMissingKey(key)) return undefined;
+      return (await tableRef()).get(key as any);
+    },
+    async getMany(keys) {
+      if (!keys.length) return [];
+      const rows = await (await tableRef()).bulkGet(keys);
+      return rows.filter(Boolean) as any[];
+    },
+    async all() {
+      return (await tableRef()).toArray();
+    },
+    async query(options = {}) {
+      return runQuery(await tableRef(), options);
+    },
+    async first(options = {}) {
+      const rows = await runQuery(await tableRef(), { ...options, limit: 1 });
+      return rows[0];
+    },
+    async count(options) {
+      const table = await tableRef();
+      if (!options || Object.keys(options).length === 0) return table.count();
+      return (await runQuery(table, options)).length;
+    },
+  };
+}
+
+/**
+ * The same reads for INSIDE a `read` / `liveRead` transaction: each calls the Dexie table directly
+ * and stays a Dexie promise chain. No `async` wrapper and no `await` of the table handle — awaiting a
+ * plain value in a transaction scope drops Dexie's transaction zone, so the read runs outside the
+ * transaction, the transaction finds no pending request, and Dexie aborts it with
+ * `PrematureCommitError` ("Transaction committed too early").
+ */
+function txReadsOf<T>(table: Table<any, DbKey>): TxEntityReader<T> {
+  return {
+    get(key) {
+      if (isMissingKey(key)) return Promise.resolve(undefined);
+      return table.get(key as any) as unknown as Promise<T | undefined>;
+    },
+    getMany(keys) {
+      if (!keys.length) return Promise.resolve([]);
+      return table.bulkGet(keys).then((rows) => rows.filter(Boolean)) as unknown as Promise<T[]>;
+    },
+    all() {
+      return table.toArray() as unknown as Promise<T[]>;
+    },
+    query(options = {}) {
+      return runQuery(table, options);
+    },
+    first(options = {}) {
+      return runQuery(table, { ...options, limit: 1 }).then((rows) => rows[0]);
+    },
+    count(options) {
+      if (!options || Object.keys(options).length === 0) return table.count() as unknown as Promise<number>;
+      return runQuery(table, options).then((rows) => rows.length);
+    },
+  };
 }
 
 /** Dexie reports a compound index as `[a+b]`; tolerate whitespace in a hand-written one. */
@@ -91,6 +216,26 @@ function hasIndex(tableRef: Table<any, DbKey>, path: string): boolean {
   const schema: any = tableRef.schema ?? {};
   if (normalizeIndexName(schema.primKey?.name ?? "") === path) return true;
   return (schema.indexes ?? []).some((index: any) => normalizeIndexName(index?.name ?? "") === path);
+}
+
+/**
+ * The index that answers an equality on `field`: the field's own index, or — for a dotted path
+ * into a list — the multi-value index on its hidden flattened field. Undefined when neither exists.
+ */
+function indexFor(tableRef: Table<any, DbKey>, field: string): string | undefined {
+  if (hasIndex(tableRef, field)) return field;
+  if (field.includes(".") && hasIndex(tableRef, listIndexField(field))) return listIndexField(field);
+  return undefined;
+}
+
+/**
+ * The in-memory form of an equality. A dotted path reads the nested value, and a list (at the
+ * field or anywhere on the path) matches when ANY of its values does — what a multi-value index
+ * returns, so a query answers the same whether or not the index exists.
+ */
+function matchesEquality(row: Record<string, unknown>, field: string, value: unknown): boolean {
+  if (row?.[field] === value) return true;
+  return valuesAtPath(row, field).some((candidate) => candidate === value);
 }
 
 function dateOf(row: Record<string, unknown>, dateField: string): number | undefined {
@@ -140,9 +285,9 @@ async function runQuery(
     rows = await tableRef.where(compound).equals(values as any).toArray();
     remaining = [];
   } else if (fields.length) {
-    const seek = fields.findIndex((field) => hasIndex(tableRef, field));
+    const seek = fields.findIndex((field) => indexFor(tableRef, field) !== undefined);
     if (seek >= 0) {
-      rows = await tableRef.where(fields[seek]).equals(values[seek] as any).toArray();
+      rows = await tableRef.where(indexFor(tableRef, fields[seek])!).equals(values[seek] as any).toArray();
       remaining = equalities.filter((_, index) => index !== seek);
     } else {
       rows = await tableRef.toArray();
@@ -157,7 +302,7 @@ async function runQuery(
   }
 
   if (remaining.length) {
-    rows = rows.filter((row) => remaining.every(([field, value]) => row?.[field] === value));
+    rows = rows.filter((row) => remaining.every(([field, value]) => matchesEquality(row, field, value)));
   }
   if (dateField && !dateOrdered && (since !== undefined || until !== undefined)) {
     rows = rows.filter((row) => {
@@ -187,6 +332,10 @@ async function runQuery(
  * that existed at import time — which `defineAppDb.get()` closes on the switch, leaving every
  * later read to fail with DatabaseClosedError.
  */
+export function dbClient<Tables extends string = string>(
+  source: BaseDB | (() => BaseDB),
+  schemaEntities?: Record<Tables, Entity>,
+): DbClient<Tables>;
 export function dbClient(
   source: BaseDB | (() => BaseDB),
   schemaEntities?: Record<string, Entity>,
@@ -194,6 +343,14 @@ export function dbClient(
   const resolveDb = typeof source === "function" ? source : () => source;
   const tableOf = (table: string) => resolveDb().table<any, DbKey>(table);
   const clients = new Map<string, EntityClient<any>>();
+  /** The current database, past `ensureDbReady`. */
+  const readyDb = async () => {
+    const db = resolveDb();
+    if (db && typeof db.isOpen === "function") {
+      await ensureDbReady(db);
+    }
+    return db;
+  };
 
   const client: DbClient = {
     entity<T = Record<string, any>>(table: string): EntityClient<T> {
@@ -221,41 +378,13 @@ export function dbClient(
          * costs one already-resolved await after the first call.
          */
         const dexieTable = async () => {
-          const db = resolveDb();
-          if (db && typeof db.isOpen === "function") {
-            await ensureDbReady(db);
-          }
+          await readyDb();
           return tableOf(table);
         };
 
         instance = {
           table,
-          async get(key) {
-            const missing = key === undefined || key === null || key === ""
-              || (Array.isArray(key) && key.length === 0);
-            if (missing) return undefined;
-            return (await dexieTable()).get(key as any);
-          },
-          async getMany(keys) {
-            if (!keys.length) return [];
-            const rows = await (await dexieTable()).bulkGet(keys);
-            return rows.filter(Boolean) as any[];
-          },
-          async all() {
-            return (await dexieTable()).toArray();
-          },
-          async query(options = {}) {
-            return runQuery(await dexieTable(), options);
-          },
-          async first(options = {}) {
-            const rows = await runQuery(await dexieTable(), { ...options, limit: 1 });
-            return rows[0];
-          },
-          async count(options) {
-            const tableRef = await dexieTable();
-            if (!options || Object.keys(options).length === 0) return tableRef.count();
-            return (await runQuery(tableRef, options)).length;
-          },
+          ...readsOf<any>(dexieTable),
 
           async put(record) {
             await (await dexieTable()).put(record as any);
@@ -319,7 +448,7 @@ export function dbClient(
             const equalityFields = equals ? Object.keys(equals) : [];
             if (scope && equalityFields.length) {
               const path = `[${[scope.field, ...equalityFields, dateField].join("+")}]`;
-              const indexed = (tableRef.schema.indexes ?? []).some(
+              const indexed = (tableRef.schema?.indexes ?? []).some(
                 (index: any) => (index?.name ?? "").replace(/\s+/g, "") === path,
               );
               const prefix = [scope.value, ...equalityFields.map((field) => equals![field])];
@@ -340,7 +469,7 @@ export function dbClient(
             }
             if (equalityFields.length) {
               const [first, ...rest] = equalityFields;
-              const firstIndexed = (tableRef.schema.indexes ?? []).some(
+              const firstIndexed = (tableRef.schema?.indexes ?? []).some(
                 (index: any) => (index?.name ?? "").replace(/\s+/g, "") === first,
               );
               const rows = firstIndexed
@@ -358,7 +487,7 @@ export function dbClient(
             const { limit = 50, since } = options;
             const tableRef = await dexieTable();
             const indexed = since
-              ? (tableRef.schema.indexes ?? []).some(
+              ? (tableRef.schema?.indexes ?? []).some(
                   (index: any) => (index?.name ?? "").replace(/\s+/g, "") === since.field,
                 )
               : false;
@@ -399,6 +528,37 @@ export function dbClient(
 
     transaction(mode, tables, fn) {
       return resolveDb().transaction(mode, tables, fn) as Promise<any>;
+    },
+    liveRead(tables, fn) {
+      // The querier must itself be `async`: Dexie only carries its read tracking across the awaits
+      // inside it for an async querier, so a plain arrow returning the promise would never re-run.
+      return liveQuery(async () => await client.read(tables, fn)) as any;
+    },
+    async read(tables, fn) {
+      const db = resolveDb();
+      await ensureDbReady(db);
+      const tx: TxReader = {
+        entity: <T>(table: string) => txReadsOf<T>(db.table<any, DbKey>(table)),
+      };
+      return await db.transaction("r", tables, () => fn(tx));
+    },
+    name() {
+      return resolveDb().name;
+    },
+    async syncedThisLogin(domain) {
+      return hasSyncedThisLogin(await readyDb(), domain);
+    },
+    async markSyncedThisLogin(domain) {
+      await markSyncedThisLogin(await readyDb(), domain);
+    },
+    async clearSyncedThisLogin(domain) {
+      await clearSyncedThisLogin(await readyDb(), domain);
+    },
+    async ready() {
+      await ensureDbReady(resolveDb());
+    },
+    async clearAllTables() {
+      await clearDatabaseTables(await readyDb());
     },
     tableNames() {
       return resolveDb().getTableNames();
