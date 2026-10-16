@@ -3,8 +3,8 @@
  * productId, from the app db's `products` seed table, for an app that picked it.
  *
  * `getProduct(id)` is safe to call from a template on every render: it answers from the table and
- * queues the id, and the queued ids go to the worker's `product` domain in one batch. The domain
- * fetches only the ones missing or older than PRODUCT_STALE_MS, and the live read shows them once
+ * queues the id when its row is missing or older than PRODUCT_STALE_MS (by the row's `syncedAt`), and
+ * the queued ids go to the worker's `product` domain in one batch. The live read shows them once
  * stored. An app without an app db uses `useProducts` instead (a session Map, no table).
  *
  * It asks through the app's `refreshAfterMutation`, which `setupAppDbSync` registers. How a product
@@ -70,9 +70,13 @@ function closeReader() {
 }
 
 /**
- * When each id was last sent to the worker. The worker decides what is stale; this only keeps a
- * re-rendering screen from asking again for an id it asked for within PRODUCT_STALE_MS.
+ * How soon an id may be asked for again while its row is still missing or stale: the request is
+ * still running, or Solr has no document for it. Keeps a re-rendering screen from asking on every
+ * render; it is not a freshness rule.
  */
+const RETRY_MS = 5 * 60 * 1000;
+
+/** When each id was last sent to the worker, for RETRY_MS only. */
 const askedAt = new Map<string, number>();
 const queued = new Set<string>();
 
@@ -81,26 +85,36 @@ onSessionCleared(() => {
   queued.clear();
 });
 
+/**
+ * An id is due when its row is missing, or older than PRODUCT_STALE_MS by its own `syncedAt`, and it
+ * was not asked for within RETRY_MS. A fresh row is never sent to the worker.
+ */
+function isDue(productId: string, now: number): boolean {
+  const row = reader?.byId.value.get(productId);
+  if (row && now - Number(row.syncedAt ?? 0) < PRODUCT_STALE_MS) return false;
+  const asked = askedAt.get(productId);
+  return asked === undefined || now - asked >= RETRY_MS;
+}
+
 /** Ask the worker for the products a screen shows. Resolves once they are stored; never rejects. */
 async function prefetch(productIds: Array<string | null | undefined>): Promise<void> {
   const now = Date.now();
-  const due = [...new Set(productIds.filter(Boolean) as string[])]
-    .filter((productId) => now - (askedAt.get(productId) ?? -Infinity) >= PRODUCT_STALE_MS);
+  const due = [...new Set(productIds.filter(Boolean) as string[])].filter((productId) => isDue(productId, now));
   if (!due.length) return;
 
   due.forEach((productId) => askedAt.set(productId, now));
   try {
+    // The worker checks `syncedAt` again and fetches only what is missing or stale.
     await getAppDbSync().refreshAfterMutation("product", { productIds: due });
   } catch (error) {
-    // Let the next render ask again rather than wait out PRODUCT_STALE_MS.
+    // Let the next render ask again rather than wait out RETRY_MS.
     due.forEach((productId) => askedAt.delete(productId));
     logger.error("Failed to fetch products", error);
   }
 }
 
 function queue(productId: string) {
-  const asked = askedAt.get(productId);
-  if (asked !== undefined && Date.now() - asked < PRODUCT_STALE_MS) return;
+  if (!isDue(productId, Date.now())) return;
   if (!queued.size) {
     queueMicrotask(() => {
       const ids = [...queued];
