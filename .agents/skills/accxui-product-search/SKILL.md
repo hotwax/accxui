@@ -1,6 +1,6 @@
 ---
 name: accxui-product-search
-description: Use when AccxUI app code (any app under apps/*) shows product details (name, image, SKU, identifiers, features) for rows that only carry a productId, or searches products by keyword / barcode / product store. Triggers include useProducts, resolve, products.value.get, ResolvedProduct, parentProductName, mainImageUrl, goodIdentifications, productFeatures, searchProducts, productStoreIds_s, a product picker or "add product" modal, scanning a barcode, Order Manager's useProductMaster / useProductCacheStore / productDb / prefetch / getProduct / primaryId / secondaryId, BOPIS's product store, and a row that shows a raw productId instead of a name.
+description: Use when AccxUI app code (any app under apps/*) shows product details (name, image, SKU, identifiers, features) for rows that only carry a productId, or searches products by keyword / barcode / product store. Triggers include useProducts, resolve, products.value.get, ResolvedProduct, parentProductName, mainImageUrl, goodIdentifications, productFeatures, searchProducts, productStoreIds_s, a product picker or "add product" modal, scanning a barcode, Order Manager's useProductMaster / products table / product domain / prefetch / getProduct / primaryId / secondaryId, BOPIS's product store, and a row that shows a raw productId instead of a name.
 ---
 
 # Products: resolving by id and searching
@@ -72,24 +72,30 @@ const rows = total ? products : [];                           // {} when nothing
 - Infinite scroll: next `viewIndex`, append to the list.
 
 Search results are screen data: keep them in the component, composable or store that searched. Never
-write them into the app db. In Order Manager, feed them into its product cache (`upsertFromApi`) so
-later id lookups hit it: that cache is its own Dexie store, not the app db.
+write them into the app db. In Order Manager, a screen that needs them as product master rows shows
+them from the search answer until `useProductMaster().getProduct(id)` has the stored row
+(`CreateOrder.vue`'s `searchedProducts`).
 
-## Order Manager's product cache
+## Order Manager's product master
 
-Order Manager keeps products in a persistent, per-OMS Dexie store so a product is fetched once, ever:
+Order Manager keeps products in its app db, in the `products` table, so a product is fetched once and
+then again only when it is older than `PRODUCT_STALE_MS` (24 h):
 
 | Piece | File | Role |
 |---|---|---|
-| `getProductDb(oms)` | `src/db/productDb.ts` | Dexie database `${oms}-CommonDB`, table `products` (`productId, updatedAt`); survives logout. App-local store outside the app db (lint-exempt in `eslint.config.js`) |
-| `useProductCacheStore` | `src/store/productCache.ts` | reactive mirror `byId` over Dexie. `prefetch(ids)` (fetch only what isn't fully cached, then store), `getProduct(id)` (sync read), `getById(id, { refresh? })`, `upsertDocs(docs)`, `reset()` (mirror only, from `postLogout`) |
-| `useProductMaster()` | `src/composables/useProductMaster.ts` | what components use: `prefetch`, `getById`, `getByIds`, `upsertFromApi`, and `primaryId(product, fallbacks)` / `secondaryId(...)` which follow the user's product-identifier setting |
+| `products` table | `src/db/orderManagerSchema.ts` | the product master row, declared `retainOnLogout: true`: the catalog is the same for every user of the instance, so logout keeps it (a `version` bump still drops it) |
+| `product` domain (class C) | `src/workers/domains/productDomain.ts` | `refreshAfterMutation("product", { productIds })` fetches only the ids missing or stale (`force: true`: all), from Maarg's `admin/search/query`, 200 per query, and stores them |
+| `useProductMaster()` | `src/composables/useProductMaster.ts` | what components use, during setup: `getProduct(id)` (live; also queues the id, and queued ids go to the worker in one batch), `prefetch(ids)` (awaitable), `getByIds(ids)` (Solr, not stored: a picker's results), `primaryId(product, fallbacks)` / `secondaryId(...)` which follow the user's product-identifier setting |
 | `useProductIdentity()` | `src/composables/useProductIdentity.ts` | `getProduct`, `primaryIdentifier`, `secondaryIdentifier`, `imagePreview`, `featureLabel` |
-| query and fields | `src/utils/productDocs.ts` | `PRODUCT_FIELDS` (the common fields + `groupId`, `groupName`, `primaryProductCategoryName`, `title`) and `isFullyCached`: **add a key there whenever `PRODUCT_FIELDS` grows**, or old rows never heal |
+| query, fields, row type | `src/utils/productDocs.ts` | `PRODUCT_FIELDS`, `mapDocToProduct`, `CachedProduct`, `PRODUCT_STALE_MS`. Shared with the worker, so no `@common` import |
 
-Pattern: components call `useProductMaster().prefetch(ids)` when rows arrive (stores call
-`useProductCacheStore().prefetch`), then read `productCache.getProduct(id)` and name the product with
-`primaryId(product || item, [item.name, item.sku])`.
+Pattern: a page calls `const productMaster = useProductMaster()` in setup, may `await
+productMaster.prefetch(ids)` when its rows arrive, and names each product with
+`primaryId(productMaster.getProduct(item.productId) || item, [item.name, item.sku])`. A store can't
+read the table: it asks for products with `refreshAfterMutation("product", { productIds })`, and a
+store getter that needs product fields takes a lookup from its caller (`orderDetail`'s
+`itemExternalIdBySeqIdByOrderId(orderId, skuOf)`). A new field goes in `PRODUCT_FIELDS`,
+`mapDocToProduct` and the `products` entity, with a `version` bump.
 
 BOPIS keeps products in its own persisted Pinia store (`src/store/product.ts`: `fetchProducts`,
 `getProduct`, `findProduct`).
@@ -103,5 +109,6 @@ BOPIS keeps products in its own persisted Pinia store (`src/store/product.ts`: `
 | Reading `products.length` after a search with no hits | crash: it's `{}` | check `total` |
 | A module-level product map of your own in a shared composable | the next user sees the previous tenant's products | `useProducts` (it resets on logout), or `onSessionCleared` |
 | Hardcoding SKU or productId as the label in Order Manager | ignores the user's identifier setting | `primaryId` / `secondaryId` |
-| Adding a field to Order Manager's `PRODUCT_FIELDS` only | cached products never get it | add it to `isFullyCached` too |
-| Copying Order Manager's Dexie cache into another app | a second product store to maintain | ask first; use `useProducts` meanwhile |
+| Adding a field to Order Manager's `PRODUCT_FIELDS` only | the entity's `fields` whitelist drops it | declare it on the `products` entity and bump the db `version` |
+| `getProduct` copied into a list once, right after `prefetch` | rows miss the product: the live read lands after `prefetch` resolves | read `getProduct` in a `computed` or the template (`SwapOrders.vue`'s `setupCandidatesWithProducts`) |
+| A products table in another app | a second product master to maintain | ask first; use `useProducts` meanwhile |

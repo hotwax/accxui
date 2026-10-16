@@ -383,6 +383,13 @@ a key member (a document attached to no feed), give it a stand-in with `keyDefau
 Each key in `keyDefaults` must be a primary-key field. Use it only where the absence is a real state,
 never to cover a wrong field name.
 
+Logout empties every table. `retainOnLogout: true` keeps one table's rows for the next login on the
+same OMS instance (the default is `false`). Use it only for data that is the same for every user
+of the instance, such as a product catalog, and never for anything scoped to the signed-in user.
+A version bump still rebuilds the database and drops those rows. Nothing refreshes a retained row
+by itself: the screen that reads it decides when it is stale (its `syncedAt`) and calls
+`refreshAfterMutation`.
+
 > ⚠️ **`fields` is a whitelist, and it is the only thing stored.** A field you don't declare is
 > dropped at write time — it is not tucked away anywhere. If a screen needs it, declare it. This is
 > the single most common cause of "the row is in IndexedDB but my field is undefined".
@@ -914,24 +921,24 @@ selector to the `DA_*` lists, or a layer ban to the `IMPORT_*` lists, at the top
 `eslint.config.js`, and check it by linting a sample file from an app folder (`eslint --stdin
 --stdin-filename src/views/X.vue`). Lint rules have no committed spec.
 
-The APP's config, including the exemption for an APP-local Dexie store kept outside the app
-database (for example a product cache):
+The APP's config:
 
 ```js
 // apps/<app>/eslint.config.js
 import { dbConfig } from "../../eslint.config.js"
 
-export default [
-  ...dbConfig,
+export default [...dbConfig]
+```
+
+Data that must outlive logout (a product catalog, the same for every user of the instance) is an
+app db table declared `retainOnLogout: true` (§2), not an app-local Dexie store. Only a store that
+genuinely can't live in the app db gets an exemption, by file, after `...dbConfig`:
+
+```js
   {
-    files: ["src/db/productDb.ts"],   // the APP's own Dexie store
+    files: ["src/db/<thing>Db.ts"],   // the APP's own Dexie store
     rules: { "@typescript-eslint/no-restricted-imports": "off", "no-restricted-syntax": "off" }
-  },
-  {
-    files: ["src/store/productCache.ts"],   // the Pinia mirror over it, which imports it
-    rules: { "@typescript-eslint/no-restricted-imports": "off" }
   }
-]
 ```
 
 AI agents get the same guidance from the `accxui-app-db-access` skill (`.agents/skills/accxui-app-db-access/SKILL.md`), and the layer rules from `accxui-app-layers`.

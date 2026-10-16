@@ -1,7 +1,7 @@
 # The app databases that exist today: Company and Order Manager
 
 Only these two apps have an app database (as of 2026-10-16: Company at `version: 6`, Order Manager at
-`version: 3`; always read the current value in the file before bumping it). Change them in place, in the files below; don't add new
+`version: 4`; always read the current value in the file before bumping it). Change them in place, in the files below; don't add new
 files or folders for something one of these already holds. Paths are under `apps/<app>/`.
 
 ## Company (`apps/company`)
@@ -31,20 +31,20 @@ files or folders for something one of these already holds. Paths are under `apps
 
 | File | Holds | Add here when… |
 |---|---|---|
-| `src/db/orderManagerDb.ts` | `orderManagerDb = defineAppDb({ suffix: "OrderManagerDB", version, schema: commonSchema })`: **the whole seed schema, no own tables**; `getOrderManagerDb(oms)` for the worker; the `vN:` history comments | a schema change: bump `version` with a `vN:` line |
+| `src/db/orderManagerDb.ts` | `orderManagerDb = defineAppDb({ suffix: "OrderManagerDB", version, schema: mergeSchemas(commonSchema, orderManagerSchema) })`: **the whole seed schema** plus the own tables; `getOrderManagerDb(oms)` for the worker; the `vN:` history comments | **every schema change: bump `version` and add a `vN:` line** |
+| `src/db/orderManagerSchema.ts` | `orderManagerSchema = defineSchema({...})`: every own table. Today only `products` (the product master, `retainOnLogout: true`; **accxui-product-search**) | a new own table, a field or index on an own table |
 | `src/db/appDbSync.ts` | `setupAppDbSync(...)`; exports only start / stop / `refreshAfterMutation` / `resyncDomain` / `resyncReferenceData` / `bootstrapState` (no class A functions) | the first class A domain: also export `activateSyncDomains` and the rest |
-| `src/db/productDb.ts` | app-local Dexie `${oms}-CommonDB` (products), kept across logout; lint-exempt (**accxui-product-search**) | nothing else |
-| `src/workers/appSync.worker.ts` | `registerDomains(Object.values(commonDomains))` + `exposeWorkerHarness((oms) => getOrderManagerDb(oms))` | — |
+| `src/workers/appSyncDomains.ts` | `appSyncDomains`: every framework seed domain (no picking, no overrides) plus the own domains | **every new domain is added to this array** |
+| `src/workers/appSync.worker.ts` | `registerDomains(appSyncDomains)` + `exposeWorkerHarness` (registers the resolver in the worker) | never |
+| `src/workers/domains/<thing>Domain.ts` | one hand-written domain per file: `productDomain` (class C: Solr through Maarg's `admin/search/query`, skips rows fresher than `PRODUCT_STALE_MS`) | a new own domain: a new file here, then add it to `appSyncDomains` |
 
-- No `src/workers/domains/`, no own schema, no `appSyncDomains.ts` today. **Order Manager's first own
-  table** means following the Company layout: `src/db/orderManagerSchema.ts`, `mergeSchemas(commonSchema,
-  orderManagerSchema)`, `src/workers/appSyncDomains.ts` (seed domains + own), the worker registering
-  that list, and `src/workers/domains/`. Ask before starting it.
-- `main.ts` sets the resolver and also registers the seed domains on the main thread.
-  `App.vue`'s `isAuthenticated` watch fetches permissions and starts the sync; `store/user.ts` as in Company,
-  and `postLogout` also resets the product cache.
-- Tests: `tests/db/` only (wiring spec, `orderManagerDb.spec.ts`, `projections.spec.ts`,
-  `syncCatalog.spec.ts`, `syncDomainUrls.spec.ts`, `aliasImports.spec.ts`).
+- `main.ts` sets the resolver and also registers `appSyncDomains` on the main thread.
+  `App.vue`'s `isAuthenticated` watch fetches permissions and starts the sync; `store/user.ts` as in Company.
+- The Settings status card lists `catalogFrom(appSyncDomains)` (imported on demand), so a new domain
+  shows up there by itself; class C rows read "fetched when shown" and have no Refresh button.
+- Tests: `tests/db/` (wiring spec on `appSyncDomains`, `orderManagerDb.spec.ts`, `projections.spec.ts`,
+  `syncCatalog.spec.ts`, `syncDomainUrls.spec.ts`, `aliasImports.spec.ts`) and `tests/workers/` (one
+  spec per domain: `productDomain.spec.ts`).
 
 ## Both
 

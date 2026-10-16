@@ -10,8 +10,8 @@ This skill builds it: tables, the database, sync domains, the worker and the log
 and writing the data afterwards is the **accxui-app-db-access** skill.
 
 `appDb` / `appSchema` stand for the app's names (`companyDb`, `companySchema`). Working references:
-`apps/company` (own and seed tables, class A, B and C domains) and `apps/order-manager` (seed tables
-only). Full reference: `docs/APP_DB_DEVELOPER_GUIDE.md`.
+`apps/company` (own and seed tables, class A, B and C domains) and `apps/order-manager` (every seed
+table, plus a class C `products` table kept across logout). Full reference: `docs/APP_DB_DEVELOPER_GUIDE.md`.
 
 **Changing Company's or Order Manager's database? Read [existing-apps.md](existing-apps.md) first.**
 It maps every file in their `src/db` and `src/workers`, and says which existing file a new table,
@@ -115,6 +115,11 @@ appDb.setOmsInstanceResolver(() => "default");        // test fallback; main.ts 
   `{ … }` and lists `[{ … }]` / `["text"]` are declared in place and coerced like the top level.
   Index a nested field by its dotted path (`"carrier.partyId"`), a field inside a list with `*`
   (`"*items.productId"`), and query the dotted path (`equals: { "items.productId": pid }`).
+- Logout empties every table. `retainOnLogout: true` on `defineEntity` keeps one (default `false`):
+  only for data that is the same for every user of the instance, such as a product catalog, never for
+  anything user-scoped. A `version` bump still drops it, and nothing refreshes it by itself: the
+  reader decides when a row is stale (its `syncedAt`) and asks with `refreshAfterMutation`
+  (Order Manager's `products`).
 - `defineSchema`, `pick`, `extendEntities` and `mergeSchemas` each return a new schema and never
   mutate their input. `mergeSchemas` throws when two schemas claim the same table: take a table from
   exactly one of them.
