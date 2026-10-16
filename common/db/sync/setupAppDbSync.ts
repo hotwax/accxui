@@ -55,6 +55,17 @@ export const bootstrapState = reactive<{
   errors: serviceState.errors,
 });
 
+/** The app's sync, registered by `setupAppDbSync`, for framework composables (`useProductMaster`). */
+let activeAppDbSync: AppDbSync | null = null;
+
+/** The sync `setupAppDbSync` set up for this app; throws before it has run. */
+export function getAppDbSync(): AppDbSync {
+  if (!activeAppDbSync) {
+    throw new Error("[db] No app db sync registered. Ensure setupAppDbSync has been called.");
+  }
+  return activeAppDbSync;
+}
+
 export function setupAppDbSync(config: AppDbSyncConfig): AppDbSync {
   let service: SyncService | null = null;
   let starting: Promise<void> | null = null;
@@ -344,7 +355,7 @@ export function setupAppDbSync(config: AppDbSyncConfig): AppDbSync {
     await service.syncAll();
   }
 
-  return {
+  const appDbSync: AppDbSync = {
     syncService,
     startAppDbSync,
     stopAppDbSync,
@@ -359,4 +370,6 @@ export function setupAppDbSync(config: AppDbSyncConfig): AppDbSync {
     syncDomainsError,
     syncNow,
   };
+  activeAppDbSync = appDbSync;
+  return appDbSync;
 }

@@ -24,8 +24,7 @@ vi.mock("../db/schema/appDbRegistry", () => ({
   }),
 }));
 
-import { productDomain } from "../db/seed/productDomain";
-import { PRODUCT_STALE_MS } from "../db/seed/productMaster";
+import { PRODUCT_STALE_MS, productDomain } from "../db/seed/productDomain";
 
 const ctx = { maargUrl: "https://example.test/rest/s1/", token: "t", omsInstance: "demo", now: Date.now() } as any;
 const solr = (docs: any[]) => ({ response: { response: { docs } } });

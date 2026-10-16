@@ -1,13 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { effectScope, shallowRef } from "vue";
 
-const live = vi.hoisted(() => ({ records: null as any, opened: 0 }));
+const live = vi.hoisted(() => ({ records: null as any, opened: 0, refresh: null as any }));
 
 vi.mock("../db/composables/useLiveEntity", () => ({
   useLiveEntity: () => {
     live.opened += 1;
     return { records: live.records };
   },
+}));
+
+vi.mock("../db/sync/setupAppDbSync", () => ({
+  getAppDbSync: () => ({ refreshAfterMutation: live.refresh }),
 }));
 
 import { useProductMaster } from "../db/composables/useProductMaster";
@@ -23,9 +27,9 @@ describe("useProductMaster", () => {
   });
 
   it("answers from the table and asks for every id a render touched in one batch", async () => {
-    const refreshAfterMutation = vi.fn(async () => 1);
+    const refreshAfterMutation = live.refresh = vi.fn(async () => 1);
     const scope = effectScope();
-    const { getProduct } = scope.run(() => useProductMaster({ refreshAfterMutation }))!;
+    const { getProduct } = scope.run(() => useProductMaster())!;
 
     expect(getProduct("P1")?.productName).toBe("Shirt");
     expect(getProduct("P2")).toBeUndefined();
@@ -38,8 +42,8 @@ describe("useProductMaster", () => {
   });
 
   it("does not ask again for an id it asked for recently", async () => {
-    const refreshAfterMutation = vi.fn(async () => 1);
-    const { prefetch } = useProductMaster({ refreshAfterMutation });
+    const refreshAfterMutation = live.refresh = vi.fn(async () => 1);
+    const { prefetch } = useProductMaster();
 
     await prefetch(["P1"]);
     await prefetch(["P1"]);
@@ -48,8 +52,8 @@ describe("useProductMaster", () => {
   });
 
   it("asks again after a failed fetch instead of waiting out the stale window", async () => {
-    const refreshAfterMutation = vi.fn().mockRejectedValueOnce(new Error("down")).mockResolvedValue(1);
-    const { prefetch } = useProductMaster({ refreshAfterMutation });
+    const refreshAfterMutation = live.refresh = vi.fn().mockRejectedValueOnce(new Error("down")).mockResolvedValue(1);
+    const { prefetch } = useProductMaster();
 
     await prefetch(["P1"]);
     await prefetch(["P1"]);
@@ -58,17 +62,17 @@ describe("useProductMaster", () => {
   });
 
   it("shares one live read between components and closes it with the last", () => {
-    const actions = { refreshAfterMutation: vi.fn(async () => 1) };
+    live.refresh = vi.fn(async () => 1);
     const first = effectScope();
     const second = effectScope();
-    first.run(() => useProductMaster(actions));
-    second.run(() => useProductMaster(actions));
+    first.run(() => useProductMaster());
+    second.run(() => useProductMaster());
     expect(live.opened).toBe(1);
 
     first.stop();
     second.stop();
     const third = effectScope();
-    third.run(() => useProductMaster(actions));
+    third.run(() => useProductMaster());
     expect(live.opened).toBe(2);
     third.stop();
   });

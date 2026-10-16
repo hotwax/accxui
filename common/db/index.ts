@@ -15,7 +15,6 @@ export * from "./storage/dbClient";
 
 export * from "./seed/seedSchema";
 export * from "./seed/seedDomains";
-export * from "./seed/productMaster";
 export * from "./seed/productDomain";
 
 export * from "./composables/useLiveEntity";

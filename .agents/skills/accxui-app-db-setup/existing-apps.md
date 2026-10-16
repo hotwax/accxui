@@ -34,7 +34,7 @@ files or folders for something one of these already holds. Paths are under `apps
 | `src/db/orderManagerDb.ts` | `orderManagerDb = defineAppDb({ suffix: "OrderManagerDB", version, schema: commonSchema })`: **the whole common schema** (seed reference tables and the `products` master), **no own tables**; `getOrderManagerDb(oms)` for the worker; the `vN:` history comments | a schema change: bump `version` with a `vN:` line |
 | `src/db/appDbSync.ts` | `setupAppDbSync(...)`; exports only start / stop / `refreshAfterMutation` / `resyncDomain` / `resyncReferenceData` / `bootstrapState` (no class A functions) | the first class A domain: also export `activateSyncDomains` and the rest |
 | `src/workers/appSync.worker.ts` | `registerDomains(Object.values(commonDomains))` (the `product` domain included) + `exposeWorkerHarness` (registers the resolver in the worker, which the product domain writes through) | — |
-| `src/composables/useProductMaster.ts` | wraps the framework's `useProductMaster` with `refreshAfterMutation`, `primaryId` / `secondaryId` and `getByIds` (**accxui-product-search**) | — |
+| `src/composables/useProductIdentity.ts` | names products the Settings product-identifier way (`primaryId` / `secondaryId`, …) over the framework's `useProductMaster`, which screens call directly (**accxui-product-search**) | — |
 
 - No `src/workers/domains/`, no own schema, no `appSyncDomains.ts` today. **Order Manager's first own
   table** means following the Company layout: `src/db/orderManagerSchema.ts`, `mergeSchemas(commonSchema,

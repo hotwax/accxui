@@ -12,7 +12,7 @@ Product data comes from Solr. Two jobs, two tools:
 | Show product details for rows that carry only a `productId` | `useProducts()` from `@common` (in-memory, per session), or, in an app that keeps them in its app db, `useProductMaster()` from `@common/db` (below) |
 | Find products by keyword, barcode or store | `useSolrSearch().searchProducts(...)` from `@common` (**accxui-solr-search**) |
 
-Follow the app's existing way: Order Manager uses `useProductMaster` (through its own wrapper),
+Follow the app's existing way: Order Manager uses `useProductMaster`,
 Company and the apps without an app db use `useProducts`. Moving an app from one to the other is its
 own change: ask first.
 
@@ -87,17 +87,16 @@ Company still uses `useProducts`.
 |---|---|---|
 | `products` table | `common/db/seed/seedSchema.ts` | an app picks it like any seed table (`commonSchema.pick([..., "products"])`; Order Manager takes the whole `commonSchema`) and registers the seed domains as usual. A `version` bump drops its rows |
 | `product` domain (class C) | `common/db/seed/productDomain.ts` | `refreshAfterMutation("product", { productIds })` fetches only the ids missing or stale (`force: true`: all), from Maarg's `admin/search/query`, 200 per query, and stores them through the app's composed entity |
-| `useProductMaster({ refreshAfterMutation })` | `common/db/composables/useProductMaster.ts` | during setup: `getProduct(id)` (live; also queues the id, and queued ids go to the worker in one batch) and `prefetch(ids)` (awaitable, never rejects). One live read shared by every mounted caller |
-| `ProductRow`, `PRODUCT_FIELDS`, `mapDocToProduct`, `buildProductQuery`, `PRODUCT_STALE_MS` | `common/db/seed/productMaster.ts` | the row type and the Solr query; worker-safe |
+| `useProductMaster()` | `common/db/composables/useProductMaster.ts` | during setup: `getProduct(id)` (live; also queues the id, and queued ids go to the worker in one batch), `prefetch(ids)` (awaitable, never rejects) and `getByIds(ids)` (Solr, not stored: a picker's results). One live read shared by every mounted caller. It asks through the app's `refreshAfterMutation`, found with `getAppDbSync()` (registered by `setupAppDbSync`). Also exports `ProductRow` |
+| `PRODUCT_FIELDS`, `mapDocToProduct`, `buildProductQuery`, `PRODUCT_STALE_MS` | `common/db/seed/productDomain.ts` | the Solr query and doc mapping, beside the domain that uses them; worker-safe |
 
-The app wraps it in its own composable, which passes its `refreshAfterMutation` and adds how the app
-names products. Order Manager's `src/composables/useProductMaster.ts` adds `primaryId(product,
-fallbacks)` / `secondaryId(...)` (the Settings product identifier) and `getByIds(ids)` (Solr, not
-stored: a picker's results); `useProductIdentity()` builds on it.
+How a product is named stays in the app: Order Manager's `useProductIdentity()` has `primaryId(product,
+fallbacks)` / `secondaryId(...)` (the Settings product identifier) and the per-productId helpers
+(`primaryIdentifier`, `imagePreview`, `featureLabel`).
 
-Pattern: a page calls the app's `useProductMaster()` in setup, may `await prefetch(ids)` when its rows
-arrive, and names each product with `primaryId(getProduct(item.productId) || item, [item.name,
-item.sku])`. A store can't read the table: it asks with `refreshAfterMutation("product", { productIds })`,
+Pattern: a page calls `useProductMaster()` (from `@common/db`) in setup, may `await prefetch(ids)` when
+its rows arrive, and names each product with `primaryId(getProduct(item.productId) || item, [item.name,
+item.sku])` from `useProductIdentity()`. A store can't read the table: it asks with `refreshAfterMutation("product", { productIds })`,
 and a store getter that needs product fields takes a lookup from its caller (Order Manager's
 `orderDetail.itemExternalIdBySeqIdByOrderId(orderId, skuOf)`). A new field goes in `PRODUCT_FIELDS`,
 `mapDocToProduct` and the `products` entity (framework), with a `version` bump in every app that
