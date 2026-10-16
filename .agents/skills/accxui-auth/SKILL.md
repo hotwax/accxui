@@ -18,6 +18,21 @@ import { onSessionCleared } from "../core/sessionScope";
 import { accxuiConfig, initialiseConfig } from "../core/configRegistry";
 ```
 
+**Not in worker-reachable framework modules** (`common/core/workerRemoteApi.ts`, `common/db/types.ts`,
+`common/db/schema/**`, `common/db/seed/**`, `common/db/storage/**`, `common/db/sync/**` except the
+main-thread `syncService.ts` / `setupAppDbSync.ts`). `useAuth` pulls in `commonUtil`, `cookieHelper`,
+`remoteApi`, a Pinia store and Vue, and `configRegistry` imports Vue, so either breaks the sync worker.
+`onSessionCleared` has no imports but does nothing there: the worker is a separate realm, so
+`logout()` never runs its resets. In those modules:
+
+- **Token:** read `ctx.token` from the `SyncContext`. The main thread publishes each new token over
+  `POLLING_TOKEN_CHANNEL` (`db/sync/channels.ts`) and the worker harness keeps the latest; never read
+  it from a cookie or `useAuth`.
+- **Instance / user:** `ctx.omsInstance` (and `ctx.maargUrl`). A new session value is computed on the
+  main thread in `syncService.ts` and passed in the start payload.
+- **Session end:** `postLogout` stops sync, which ends the worker and clears the tables; worker code
+  needs no reset hook of its own.
+
 ## Wiring an app (once, in `main.ts`)
 
 ```ts
