@@ -218,5 +218,7 @@ export async function deleteLegacyCaches(): Promise<void> {
   await Promise.allSettled([
     Dexie.delete("DataManagerLogCacheDB"),
     Dexie.delete("CompanyCacheDB"),
+    // Company's Shopify product-sync error records, now the app db's dataManagerErrorRecords.
+    Dexie.delete("ShopifySyncDB"),
   ]);
 }

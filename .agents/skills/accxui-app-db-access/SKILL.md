@@ -201,8 +201,7 @@ AGENTS.md (App layout)": API calls, composables, stores in utils) are in **accxu
 | `upsertMany` / `snapshotReplace` anywhere, or `put` / `bulkPut` / `remove` / `bulkRemove` / `clear` on `appDb.entity(...)`, outside `src/workers/**` | `refreshAfterMutation` for a missing record; `refreshAfterMutation` / `resyncDomain` after a server write |
 
 Exempt: an app-local Dexie store outside the app database, switched off in that app's own
-`eslint.config.js` (Company `src/db/shopifySyncDb.ts`; Order Manager `src/db/productDb.ts` and the
-`productCache` store that mirrors it).
+`eslint.config.js` (Order Manager `src/db/productDb.ts` and the `productCache` store that mirrors it).
 
 ## Before you finish
 
