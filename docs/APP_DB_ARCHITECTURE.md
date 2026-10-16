@@ -70,7 +70,6 @@ flowchart TB
     subgraph CONV["Framework, src/db and worker on the same layer"]
       direction LR
       AE["appDb.entity(appDb.tables.x)<br/>.get · query · upsertMany · remove …<br/>(worker sync domains, src/db)"]
-      LSD["loadSeedData()<br/>one-shot seed snapshot<br/>(worker, src/db)"]
       UDS["useDbStatus(appDb.client(), …)<br/>status card"]
       SYNC["Sync domains, harness,<br/>setupAppDbSync"]
     end
@@ -84,7 +83,6 @@ flowchart TB
     UPM -. "missing or stale ids:<br/>getAppDbSync().refreshAfterMutation(&quot;product&quot;, { productIds })" .-> SYNC
     ULE -- "entity(t).live(opts)<br/>or, with syncDomain,<br/>liveRead([t, syncMeta])" --> DC
     AE --> DC
-    LSD -- "read([...tables, syncMeta])" --> DC
     UDS -- "liveRead / read" --> DC
     SYNC --> DC
     DC --> BDB
@@ -105,7 +103,7 @@ database only through these.
 | **useSeedData** | Seed lookups over `useLiveEntity` | One `useLiveEntity(table, { syncDomain })` per seed table, opened by the first getter that needs it, shared by the component tree, closed when the providing component unmounts |
 | **useProductMaster** | Product details over `useLiveEntity("products")` | One live read for the whole app, opened by the first mounted user, closed when the last unmounts. `getProduct(id)` answers from it and batches the ids whose row is missing or older than `PRODUCT_STALE_MS` into one `refreshAfterMutation("product", { productIds })`, through the sync `setupAppDbSync` registered (`getAppDbSync()`) |
 | **appDb.entity** | One-shot `EntityClient` | Plain async calls, for worker sync domains (the only writers) and `src/db`; app code does not use it |
-| **loadSeedData** | One-shot seed snapshot | Same getters as `useSeedData`, read once in one transaction; `src/workers/**` and `src/db/**` only |
+| **loadSeedData** | One-shot seed snapshot | Framework-internal: APP code does not call it. It lives beside `useSeedData` and imports Vue, so it is not worker-safe either; a worker sync domain reads with `appDb.entity(...)` |
 
 ### 2.1 The read pattern
 

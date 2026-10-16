@@ -274,7 +274,7 @@ sequenceDiagram
 | Rows in a store action or util | taken as arguments from the composable or page that calls it | — |
 | A read or write in a worker sync domain | `appDb.entity(appDb.tables.x).get / query / upsertMany / …` | no |
 | Product details for rows that carry only a `productId` | `useProductMaster().getProduct(id)`: one shared `useLiveEntity("products")`; missing or stale ids go to the `product` domain in one `refreshAfterMutation` | yes |
-| Seed rows in a worker or `src/db` | `await loadSeedData([...tables])`: one-shot snapshot | no |
+| Seed rows in a worker sync domain | `appDb.entity(appDb.tables.x).query / all` (`loadSeedData()` imports Vue: not for workers) | no |
 
 APP code never calls `appDb.entity(...)` or `loadSeedData()`; lint rejects both outside
 `src/workers/**` and `src/db/**`. Use `hydrated` (`synced` with a `syncDomain`, `.withSync()` on
