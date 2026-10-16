@@ -1,5 +1,5 @@
 /**
- * The 29 HotWax OMS seed reference tables, each declared exactly once.
+ * The HotWax OMS seed reference tables, and the `products` master, each declared exactly once.
  *
  * Keyed by IndexedDB store name, so `commonSchema.stores` is what Dexie's `version().stores()`
  * wants with no name/table mapping in between. Standard domains live in the sibling
@@ -333,5 +333,30 @@ export const commonSchema = defineSchema({
       shopifyLocationId: "text",
     },
     indexes: ["shopId", "facilityId", "shopifyLocationId"],
+  }),
+
+  /**
+   * Product master from Solr, fetched when a screen shows a product (the `product` domain, class C;
+   * read with `useProductMaster`). The catalog is the same for every user of the instance, so it
+   * survives logout; a row older than PRODUCT_STALE_MS is refetched the next time it is shown.
+   */
+  products: defineEntity({
+    primaryKey: "productId",
+    fields: {
+      productId: "text",
+      productName: "text",
+      sku: "text",
+      parentProductName: "text",
+      internalName: "text",
+      mainImageUrl: "text",
+      productFeatures: ["text"],
+      // The remaining static identifiers a product-identifier setting offers.
+      groupId: "text",
+      groupName: "text",
+      primaryProductCategoryName: "text",
+      title: "text",
+      goodIdentifications: [{ type: "text", value: "text" }],
+    },
+    retainOnLogout: true,
   }),
 }, { seed: true });

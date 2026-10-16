@@ -1,8 +1,10 @@
 /**
- * Standard HotWax OMS Reference (Class B) Snapshot Domain Definitions.
+ * Standard HotWax OMS domains: the reference (class B) snapshot domains, and the product master
+ * (class C, `productDomain.ts`).
  */
 
 import { defineSnapshotDomain } from "../sync/defineSnapshotDomain";
+import { productDomain } from "./productDomain";
 import type { SyncDomain } from "../types";
 
 export const commonDomains: Record<string, SyncDomain> = {
@@ -295,6 +297,8 @@ export const commonDomains: Record<string, SyncDomain> = {
     listUrl: "oms/shopifyShops/locations",
     collectionKey: null,
   }),
+
+  product: productDomain,
 };
 
 export const commonDomainsByTable: Record<string, SyncDomain> = Object.fromEntries(

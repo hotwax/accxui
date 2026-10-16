@@ -44,6 +44,12 @@ export interface EntityDefinition {
    * wrong field name.
    */
   keyDefaults?: Record<string, string | number>;
+  /**
+   * Keep this table's rows when the user logs out; every other table is emptied. Only for data that
+   * is the same for every user of the OMS instance (a product catalog), never for anything scoped to
+   * the signed-in user. The rows still go on a schema version bump, which rebuilds the database.
+   */
+  retainOnLogout?: boolean;
 }
 
 export interface Entity {
@@ -63,6 +69,8 @@ export interface Entity {
   listIndexes: Record<string, string>;
   rename?: Record<string, string>;
   keyDefaults?: Record<string, string | number>;
+  /** Present, and true, only when the definition asked for it. */
+  retainOnLogout?: true;
   /** The derived Dexie `stores()` string. */
   schema: string;
 }
@@ -309,6 +317,7 @@ export function defineEntity(def: EntityDefinition): Entity {
     listIndexes,
     ...(def.rename ? { rename: def.rename } : {}),
     ...(def.keyDefaults ? { keyDefaults: def.keyDefaults } : {}),
+    ...(def.retainOnLogout ? { retainOnLogout: true as const } : {}),
     schema: [keyPath, ...storeIndexes].join(", "),
   };
 }
