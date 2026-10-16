@@ -130,3 +130,13 @@ describe("defineEntity validation", () => {
     })).toThrow(/compound index "\[configId\+createdDate\]" names "createdDate"/);
   });
 });
+
+describe("defineEntity retainOnLogout", () => {
+  it("is absent unless the definition asks for it", () => {
+    const plain = defineEntity({ primaryKey: "orderId", fields: { orderId: "text" } });
+    const retained = defineEntity({ primaryKey: "productId", fields: { productId: "text" }, retainOnLogout: true });
+
+    expect("retainOnLogout" in plain).toBe(false);
+    expect(retained.retainOnLogout).toBe(true);
+  });
+});

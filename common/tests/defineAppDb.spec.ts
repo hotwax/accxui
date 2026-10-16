@@ -18,6 +18,15 @@ const ownSchema = defineSchema({
 const picked = () => commonSchema.pick(["facilities", "productStores"]);
 
 describe("defineAppDb schema composition", () => {
+  it("hands the database the tables declared retainOnLogout, and only those", () => {
+    const retained = defineSchema({
+      products: defineEntity({ primaryKey: "productId", fields: { productId: "text" }, retainOnLogout: true }),
+    });
+    const db = defineAppDb({ suffix: "TestDB", schema: mergeSchemas(picked(), ownSchema, retained) });
+
+    expect([...db.get("demo").retainedTables]).toEqual(["products"]);
+  });
+
   it("composes the picked seed tables with the app's own", () => {
     const db = defineAppDb({ suffix: "TestDB", schema: mergeSchemas(picked(), ownSchema) });
 
