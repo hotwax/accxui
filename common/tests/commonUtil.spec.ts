@@ -112,9 +112,13 @@ describe("commonUtil.getErrorMessage", () => {
     expect(msg({ response: { data: { _ERROR_MESSAGE_LIST_: ["first error", "second error"] } } })).toBe("first error, second error");
   });
 
-  it("reads Moqui string and array errors", () => {
+  it("reads Moqui string errors", () => {
     expect(msg({ response: { data: { errors: "No access" } } })).toBe("No access");
-    expect(msg({ response: { data: { errors: ["x", "y"] } } })).toBe("x, y");
+  });
+
+  it("joins multiple Moqui messages separated by line breaks", () => {
+    expect(msg({ response: { data: { errors: "First problem\nSecond problem" } } })).toBe("First problem; Second problem");
+    expect(msg({ response: { data: { errors: "A\r\n\r\nB\n" } } })).toBe("A; B");
   });
 
   it("reads errorMessage and error properties", () => {
