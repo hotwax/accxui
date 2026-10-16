@@ -139,6 +139,7 @@ function build(entities: Record<string, Entity>, seedTables: ReadonlySet<string>
         indexes: [...entity.indexes, ...addedIndexes],
         ...(rename ? { rename } : {}),
         ...(entity.keyDefaults ? { keyDefaults: entity.keyDefaults } : {}),
+        ...(entity.retainOnLogout ? { retainOnLogout: true } : {}),
       });
     }
 

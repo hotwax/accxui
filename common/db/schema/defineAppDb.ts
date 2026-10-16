@@ -90,9 +90,12 @@ export function defineAppDb<Tables extends string>(def: AppDbDefinition<Tables>)
       syncClass: commonDomainsByTable[table].syncClass,
     }));
 
+  const entities: Record<string, Entity> = def.schema.entities;
+  const retainedTables = Object.keys(stores).filter((table) => entities[table]?.retainOnLogout);
+
   class AppDatabase extends BaseDB {
     constructor(dbName: string) {
-      super(dbName, stores, version);
+      super(dbName, stores, version, retainedTables);
     }
   }
 

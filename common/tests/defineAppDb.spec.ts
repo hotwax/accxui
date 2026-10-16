@@ -18,6 +18,15 @@ const ownSchema = defineSchema({
 const picked = () => commonSchema.pick(["facilities", "productStores"]);
 
 describe("defineAppDb schema composition", () => {
+  it("hands the database the tables declared retainOnLogout, and only those", () => {
+    const retained = defineSchema({
+      products: defineEntity({ primaryKey: "productId", fields: { productId: "text" }, retainOnLogout: true }),
+    });
+    const db = defineAppDb({ suffix: "TestDB", schema: mergeSchemas(picked(), ownSchema, retained) });
+
+    expect([...db.get("demo").retainedTables]).toEqual(["products"]);
+  });
+
   it("composes the picked seed tables with the app's own", () => {
     const db = defineAppDb({ suffix: "TestDB", schema: mergeSchemas(picked(), ownSchema) });
 
@@ -155,12 +164,13 @@ describe("provenance keeps an app's own table out of the seed machinery", () => 
 
 describe("DEFAULT_COMMON_SYNC_CATALOG", () => {
   it("derives one entry per seed table, with its singular domain name and label", () => {
-    expect(DEFAULT_COMMON_SYNC_CATALOG).toHaveLength(29);
+    expect(DEFAULT_COMMON_SYNC_CATALOG).toHaveLength(30);
     expect(DEFAULT_COMMON_SYNC_CATALOG.map((e) => e.name).sort()).toEqual([...COMMON_DOMAIN_NAMES].sort());
     for (const entry of DEFAULT_COMMON_SYNC_CATALOG) {
       expect(entry.table, `${entry.name} missing table`).toBeTruthy();
       expect(entry.label, `${entry.name} missing label`).toBeTruthy();
-      expect(entry.syncClass).toBe("B");
+      // Every reference table syncs once per login; the product master is fetched when shown.
+      expect(entry.syncClass).toBe(entry.name === "product" ? "C" : "B");
     }
   });
 });
