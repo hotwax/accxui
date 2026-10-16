@@ -29,7 +29,7 @@ Maarg; the **main thread** reads it. One database per OMS instance, so tenants n
 ```mermaid
 flowchart LR
     subgraph MAIN["Main thread"]
-      UI["Pages / composables / stores"]
+      UI["Pages / composables"]
       FAC["appDbSync<br/>start · stop · refresh · page activation"]
     end
     subgraph WORKER["Sync worker"]
@@ -39,7 +39,8 @@ flowchart LR
     IDB[("IndexedDB<br/>{oms}-AppDB")]
     API[("Maarg / OMS")]
 
-    UI -- "read / write via the access layer" --> IDB
+    UI -- "read via useLiveEntity / useSeedData" --> IDB
+    UI -- "refreshAfterMutation · activateSyncDomains" --> FAC
     FAC <-. "Comlink RPC, postMessage" .-> HAR
     HAR --> DOM
     DOM -- fetch --> API
