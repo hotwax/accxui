@@ -1,6 +1,6 @@
 # AccxUI Local Database — Sync Flows
 
-**Version:** 2.1 · **Date:** 2026-10-13
+**Version:** 2.3 · **Date:** 2026-10-16
 
 What happens to the APP's local database over a session: boot, login and database construction,
 the one-time domain sync, the worker tick, reading data, mutation refresh, page-level sync, and
@@ -66,7 +66,7 @@ sequenceDiagram
     AUTH->>AUTH: token stored
     AUTH->>US: postLogin()
     US->>SAS: await stopAppDbSync()
-    Note over SAS: start from an EMPTY database:<br/>the last session may have expired without a logout (§7)
+    Note over SAS: start from an EMPTY database (retainOnLogout tables kept):<br/>the last session may have expired without a logout (§7)
     US->>US: fetch profile, permissions
     US->>SAS: void startAppDbSync()
     Note over SAS: idempotent: App.vue's watcher may call it too.<br/>A start that arrives mid-wipe waits for the wipe.
@@ -94,7 +94,7 @@ sequenceDiagram
     end
     Note over SS,DB: the database is ready BEFORE the worker exists
     SS->>H: spawn appSync.worker.ts (Comlink)
-    Note over H: worker imports: registerDomains(appSyncDomains),<br/>its own appDb copy, exposeWorkerHarness
+    Note over H: worker imports: registerDomains(appSyncDomains),<br/>its own appDb copy, exposeWorkerHarness<br/>(how the list is built: ARCHITECTURE §4.1)
     opt a page already activated domains (deep link)
         SS->>H: setDomains(pageDomains)
     end
@@ -144,7 +144,7 @@ has it. A class-B domain runs again only when:
 - a mutation asks for it (§5),
 - the status card's **Refresh** (`resyncDomain`) or **Refresh all** (`resyncReferenceData`) clears
   the marker, or
-- the next login, which starts from an empty database.
+- the next login, which starts with every login marker cleared.
 
 A domain that failed or wrote nothing is not marked; the harness retries it after 30 s.
 
@@ -202,14 +202,83 @@ sequenceDiagram
     P->>L: unmount → unsubscribe
 ```
 
+### 4.1 Seed lookups go through the same path
+
+`useSeedData()` opens nothing at setup. Each seed table becomes a `useLiveEntity` read the first
+time a getter needs it, and the whole component tree shares it.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant P as Page (setup)
+    participant C as Child component
+    participant S as useSeedData
+    participant L as useLiveEntity
+    participant DB as IndexedDB
+
+    P->>S: useSeedData()
+    S->>S: no ancestor instance → create one, provide(SEED_KEY)
+    C->>S: useSeedData() → inject: the page's instance
+    P->>S: template: seed.facilityName(id)
+    alt first getter on "facilities"
+        S->>L: scope.run(useLiveEntity("facilities", { syncDomain: "facility" }))
+        L->>DB: liveRead([facilities, syncMeta]): rows + loginSync:facility
+        DB-->>L: rows, synced
+    end
+    L-->>S: records (reactive)
+    S-->>P: label (raw id until rows arrive)
+    C->>S: seed.facilityName(otherId) → same live read, no new query
+    DB-->>L: worker writes facilities → liveQuery re-emits
+    L-->>P: re-render
+    P->>S: page unmounts → its scope stops → every table it opened unsubscribes
+```
+
+### 4.2 Product details: read, and ask for what is missing
+
+`useProductMaster()` reads the `products` table the same way, and asks the class-C `product`
+domain for the ids it lacks. It never writes the table itself.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant P as Page / component
+    participant M as useProductMaster
+    participant L as useLiveEntity("products")
+    participant SAS as getAppDbSync()
+    participant H as Worker: product domain
+    participant DB as IndexedDB
+
+    P->>M: useProductMaster()
+    Note over M,L: first mounted user opens ONE live read for the app,<br/>the last to unmount closes it
+    P->>M: template: getProduct(id)
+    M->>L: byId.get(id)
+    alt row missing, or older than PRODUCT_STALE_MS (and not asked for in the last 5 min)
+        M-->>P: the stored row, or undefined while missing
+        M->>M: queue id, the render's ids go out together (microtask)
+        M->>SAS: one batch: refreshAfterMutation("product", { productIds })
+        SAS->>H: refetchOne
+        H->>DB: getMany(ids), drop the fresh ones
+        H->>H: admin/search/query, 200 ids per query
+        H->>DB: upsertMany(rows)
+        DB-->>L: liveQuery re-emits
+        L-->>P: re-render with the product
+    else fresh row
+        M-->>P: the row
+    end
+```
+
 | Need | Use | Re-renders? |
 |---|---|---|
 | Rows on screen | `useLiveEntity(appDb.tables.x, opts)`, in a composable or `.vue` file | yes |
-| Seed labels and lists | `useSeedData()` (one live read per seed table, shared by the component tree that opened it) | yes |
+| Seed labels and lists | `useSeedData()`: one `useLiveEntity` per seed table, shared by the component tree that opened it | yes |
 | Rows in a store action or util | taken as arguments from the composable or page that calls it | — |
 | A read or write in a worker sync domain | `appDb.entity(appDb.tables.x).get / query / upsertMany / …` | no |
+| Product details for rows that carry only a `productId` | `useProductMaster().getProduct(id)`: one shared `useLiveEntity("products")`; missing or stale ids go to the `product` domain in one `refreshAfterMutation` | yes |
+| Seed rows in a worker sync domain | `appDb.entity(appDb.tables.x).query / all` (`loadSeedData()` imports Vue: not for workers) | no |
 
-Use `hydrated` (or `.withSync()` on seed lists) to tell "not loaded yet" from "really empty".
+APP code never calls `appDb.entity(...)` or `loadSeedData()`; lint rejects both outside
+`src/workers/**` and `src/db/**`. Use `hydrated` (`synced` with a `syncDomain`, `.withSync()` on
+seed lists) to tell "not loaded yet" from "really empty".
 
 ---
 
@@ -326,13 +395,17 @@ sequenceDiagram
     SS->>SS: stop token watch, ignore late messages
     SS->>H: terminate() (worker and its timer gone)
     SAS->>C: clearAllTables()
-    C->>DB: one rw transaction: clear every data table,<br/>delete every syncMeta key EXCEPT schemaVersion
-    Note over DB: empty database, same schema.<br/>The next login re-runs the one-time sync.
+    C->>DB: one rw transaction: clear every data table EXCEPT retainOnLogout ones (products),<br/>delete every syncMeta key EXCEPT schemaVersion
+    Note over DB: empty database, same schema, retained tables kept.<br/>The next login re-runs the one-time sync.
 ```
 
 - `schemaVersion` survives so the next login's worker does not take the emptied database for an old
   build and rebuild it under rows the main thread has just written.
+- A table declared `retainOnLogout` (the `products` master) keeps its rows: it holds the same data
+  for every user of the instance, so the next login does not fetch it again. Its rows are still
+  refetched once older than `PRODUCT_STALE_MS`, and a schema `version` bump drops them.
 - A wipe failure is logged and never blocks logout.
-- The open page's `useLiveEntity` subscriptions simply re-emit empty; they close on unmount.
+- The open page's `useLiveEntity` subscriptions re-emit (empty, except on retained tables); they
+  close on unmount.
 - **OMS instance switch:** the resolver returns a new instance, so the next `client()` call opens
   `{newOms}-AppDB` and closes the old handle. The late-binding client follows automatically.
