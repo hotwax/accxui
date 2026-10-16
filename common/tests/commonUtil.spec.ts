@@ -30,6 +30,19 @@ describe("commonUtil local instance URLs", () => {
     expect(commonUtil.getMaargURL()).toBe("http://localhost:8080/rest/s1/");
   });
 
+  it.each([
+    ["127.0.0.1:8080", "http://127.0.0.1:8080/rest/s1/", "127.0.0.1:8080"],
+    ["127.0.0.2:8080", "http://127.0.0.2:8080/rest/s1/", "127.0.0.2:8080"],
+    ["[::1]:8080", "http://[::1]:8080/rest/s1/", "[::1]:8080"],
+    ["https://localhost:8443/", "https://localhost:8443/rest/s1/", "localhost:8443"],
+  ])("preserves the loopback address %s", (address, apiUrl, instanceName) => {
+    document.cookie = `oms=${address}; path=/`;
+    document.cookie = `maarg=${address}; path=/`;
+    expect(commonUtil.getOmsURL()).toBe(apiUrl);
+    expect(commonUtil.getMaargURL()).toBe(apiUrl);
+    expect(commonUtil.getOMSInstanceName()).toBe(instanceName);
+  });
+
   it("keeps normal HotWax aliases on the hosted domain", () => {
     document.cookie = "oms=demo; path=/";
 
@@ -97,9 +110,10 @@ describe("commonUtil.isVersionGreaterOrEqual", () => {
     expect(commonUtil.isVersionGreaterOrEqual("1.0.0+build.1", "1.0.0+build.9")).toBe(true); // build ignored, equal
   });
 
-  it("returns false when either argument is not a valid version", () => {
-    expect(commonUtil.isVersionGreaterOrEqual("1.0", "1.0.1")).toBe(false);
-    expect(commonUtil.isVersionGreaterOrEqual("1.0.0", "not-a-version")).toBe(false);
-    expect(commonUtil.isVersionGreaterOrEqual(undefined as any, "1.0.0")).toBe(false);
+  it("allows branch builds or an unconfigured compatibility requirement", () => {
+    expect(commonUtil.isVersionGreaterOrEqual("1.0", "1.0.1")).toBe(true);
+    expect(commonUtil.isVersionGreaterOrEqual("1.0.0", "not-a-version")).toBe(true);
+    expect(commonUtil.isVersionGreaterOrEqual("1.0.0", "main")).toBe(true);
+    expect(commonUtil.isVersionGreaterOrEqual(undefined as any, "1.0.0")).toBe(true);
   });
 });

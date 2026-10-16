@@ -365,11 +365,18 @@ const telecomCode = {
   "ZW": "+263"
 } as any;
 
+const isLoopbackHost = (hostname: string) =>
+  hostname === "localhost" || hostname === "[::1]" || /^127(?:\.\d+){3}$/.test(hostname);
+
+const normalizeInstanceAddress = (address: string) => address.trim()
+  .replace(/^(localhost|\[::1\]|127(?:\.\d+){3})(?=[:/]|$)/, 'http://$1');
+
 const getMaargURL = () => {
   const maarg = getEmbeddedAppStoreSafe().maarg || cookieHelper().get("maarg")
   let maargURL = ""
   if (maarg) {
-    maargURL = maarg.startsWith('http') ? maarg.includes('/rest/s1') ? maarg : `${maarg}/rest/s1/` : `https://${maarg}.hotwax.io/rest/s1/`;
+    const address = normalizeInstanceAddress(maarg);
+    maargURL = address.startsWith('http') ? address.includes('/rest/s1') ? address : `${address.replace(/\/+$/, '')}/rest/s1/` : `https://${address}.hotwax.io/rest/s1/`;
   }
   return maargURL
 }
@@ -384,7 +391,7 @@ const getOmsURL = (isMoquiOnly = isMoqui()) => {
   // VITE_OMS_TYPE unset  → use OFBiz paths (/api/)  [default, backward-compatible]
   let omsURL = ""
   if (oms) {
-    const trimmedOms = oms.trim()
+    const trimmedOms = normalizeInstanceAddress(oms)
     if (trimmedOms.startsWith('http')) {
       const cleanOms = trimmedOms.replace(/\/+$/, '')
       // Full URL provided — use as-is if it already has a known path suffix
@@ -812,8 +819,9 @@ const getProductIdentificationValue = (productIdentifier: string, product: any) 
 
 const getOMSInstanceName = () => {
   const instanceUrl = getOmsURL();
-  const hostname = instanceUrl.replace(/^(https?:\/\/)/, "").replace(/\/.*/, "").replace(/:.*/, "");
-  return hostname.split(".")[0];
+  if (!instanceUrl) return "";
+  const { hostname, host } = new URL(instanceUrl);
+  return isLoopbackHost(hostname) ? host : hostname.split(".")[0];
 };
 
 const sortSequence = (sequence: Array<any>, sortOnField = "sequenceNum") => {
