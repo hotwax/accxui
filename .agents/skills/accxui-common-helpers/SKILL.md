@@ -1,13 +1,51 @@
 ---
 name: accxui-common-helpers
-description: Use when AccxUI app code (any app under apps/*) shows a toast or loader, checks an API response for an error, logs, translates a user-facing string, switches the language, formats a date / time / phone number / currency, shows a status color or product identifier, copies to the clipboard, validates an email or password, works with a cron expression, needs the OMS instance name or the OMS / Maarg URL, or is about to write a small generic helper. Triggers include commonUtil, showToast, hasError, getProductIdentificationValue, getFeatures, getStatusColor, getOMSInstanceName, getOmsURL / getMaargURL, isMoqui, logger, console.log, translate, en.json, locales, createDxpI18n, i18n.global.locale, emitter, presentLoader / dismissLoader, cookieHelper.
+description: Use when AccxUI app code (any app under apps/*) or framework code in common/ (components, composables, main-thread core; worker-reachable common/db and common/core/workerRemoteApi have their own rules here) shows a toast or loader, checks an API response for an error, logs, translates a user-facing string, switches the language, formats a date / time / phone number / currency, shows a status color or product identifier, copies to the clipboard, validates an email or password, works with a cron expression, needs the OMS instance name or the OMS / Maarg URL, or is about to write a small generic helper. Triggers include commonUtil, showToast, hasError, getProductIdentificationValue, getFeatures, getStatusColor, getOMSInstanceName, getOmsURL / getMaargURL, isMoqui, logger, console.log, translate, en.json, locales, createDxpI18n, i18n.global.locale, emitter, presentLoader / dismissLoader, cookieHelper.
 ---
 
 # Framework helpers: `commonUtil`, `logger`, `translate`, `emitter`
 
-Import from `@common`, in app code only (worker code under `src/db` / `src/workers` never imports `@common`). Before writing a helper, check this list: the apps already use these. A
+In app code, import from `@common` (worker code under `src/db` / `src/workers` never imports `@common`). Before writing a helper, check this list: the apps already use these. A
 generic helper that isn't here goes into `common/` (a framework commit, after asking), not into one
 app's `utils`.
+
+**Inside `common/` itself** (a component, composable or core module that needs one of these helpers),
+import from the source file with a relative path, never `@common` or `../index` (the barrel can create
+circular imports):
+
+```ts
+import { commonUtil } from "../utils/commonUtil";
+import logger from "../core/logger";
+import { translate } from "../core/i18n";
+import emitter from "../core/emitter";
+import { cookieHelper } from "../helpers/cookieHelper";
+```
+
+**Worker-reachable framework modules are excluded from this.** These run inside a sync worker, so
+importing a main-thread helper there pulls Vue, Ionic, Pinia or DOM-only code into the worker and
+breaks it (`cookieHelper` reads `document.cookie`; `commonUtil` imports `@ionic/vue`, the i18n
+module and a Pinia store; `logger` and `translate` are Vue plugins):
+
+- `common/core/workerRemoteApi.ts`, `common/db/types.ts`, `common/db/schema/**`,
+  `common/db/seed/**`, `common/db/storage/**`, and `common/db/sync/**` **except** the main-thread
+  `syncService.ts` and `setupAppDbSync.ts`, plus anything these import.
+
+In those files never import `commonUtil`, `cookieHelper`, `translate` / `../core/i18n`, `logger`,
+`emitter`, `useAuth`, `configRegistry`, a composable, a store, `vue` or `@ionic/vue` (a `type`-only
+import is fine; it is erased). Use the worker-safe primitives instead:
+
+| Need | Worker-safe way |
+|---|---|
+| Logging | `console.warn` / `console.error` with a `[db]` or module prefix, as `baseDb.ts`, `defineSnapshotDomain.ts` and `workerRemoteApi.ts` do. Pass a value that may hold a token or response body through `sanitizeForLog` from `core/logRedaction.ts` (its `vue-logger-plugin` import is type-only) |
+| OMS instance, Maarg URL, token | read them from the `SyncContext` (`ctx.omsInstance`, `ctx.maargUrl`, `ctx.token`) and call `workerGet` / `workerPost` / `pageAll` / `pageNewestFirst`, which build the URL. Never `getOMSInstanceName()`, `getMaargURL()` or a cookie. A new value the worker needs is computed on the main thread in `syncService.ts`, added to the start payload and read into `ctx` in `pollingWorkerHarness.ts` |
+| A user-facing message | no `translate`: return English text or a code, and translate it on the main thread where it is shown |
+| Dates and other formatting | the plain library (`luxon`) directly, not a `commonUtil` wrapper |
+
+Before committing a change there, check the file's imports (and any new import's own imports) against
+this list.
+
+A new generic helper needed by framework code goes straight into `common/utils/commonUtil.ts` (or the
+matching `common/` module) and is exported from `common/index.ts` if apps should use it too.
 
 ## `commonUtil`: what the apps use
 
@@ -63,7 +101,7 @@ digit and a symbol), `generateInternalId(name)` (`"My Store"` → `"MY_STORE"`).
 ## `logger`
 
 - `logger.error(...)` in every `catch` that doesn't rethrow; `logger.warn(...)` for a handled but
-  unexpected state; `logger.info` / `logger.debug` rarely. **Never `console.*`** in app code.
+  unexpected state; `logger.info` / `logger.debug` rarely. **Never `console.*`** in app code or main-thread `common/` code (worker-reachable modules are the exception, above).
 - It redacts tokens and passwords before printing, so logging an axios error is safe.
 - Installed once in `main.ts`: `.use(logger, { level: import.meta.env.VITE_DEFAULT_LOG_LEVEL })`; it
   also catches uncaught Vue errors.
