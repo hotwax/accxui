@@ -1,6 +1,6 @@
 ---
 name: accxui-product-search
-description: Use when AccxUI app code (any app under apps/*) shows product details (name, image, SKU, identifiers, features) for rows that only carry a productId, or searches products by keyword / barcode / product store. Triggers include useProducts, resolve, products.value.get, ResolvedProduct, parentProductName, mainImageUrl, goodIdentifications, productFeatures, searchProducts, productStoreIds_s, a product picker or "add product" modal, scanning a barcode, Order Manager's useProductMaster / useProductCacheStore / productDb / prefetch / getProduct / primaryId / secondaryId, BOPIS's product store, and a row that shows a raw productId instead of a name.
+description: Use when AccxUI app code (any app under apps/*) or framework code in common/ (components, composables) shows product details (name, image, SKU, identifiers, features) for rows that only carry a productId, or searches products by keyword / barcode / product store. Triggers include useProducts, resolve, products.value.get, ResolvedProduct, parentProductName, mainImageUrl, goodIdentifications, productFeatures, searchProducts, productStoreIds_s, a product picker or "add product" modal, scanning a barcode, Order Manager's useProductMaster / useProductCacheStore / productDb / prefetch / getProduct / primaryId / secondaryId, BOPIS's product store, and a row that shows a raw productId instead of a name.
 ---
 
 # Products: resolving by id and searching
@@ -15,6 +15,15 @@ Product data comes from Solr. Two jobs, two tools:
 Order Manager has its own persistent product cache (below). Follow the app's existing way: in Order
 Manager use its product cache, elsewhere use `useProducts`. A shared, framework-level version of the
 local-db cache may come later; until then don't copy Order Manager's into another app without asking.
+
+**Inside `common/` itself** (a shared product row, picker or composable), use `useProducts` /
+`useSolrSearch` only, never an app's product cache, and import with a relative path, never `@common`
+or `../index`:
+
+```ts
+import { useProducts, type ResolvedProduct } from "../composables/useProducts";
+import { useSolrSearch } from "../composables/useSolrSearch";
+```
 
 ## `useProducts()` (framework)
 

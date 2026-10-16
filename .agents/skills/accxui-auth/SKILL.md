@@ -1,6 +1,6 @@
 ---
 name: accxui-auth
-description: Use when AccxUI app code (any app under apps/*) deals with login, logout, the session token, route guards or per-session state. Triggers include useAuth, isAuthenticated, logout, updateUserId, clearAuth, checkAppVersionRedirect, initialiseConfig, postLogin / preLogout / postLogout, the common Login component, onSessionCleared, a router guard redirecting to /login, a user who stays on /login after a successful login, data from the previous user showing after re-login, a 401 that logs the user out, INVALID_APP_CONTEXT, "Session expired. Refreshing...", or a tab that logs out when another tab does.
+description: Use when AccxUI app code (any app under apps/*) or framework code in common/ (components, composables, core) deals with login, logout, the session token, route guards or per-session state. Triggers include useAuth, isAuthenticated, logout, updateUserId, clearAuth, checkAppVersionRedirect, initialiseConfig, postLogin / preLogout / postLogout, the common Login component, onSessionCleared, a router guard redirecting to /login, a user who stays on /login after a successful login, data from the previous user showing after re-login, a 401 that logs the user out, INVALID_APP_CONTEXT, "Session expired. Refreshing...", or a tab that logs out when another tab does.
 ---
 
 # Auth: `useAuth`, the login hooks and session state
@@ -8,6 +8,15 @@ description: Use when AccxUI app code (any app under apps/*) deals with login, l
 `useAuth()` from `@common` is a plain framework helper (not an app composable), so stores, the
 router and `.vue` files may all call it. It holds one token per tab (cookies + module refs); the app
 plugs in through `initialiseConfig`. The login screen is the framework's `Login` component.
+
+**Inside `common/` itself**, import from the source file with a relative path, never `@common` or
+`../index` (the barrel can create circular imports):
+
+```ts
+import { useAuth } from "../composables/useAuth";
+import { onSessionCleared } from "../core/sessionScope";
+import { accxuiConfig, initialiseConfig } from "../core/configRegistry";
+```
 
 ## Wiring an app (once, in `main.ts`)
 
@@ -93,12 +102,17 @@ watch(useAuth().isAuthenticated, (authenticated) => { if (authenticated) void st
   module scope; `logout()` runs it after `postLogout`:
 
 ```ts
-import { onSessionCleared } from "@common";
+// common/composables/useSomething.ts
+import { onSessionCleared } from "../core/sessionScope";
 const cache = new Map<string, any>();
 onSessionCleared(() => cache.clear());
 ```
 
-  App code may use `onSessionCleared` the same way for its own module-level state (Company's
+  Every new composable in `common/` that keeps module-level data (a cache, a `ref` outside the
+  function) must do this, or the next user on the same tab sees the previous user's data
+  (`common/composables/useProducts.ts` is the reference).
+
+  App code may use `onSessionCleared` the same way (imported from `@common`) for its own module-level state (Company's
   `useSecurity.ts` does).
 
 ## Common mistakes

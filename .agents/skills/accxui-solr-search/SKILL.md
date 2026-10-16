@@ -1,6 +1,6 @@
 ---
 name: accxui-solr-search
-description: Use when AccxUI app code (any app under apps/*) searches products or orders through Solr, or builds a Solr facet / count / grouped query. Triggers include useSolrSearch, searchProducts, runSolrQuery, prepareOrderQuery, admin/runSolrQuery, admin/search/query, docType, filters / facet / group in a search payload, an "add product" or product picker search, an order lookup, a search result that is {} instead of [], a search that breaks on a special character, or one that works on OFBiz but not on Moqui.
+description: Use when AccxUI app code (any app under apps/*) or framework code in common/ (components, composables) searches products or orders through Solr, or builds a Solr facet / count / grouped query. Triggers include useSolrSearch, searchProducts, runSolrQuery, prepareOrderQuery, admin/runSolrQuery, admin/search/query, docType, filters / facet / group in a search payload, an "add product" or product picker search, an order lookup, a search result that is {} instead of [], a search that breaks on a special character, or one that works on OFBiz but not on Moqui.
 ---
 
 # Solr search: `useSolrSearch`
@@ -9,6 +9,10 @@ description: Use when AccxUI app code (any app under apps/*) searches products o
 helper: it makes API calls, so call it where API calls may live: a composable, a Pinia store action,
 or a `.vue` file (it counts as the composable that owns the request). Not in a util, the router or a
 sync worker (it pulls in `api` and `commonUtil`).
+
+**Inside `common/` itself**, import it with a relative path, never `@common` or `../index`:
+`import { useSolrSearch } from "../composables/useSolrSearch";` (or `"./useSolrSearch"` from another
+composable, as `common/composables/useProducts.ts` does).
 
 It hides the backend split: on Moqui it posts `payload.json` to `admin/search/query` and normalizes
 the answer; on OFBiz it posts `payload` to `admin/runSolrQuery`. Either way you read
