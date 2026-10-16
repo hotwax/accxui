@@ -23,6 +23,9 @@ Your app declares its tables once, and the framework gives you:
   worker or from your own write-through.
 - **29 HotWax seed reference tables** (statuses, enums, facilities, geos, carriers, shipment
   methods, …) already declared and already synced. You pick which ones you want.
+- **A `products` master table**, filled from Solr when a screen shows a product and kept across
+  logout. Pick it like a seed table and read it with `useProductMaster` (the `accxui-product-search`
+  skill).
 
 The rule of thumb: **read from the database, never fetch reference data in a view.**
 
@@ -388,7 +391,8 @@ same OMS instance (the default is `false`). Use it only for data that is the sam
 of the instance, such as a product catalog, and never for anything scoped to the signed-in user.
 A version bump still rebuilds the database and drops those rows. Nothing refreshes a retained row
 by itself: the screen that reads it decides when it is stale (its `syncedAt`) and calls
-`refreshAfterMutation`.
+`refreshAfterMutation`. The framework's `products` seed table works this way: `useProductMaster`
+asks its `product` domain for the ids a screen shows, and the domain fetches only the stale ones.
 
 > ⚠️ **`fields` is a whitelist, and it is the only thing stored.** A field you don't declare is
 > dropped at write time — it is not tucked away anywhere. If a screen needs it, declare it. This is

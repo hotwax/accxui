@@ -11,7 +11,7 @@ and writing the data afterwards is the **accxui-app-db-access** skill.
 
 `appDb` / `appSchema` stand for the app's names (`companyDb`, `companySchema`). Working references:
 `apps/company` (own and seed tables, class A, B and C domains) and `apps/order-manager` (every seed
-table, plus a class C `products` table kept across logout). Full reference: `docs/APP_DB_DEVELOPER_GUIDE.md`.
+table, including the `products` master, and no own tables). Full reference: `docs/APP_DB_DEVELOPER_GUIDE.md`.
 
 **Changing Company's or Order Manager's database? Read [existing-apps.md](existing-apps.md) first.**
 It maps every file in their `src/db` and `src/workers`, and says which existing file a new table,
@@ -119,7 +119,7 @@ appDb.setOmsInstanceResolver(() => "default");        // test fallback; main.ts 
   only for data that is the same for every user of the instance, such as a product catalog, never for
   anything user-scoped. A `version` bump still drops it, and nothing refreshes it by itself: the
   reader decides when a row is stale (its `syncedAt`) and asks with `refreshAfterMutation`
-  (Order Manager's `products`).
+  (the framework's `products` seed table).
 - `defineSchema`, `pick`, `extendEntities` and `mergeSchemas` each return a new schema and never
   mutate their input. `mergeSchemas` throws when two schemas claim the same table: take a table from
   exactly one of them.
@@ -137,6 +137,7 @@ before relying on one.
 | `enums` | `enum` | `refetchScope` (`enumId`) |
 | `groupFacilities` | `groupFacility` | `refetchScope` |
 | `productStoreFacilities`, `productStoreFacilityGroups`, `productStoreShipmentMethods` | `productStoreFacility`, `productStoreFacilityGroup`, `productStoreShipmentMethod` | `fanOut` (re-reads every row for the `productStoreId`) |
+| `products` | `product` (class C, fetched when shown; kept across logout) | `refetchOne` by `{ productIds }`: fetches the missing or stale ones (**accxui-product-search**) |
 | `statuses`, `enumTypes`, `facilityTypes`, `facilityGroups`, `geos`, `geoAssocs`, `carriers`, `carrierShipmentMethods`, `shipmentMethodTypes`, `paymentMethodTypes`, `returnReasons`, `returnTypes`, `returnItemTypes`, `roleTypes`, `orderAdjustmentTypes`, `contactMechPurposeTypes`, `communicationEventTypes`, `partyRelationshipTypes`, `statusFlowTransitions`, `productStoreEmailSettings`, `shopifyShops`, `shopifyShopLocations` | the table name in the singular: `status`, `enumType`, `facilityType`, `geo`, `carrier`, `shopifyShop`, … | **none**: `refreshAfterMutation` resolves `0`; use `resyncDomain(name)` |
 
 Pick the smallest change that does the job:

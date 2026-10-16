@@ -165,8 +165,7 @@ const { domains, loaded, catalogLoaded, refreshing, totalRows, oldestSyncedAt, l
    - an app with its own domains (or overridden seed domains): the async `catalogFrom(appSyncDomains)`
      above. It lists exactly what the worker registers, and works before the worker is up or after
      it failed to start. Import it lazily, to keep domain code out of startup;
-   - an app with seed tables only and no domains of its own: `appDb.statusCatalog` (Company and
-     Order Manager both have own domains, so both use `catalogFrom`);
+   - an app with seed tables only (Order Manager): `appDb.statusCatalog`;
    - omitted: every framework seed domain, including tables the app doesn't have. Don't.
 3. `{ resyncDomain, resyncAll }` from `@/db/appDbSync`. Omitted, the Refresh buttons do nothing.
 

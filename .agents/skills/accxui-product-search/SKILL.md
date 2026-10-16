@@ -1,6 +1,6 @@
 ---
 name: accxui-product-search
-description: Use when AccxUI app code (any app under apps/*) shows product details (name, image, SKU, identifiers, features) for rows that only carry a productId, or searches products by keyword / barcode / product store. Triggers include useProducts, resolve, products.value.get, ResolvedProduct, parentProductName, mainImageUrl, goodIdentifications, productFeatures, searchProducts, productStoreIds_s, a product picker or "add product" modal, scanning a barcode, Order Manager's useProductMaster / products table / product domain / prefetch / getProduct / primaryId / secondaryId, BOPIS's product store, and a row that shows a raw productId instead of a name.
+description: Use when AccxUI app code (any app under apps/*) shows product details (name, image, SKU, identifiers, features) for rows that only carry a productId, or searches products by keyword / barcode / product store. Triggers include useProducts, resolve, products.value.get, ResolvedProduct, parentProductName, mainImageUrl, goodIdentifications, productFeatures, searchProducts, productStoreIds_s, a product picker or "add product" modal, scanning a barcode, useProductMaster, the products seed table, the product domain, prefetch / getProduct, Order Manager's primaryId / secondaryId, BOPIS's product store, and a row that shows a raw productId instead of a name.
 ---
 
 # Products: resolving by id and searching
@@ -9,12 +9,12 @@ Product data comes from Solr. Two jobs, two tools:
 
 | Job | Use |
 |---|---|
-| Show product details for rows that carry only a `productId` | `useProducts()` from `@common` (in-memory, per session) |
+| Show product details for rows that carry only a `productId` | `useProducts()` from `@common` (in-memory, per session), or, in an app that keeps them in its app db, `useProductMaster()` from `@common/db` (below) |
 | Find products by keyword, barcode or store | `useSolrSearch().searchProducts(...)` from `@common` (**accxui-solr-search**) |
 
-Order Manager has its own persistent product cache (below). Follow the app's existing way: in Order
-Manager use its product cache, elsewhere use `useProducts`. A shared, framework-level version of the
-local-db cache may come later; until then don't copy Order Manager's into another app without asking.
+Follow the app's existing way: Order Manager uses `useProductMaster` (through its own wrapper),
+Company and the apps without an app db use `useProducts`. Moving an app from one to the other is its
+own change: ask first.
 
 ## `useProducts()` (framework)
 
@@ -76,26 +76,32 @@ write them into the app db. In Order Manager, a screen that needs them as produc
 them from the search answer until `useProductMaster().getProduct(id)` has the stored row
 (`CreateOrder.vue`'s `searchedProducts`).
 
-## Order Manager's product master
+## `useProductMaster()` (framework, apps with an app db)
 
-Order Manager keeps products in its app db, in the `products` table, so a product is fetched once and
-then again only when it is older than `PRODUCT_STALE_MS` (24 h):
+An app with an app db can keep products in it instead: the `products` seed table (declared
+`retainOnLogout: true`, so logout keeps it) filled by the class C `product` seed domain. A product is
+fetched once, then again only when it is older than `PRODUCT_STALE_MS` (24 h). Order Manager uses it;
+Company still uses `useProducts`.
 
-| Piece | File | Role |
+| Piece | Where (`@common/db`) | Role |
 |---|---|---|
-| `products` table | `src/db/orderManagerSchema.ts` | the product master row, declared `retainOnLogout: true`: the catalog is the same for every user of the instance, so logout keeps it (a `version` bump still drops it) |
-| `product` domain (class C) | `src/workers/domains/productDomain.ts` | `refreshAfterMutation("product", { productIds })` fetches only the ids missing or stale (`force: true`: all), from Maarg's `admin/search/query`, 200 per query, and stores them |
-| `useProductMaster()` | `src/composables/useProductMaster.ts` | what components use, during setup: `getProduct(id)` (live; also queues the id, and queued ids go to the worker in one batch), `prefetch(ids)` (awaitable), `getByIds(ids)` (Solr, not stored: a picker's results), `primaryId(product, fallbacks)` / `secondaryId(...)` which follow the user's product-identifier setting |
-| `useProductIdentity()` | `src/composables/useProductIdentity.ts` | `getProduct`, `primaryIdentifier`, `secondaryIdentifier`, `imagePreview`, `featureLabel` |
-| query, fields, row type | `src/utils/productDocs.ts` | `PRODUCT_FIELDS`, `mapDocToProduct`, `CachedProduct`, `PRODUCT_STALE_MS`. Shared with the worker, so no `@common` import |
+| `products` table | `common/db/seed/seedSchema.ts` | an app picks it like any seed table (`commonSchema.pick([..., "products"])`; Order Manager takes the whole `commonSchema`) and registers the seed domains as usual. A `version` bump drops its rows |
+| `product` domain (class C) | `common/db/seed/productDomain.ts` | `refreshAfterMutation("product", { productIds })` fetches only the ids missing or stale (`force: true`: all), from Maarg's `admin/search/query`, 200 per query, and stores them through the app's composed entity |
+| `useProductMaster({ refreshAfterMutation })` | `common/db/composables/useProductMaster.ts` | during setup: `getProduct(id)` (live; also queues the id, and queued ids go to the worker in one batch) and `prefetch(ids)` (awaitable, never rejects). One live read shared by every mounted caller |
+| `ProductRow`, `PRODUCT_FIELDS`, `mapDocToProduct`, `buildProductQuery`, `PRODUCT_STALE_MS` | `common/db/seed/productMaster.ts` | the row type and the Solr query; worker-safe |
 
-Pattern: a page calls `const productMaster = useProductMaster()` in setup, may `await
-productMaster.prefetch(ids)` when its rows arrive, and names each product with
-`primaryId(productMaster.getProduct(item.productId) || item, [item.name, item.sku])`. A store can't
-read the table: it asks for products with `refreshAfterMutation("product", { productIds })`, and a
-store getter that needs product fields takes a lookup from its caller (`orderDetail`'s
-`itemExternalIdBySeqIdByOrderId(orderId, skuOf)`). A new field goes in `PRODUCT_FIELDS`,
-`mapDocToProduct` and the `products` entity, with a `version` bump.
+The app wraps it in its own composable, which passes its `refreshAfterMutation` and adds how the app
+names products. Order Manager's `src/composables/useProductMaster.ts` adds `primaryId(product,
+fallbacks)` / `secondaryId(...)` (the Settings product identifier) and `getByIds(ids)` (Solr, not
+stored: a picker's results); `useProductIdentity()` builds on it.
+
+Pattern: a page calls the app's `useProductMaster()` in setup, may `await prefetch(ids)` when its rows
+arrive, and names each product with `primaryId(getProduct(item.productId) || item, [item.name,
+item.sku])`. A store can't read the table: it asks with `refreshAfterMutation("product", { productIds })`,
+and a store getter that needs product fields takes a lookup from its caller (Order Manager's
+`orderDetail.itemExternalIdBySeqIdByOrderId(orderId, skuOf)`). A new field goes in `PRODUCT_FIELDS`,
+`mapDocToProduct` and the `products` entity (framework), with a `version` bump in every app that
+picks the table, or an app adds it for itself with `extendEntities`.
 
 BOPIS keeps products in its own persisted Pinia store (`src/store/product.ts`: `fetchProducts`,
 `getProduct`, `findProduct`).
@@ -109,6 +115,6 @@ BOPIS keeps products in its own persisted Pinia store (`src/store/product.ts`: `
 | Reading `products.length` after a search with no hits | crash: it's `{}` | check `total` |
 | A module-level product map of your own in a shared composable | the next user sees the previous tenant's products | `useProducts` (it resets on logout), or `onSessionCleared` |
 | Hardcoding SKU or productId as the label in Order Manager | ignores the user's identifier setting | `primaryId` / `secondaryId` |
-| Adding a field to Order Manager's `PRODUCT_FIELDS` only | the entity's `fields` whitelist drops it | declare it on the `products` entity and bump the db `version` |
+| Adding a field to `PRODUCT_FIELDS` only | the entity's `fields` whitelist drops it | declare it on the `products` entity too, and bump the `version` of every app db that picks it |
 | `getProduct` copied into a list once, right after `prefetch` | rows miss the product: the live read lands after `prefetch` resolves | read `getProduct` in a `computed` or the template (`SwapOrders.vue`'s `setupCandidatesWithProducts`) |
-| A products table in another app | a second product master to maintain | ask first; use `useProducts` meanwhile |
+| An app declaring its own products table | a second product master to maintain | pick the framework's `products` seed table |

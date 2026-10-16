@@ -15,10 +15,13 @@ export * from "./storage/dbClient";
 
 export * from "./seed/seedSchema";
 export * from "./seed/seedDomains";
+export * from "./seed/productMaster";
+export * from "./seed/productDomain";
 
 export * from "./composables/useLiveEntity";
 export * from "./composables/useDbStatus";
 export * from "./composables/useSeedData";
+export * from "./composables/useProductMaster";
 
 export * from "./sync/channels";
 export * from "./sync/reconciliation";

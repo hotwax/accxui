@@ -164,12 +164,13 @@ describe("provenance keeps an app's own table out of the seed machinery", () => 
 
 describe("DEFAULT_COMMON_SYNC_CATALOG", () => {
   it("derives one entry per seed table, with its singular domain name and label", () => {
-    expect(DEFAULT_COMMON_SYNC_CATALOG).toHaveLength(29);
+    expect(DEFAULT_COMMON_SYNC_CATALOG).toHaveLength(30);
     expect(DEFAULT_COMMON_SYNC_CATALOG.map((e) => e.name).sort()).toEqual([...COMMON_DOMAIN_NAMES].sort());
     for (const entry of DEFAULT_COMMON_SYNC_CATALOG) {
       expect(entry.table, `${entry.name} missing table`).toBeTruthy();
       expect(entry.label, `${entry.name} missing label`).toBeTruthy();
-      expect(entry.syncClass).toBe("B");
+      // Every reference table syncs once per login; the product master is fetched when shown.
+      expect(entry.syncClass).toBe(entry.name === "product" ? "C" : "B");
     }
   });
 });

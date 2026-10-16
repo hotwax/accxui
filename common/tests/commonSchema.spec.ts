@@ -14,8 +14,8 @@ describe("commonSchema", () => {
     expect(Object.keys(commonDomainsByTable).sort()).toEqual([...COMMON_TABLE_NAMES].sort());
   });
 
-  it("keeps the pre-refactor domain names exactly", () => {
-    expect([...COMMON_DOMAIN_NAMES].sort()).toEqual(before.domainNames);
+  it("keeps the pre-refactor domain names exactly, adding only the product master", () => {
+    expect([...COMMON_DOMAIN_NAMES].sort()).toEqual([...before.domainNames, "product"].sort());
   });
 
   it("gives every entity a label", () => {
