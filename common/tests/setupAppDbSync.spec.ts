@@ -525,6 +525,8 @@ describe("activation and refresh routing", () => {
     await sync.startAppDbSync();
 
     expect(harnessStub.setDomains).toHaveBeenCalledWith([{ name: "inventoryEvent", args: { shopId: "S" } }]);
+    // The real worker receives it through postMessage, which cannot clone a reactive proxy.
+    expect(() => structuredClone(harnessStub.setDomains.mock.calls[0][0])).not.toThrow();
     await sync.stopAppDbSync();
   });
 
