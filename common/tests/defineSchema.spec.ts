@@ -92,6 +92,15 @@ describe("AppSchema.extendIndexes", () => {
 });
 
 describe("AppSchema.extendEntities", () => {
+  it("keeps retainOnLogout on an extended entity", () => {
+    const retained = defineSchema({
+      products: defineEntity({ primaryKey: "productId", fields: { productId: "text" }, retainOnLogout: true }),
+    });
+    const extended = retained.extendEntities({ products: { fields: { productName: "text" } } });
+
+    expect(extended.entities.products.retainOnLogout).toBe(true);
+  });
+
   it("adds fields to the entity's projection, after its own", () => {
     const extended = base().extendEntities({ facilities: { fields: { externalId: "text", openedDate: "date" } } });
 

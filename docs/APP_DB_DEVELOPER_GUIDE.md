@@ -23,6 +23,9 @@ Your app declares its tables once, and the framework gives you:
   worker or from your own write-through.
 - **29 HotWax seed reference tables** (statuses, enums, facilities, geos, carriers, shipment
   methods, …) already declared and already synced. You pick which ones you want.
+- **A `products` master table**, filled from Solr when a screen shows a product and kept across
+  logout. Pick it like a seed table and read it with `useProductMaster` (the `accxui-product-search`
+  skill).
 
 The rule of thumb: **read from the database, never fetch reference data in a view.**
 
@@ -382,6 +385,14 @@ A row missing **any** primary-key member is dropped as unkeyable. If the server 
 a key member (a document attached to no feed), give it a stand-in with `keyDefaults: { feedId: "" }`.
 Each key in `keyDefaults` must be a primary-key field. Use it only where the absence is a real state,
 never to cover a wrong field name.
+
+Logout empties every table. `retainOnLogout: true` keeps one table's rows for the next login on the
+same OMS instance (the default is `false`). Use it only for data that is the same for every user
+of the instance, such as a product catalog, and never for anything scoped to the signed-in user.
+A version bump still rebuilds the database and drops those rows. Nothing refreshes a retained row
+by itself: the screen that reads it decides when it is stale (its `syncedAt`) and calls
+`refreshAfterMutation`. The framework's `products` seed table works this way: `useProductMaster`
+asks its `product` domain for the ids a screen shows, and the domain fetches only the stale ones.
 
 > ⚠️ **`fields` is a whitelist, and it is the only thing stored.** A field you don't declare is
 > dropped at write time — it is not tucked away anywhere. If a screen needs it, declare it. This is
@@ -914,24 +925,24 @@ selector to the `DA_*` lists, or a layer ban to the `IMPORT_*` lists, at the top
 `eslint.config.js`, and check it by linting a sample file from an app folder (`eslint --stdin
 --stdin-filename src/views/X.vue`). Lint rules have no committed spec.
 
-The APP's config, including the exemption for an APP-local Dexie store kept outside the app
-database (for example a product cache):
+The APP's config:
 
 ```js
 // apps/<app>/eslint.config.js
 import { dbConfig } from "../../eslint.config.js"
 
-export default [
-  ...dbConfig,
+export default [...dbConfig]
+```
+
+Data that must outlive logout (a product catalog, the same for every user of the instance) is an
+app db table declared `retainOnLogout: true` (§2), not an app-local Dexie store. Only a store that
+genuinely can't live in the app db gets an exemption, by file, after `...dbConfig`:
+
+```js
   {
-    files: ["src/db/productDb.ts"],   // the APP's own Dexie store
+    files: ["src/db/<thing>Db.ts"],   // the APP's own Dexie store
     rules: { "@typescript-eslint/no-restricted-imports": "off", "no-restricted-syntax": "off" }
-  },
-  {
-    files: ["src/store/productCache.ts"],   // the Pinia mirror over it, which imports it
-    rules: { "@typescript-eslint/no-restricted-imports": "off" }
   }
-]
 ```
 
 AI agents get the same guidance from the `accxui-app-db-access` skill (`.agents/skills/accxui-app-db-access/SKILL.md`), and the layer rules from `accxui-app-layers`.
@@ -1070,7 +1081,7 @@ the seed domain's name (the "same table, your own domain" case in §2).
 
 | Contains | Rules |
 |---|---|
-| `setupAppDbSync({ db: appDb, getWorkerUrl: () => new URL(workerUrl, import.meta.url), createSyncService })` with `import workerUrl from "../workers/appSync.worker.ts?worker&url"` (relative: the apps' alias-import check rejects a `?worker&url` suffix on an `@/` path), and re-exports: `startAppDbSync`, `stopAppDbSync`, `refreshAfterMutation`, `resyncDomain`, `resyncReferenceData`, `syncService`, `bootstrapState`; for page-level sync also `activateSyncDomains`, `deactivateSyncDomains`, `createSyncDomainOwner`, `syncDomainsReady`, `syncDomainsError`, `syncNow` | Main thread only, but deep imports like the rest of `src/db`. Call `setupAppDbSync` exactly once (this module). Every other file imports sync functions from here, never from `@common/db/sync/*` |
+| `setupAppDbSync({ db: appDb, getWorkerUrl: () => new URL(workerUrl, import.meta.url), createSyncService })` with `import workerUrl from "../workers/appSync.worker.ts?worker&url"` (relative: the apps' alias-import check rejects a `?worker&url` suffix on an `@/` path), and re-exports: `startAppDbSync`, `stopAppDbSync`, `refreshAfterMutation`, `resyncDomain`, `resyncReferenceData`, `syncService`, `bootstrapState`; for page-level sync also `activateSyncDomains`, `deactivateSyncDomains`, `createSyncDomainOwner`, `syncDomainsReady`, `syncDomainsError`, `syncNow` | Main thread only, but deep imports like the rest of `src/db`. Call `setupAppDbSync` exactly once (this module): it registers itself, and framework composables (`useProductMaster`) reach it through `getAppDbSync()`. Every other file imports sync functions from here, never from `@common/db/sync/*` |
 
 ### `src/config/appSyncConfig.ts` (optional)
 

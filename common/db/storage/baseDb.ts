@@ -9,6 +9,8 @@ export class BaseDB extends Dexie {
   protected _tableNames: string[] = [];
   /** The schema version this build declares. `ensureDbReady` rebuilds when a database disagrees. */
   readonly declaredVersion: number;
+  /** Tables `clearDatabaseTables` leaves alone on logout (entities declared `retainOnLogout`). */
+  readonly retainedTables: ReadonlySet<string>;
 
   /**
    * `version` is the ONE knob. Bump it for any schema change at all — a new table, an added or
@@ -18,9 +20,10 @@ export class BaseDB extends Dexie {
    * rebuilding is cheaper than reasoning about which changes Dexie can carry in place and which
    * leave rows the new code cannot read.
    */
-  constructor(dbName: string, schema: Record<string, string>, version = 1) {
+  constructor(dbName: string, schema: Record<string, string>, version = 1, retainedTables: string[] = []) {
     super(dbName);
     this.declaredVersion = version;
+    this.retainedTables = new Set(retainedTables);
     const combinedSchema = {
       ...schema,
       syncMeta: "key",
@@ -40,6 +43,10 @@ const SCHEMA_VERSION_KEY = "schemaVersion";
 /**
  * Wipe all data tables in the given Dexie instance on logout.
  *
+ * Skips the tables in `retainedTables`: catalog data that is the same for every user of the
+ * instance, kept so the next login does not fetch it again. The login markers in `syncMeta` go
+ * regardless; they describe a login, not a table.
+ *
  * Keeps the schema version record, which still describes the emptied database. Without it the next
  * realm to open the database — the sync worker the next login starts — takes it for an unrecorded
  * build and rebuilds it, dropping whatever the main thread wrote first.
@@ -48,6 +55,9 @@ export async function clearDatabaseTables(db: BaseDB): Promise<void> {
   try {
     await db.transaction("rw", db.getTableNames(), async () => {
       for (const tableName of db.getTableNames()) {
+        if (db.retainedTables?.has(tableName)) {
+          continue;
+        }
         if (tableName === "syncMeta") {
           const keys = await db.syncMeta.toCollection().primaryKeys();
           await db.syncMeta.bulkDelete(keys.filter((key) => key !== SCHEMA_VERSION_KEY));
