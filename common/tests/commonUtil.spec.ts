@@ -105,7 +105,7 @@ describe("commonUtil.isVersionGreaterOrEqual", () => {
 });
 
 describe("commonUtil.getErrorMessage", () => {
-  const msg = (e: any, f?: string) => commonUtil.getErrorMessage(e, f);
+  const msg = (e: any) => commonUtil.getErrorMessage(e);
 
   it("reads OFBiz string and list errors", () => {
     expect(msg({ response: { data: { _ERROR_MESSAGE_: "Bad item" } } })).toBe("Bad item");
@@ -137,8 +137,8 @@ describe("commonUtil.getErrorMessage", () => {
   });
 
   it("ignores HTML bodies from gateway/proxy error pages", () => {
-    expect(msg({ response: { data: "<html><body>502 Bad Gateway</body></html>" } }, "Gateway fallback")).toBe("Gateway fallback");
-    expect(msg({ response: { data: "  <!DOCTYPE html><html>504</html>" } }, "Timeout fallback")).toBe("Timeout fallback");
+    expect(msg({ response: { data: "<html><body>502 Bad Gateway</body></html>" } })).toBe("");
+    expect(msg({ response: { data: "  <!DOCTYPE html><html>504</html>" } })).toBe("");
   });
 
   it("handles an already-unwrapped response object", () => {
@@ -146,10 +146,10 @@ describe("commonUtil.getErrorMessage", () => {
     expect(msg({ data: { errors: "From Moqui resp" } })).toBe("From Moqui resp");
   });
 
-  it("uses the provided fallback when no message is extractable", () => {
-    expect(msg({}, "Custom fallback")).toBe("Custom fallback");
-    expect(msg({ response: {} }, "Custom fallback")).toBe("Custom fallback");
-    expect(msg(null, "Fallback")).toBe("Fallback");
+  it("returns empty string when no message is extractable", () => {
+    expect(msg({})).toBe("");
+    expect(msg({ response: {} })).toBe("");
+    expect(msg(null)).toBe("");
     expect(msg(undefined)).toBe("");
   });
 });

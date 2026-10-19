@@ -108,7 +108,7 @@ export function useAuth() {
         });
 
         if(commonUtil.hasError(resp)) {
-          const serverError = commonUtil.getErrorMessage(resp, translate("Please contact administrator."));
+          const serverError = commonUtil.getErrorMessage(resp);
           logger.error("Failed to login", serverError);
           commonUtil.showToast(`${translate("Failed to login.")} ${serverError}`);
           updateUserId("")
@@ -136,7 +136,7 @@ export function useAuth() {
 
       // Moqui login returns a non-2xx status (e.g. bad credentials), so axios rejects
       // before `hasError()` can inspect the body - surface that message here instead.
-      const serverError = commonUtil.getErrorMessage(err, translate("Please contact administrator."));
+      const serverError = commonUtil.getErrorMessage(err);
       logger.error("Failed to login", serverError);
       commonUtil.showToast(`${translate("Failed to login.")} ${serverError}`);
 

@@ -140,7 +140,7 @@ describe("login displays and logs extracted server error", () => {
     expect(logger.error).toHaveBeenCalledWith("Failed to login", "Invalid password");
   });
 
-  it("falls back gracefully on network error", async () => {
+  it("uses error.message on a network error", async () => {
     api.mockRejectedValue(new Error("Network Error"));
 
     await expect(useAuth().login("user", "pass")).rejects.toThrow("Network Error");
@@ -148,15 +148,15 @@ describe("login displays and logs extracted server error", () => {
     expect(logger.error).toHaveBeenCalledWith("Failed to login", "Network Error");
   });
 
-  it("falls back to default message when server returns no extractable error", async () => {
+  it("shows only the static prefix when the server returns no extractable error", async () => {
     api.mockRejectedValue({
       response: {
         data: {}
       }
     });
 
-    await expect(useAuth().login("user", "pass")).rejects.toThrow("Please contact administrator.");
-    expect(commonUtil.showToast).toHaveBeenCalledWith("Failed to login. Please contact administrator.");
-    expect(logger.error).toHaveBeenCalledWith("Failed to login", "Please contact administrator.");
+    await expect(useAuth().login("user", "pass")).rejects.toBeInstanceOf(Error);
+    expect(commonUtil.showToast).toHaveBeenCalledWith(expect.stringContaining("Failed to login."));
+    expect(logger.error).toHaveBeenCalledWith("Failed to login", "");
   });
 });

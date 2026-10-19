@@ -100,7 +100,7 @@ function hasError(response: any): boolean {
   return false;
 }
 
-function getErrorMessage(error: any, fallback = ""): string {
+function getErrorMessage(error: any): string {
   const data = error?.response?.data ?? error?.data ?? error;
 
   const clean = (v: any): string => {
@@ -122,8 +122,7 @@ function getErrorMessage(error: any, fallback = ""): string {
     clean(data?.errorMessage) ||
     clean(data?.error) ||
     clean(data) ||
-    clean(error?.message) ||
-    fallback
+    clean(error?.message)
   );
 }
 
