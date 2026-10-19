@@ -165,6 +165,8 @@ export const useUserStore = defineStore("user", {
   state: () => ({
     current: {} as any,
     permissions: [] as string[],
+    // "success" only once the app permission passed; App.vue starts the sync on it. Persisted, so a reload keeps it.
+    permissionsStatus: "" as "" | "pending" | "success" | "error",
     oms: "",
     appVersion: undefined as string | undefined,   // undefined = not resolved yet; set by the framework
   }),
@@ -196,6 +198,7 @@ export const useUserStore = defineStore("user", {
       }
     },
     async fetchPermissions() {
+      this.permissionsStatus = "pending";
       const permissions: string[] = [];
       for(let viewIndex = 0; viewIndex < 50; viewIndex++) {
         const resp: any = await api({ url: "admin/user/permissions", method: "get", params: { viewIndex, viewSize: 200 } });
@@ -209,11 +212,15 @@ export const useUserStore = defineStore("user", {
       if(appPermission && !permissions.includes(appPermission)) {
         const message = "You do not have permission to access the app.";
         commonUtil.showToast(translate(message));
-        throw new Error(message);                    // fails the login
+        this.permissionsStatus = "error";
+        throw new Error(message);                    // fails the login; permissions are never stored
       }
       this.permissions = permissions;
+      this.permissionsStatus = "success";
     },
     async postLogin() {
+      // Close App.vue's sync gate first: a stale session that skipped postLogout persisted "success".
+      this.permissionsStatus = "pending";
       // Every login starts from an empty local database (a stale session may have skipped postLogout).
       await stopAppDbSync().catch((error) => logger.error("Failed to clear the local database on login", error));
       try {
@@ -363,11 +370,12 @@ registers its own (Order Manager's main-thread call is dead code).
 
 <script setup lang="ts">
 import { IonApp, IonRouterOutlet, IonSplitPane, loadingController } from "@ionic/vue";
-import { onMounted, onUnmounted, watch } from "vue";
+import { computed, onMounted, onUnmounted, watch } from "vue";
 import { useRoute } from "vue-router";
 import { emitter, FastTravel, translate, useAuth } from "@common";
 import Menu from "@/components/Menu.vue";
 import { startAppDbSync } from "@/db/appDbSync";
+import { useUserStore } from "@/store/user";
 
 const route = useRoute();
 let loader: HTMLIonLoadingElement | null = null;
@@ -399,8 +407,13 @@ onUnmounted(() => {
 });
 
 // A reload restores the session without postLogin: start the sync here too (checkSyncLifecycle checks it).
-watch(useAuth().isAuthenticated, (authenticated) => {
-  if(authenticated) {
+// Gated on the app permission, not on isAuthenticated alone: isAuthenticated turns true as soon as
+// the profile loads, before fetchPermissions() can reject the login, and a worker started then
+// would keep syncing for a user the app turned away.
+const userStore = useUserStore();
+const canSync = computed(() => useAuth().isAuthenticated.value && userStore.permissionsStatus === "success");
+watch(canSync, (ready) => {
+  if(ready) {
     void startAppDbSync();
   }
 }, { immediate: true });
@@ -430,7 +443,8 @@ and **accxui-seed-data**; drop `standalone-hidden` unless the app defines
 | Copying BOPIS / Fulfillment's shell | store-cached reference data, a build that doesn't lint, `next()` guards | this skeleton |
 | `postLogin` without `updateUserId` | valid token, back on `/login` | call it after loading the profile |
 | `initialiseConfig` before `.use(pinia)` | `getActivePinia` error at startup | after pinia, as above |
-| Sync started only in `postLogin` | nothing syncs after a reload | the `isAuthenticated` watch in `App.vue` |
+| Sync started only in `postLogin` | nothing syncs after a reload | the `isAuthenticated` + `permissionsStatus` watch in `App.vue` |
+| `App.vue` starts the sync on `isAuthenticated` alone | a login rejected for the app permission leaves the worker syncing | gate it on `permissionsStatus === "success"`, reset to `"pending"` at the top of `postLogin` |
 | No `resolve.dedupe` | two Vue / Pinia copies; state not shared with `common/` | the `dedupe` list |
 | `versionInfoUtil` imported in `src/` | Node's `child_process` in the browser bundle | `vite.config` only |
 | Locale file named `en-US.json` | the translation-key lint finds no file and checks nothing | `src/locales/en.json` mapped as `"en-US"` |

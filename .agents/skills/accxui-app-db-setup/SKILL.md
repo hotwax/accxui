@@ -37,7 +37,8 @@ domain or seed pick goes in (for example: a Company class B table from one list 
    `workerGet`, `workerPost`). Never `api()` or `fetch` in a domain. **Before writing a fetch in a
    hand-written domain, read [worker-remote-api.md](worker-remote-api.md)**: every option, how
    arrays, empty bodies and errors behave, and when a snapshot needs `requireComplete`.
-7. **Wire the lifecycle exactly:** `App.vue` starts the sync when `isAuthenticated` turns true;
+7. **Wire the lifecycle exactly:** `App.vue` starts the sync when `isAuthenticated` is true and the
+   app-permission check has passed (**accxui-auth**);
    `postLogin` stops it, then starts it; `postLogout` stops it (which clears the tables).
    `checkSyncLifecycle` catches a mistake.
 8. **Class B is never activated from a page; class A always is,** and the page deactivates it with
@@ -583,12 +584,14 @@ in `src/utils/`.
 
 ```ts
 // src/App.vue — a reload restores the session without postLogin, so the watch starts the sync too.
-watch(useAuth().isAuthenticated, (authenticated) => {
-  if (authenticated) void startAppDbSync();
-}, { immediate: true });
+// Gated on the app permission: isAuthenticated alone turns true before fetchPermissions() can reject.
+const userStore = useUserStore();
+const canSync = computed(() => useAuth().isAuthenticated.value && userStore.permissionsStatus === "success");
+watch(canSync, (ready) => { if (ready) void startAppDbSync() }, { immediate: true });
 
 // src/store/user.ts
 async postLogin() {
+  this.permissionsStatus = "pending";   // close the gate: a stale session may have persisted "success"
   await stopAppDbSync().catch((error) => logger.error("Failed to clear the local database on login", error));
   // … profile, permissions …
   void startAppDbSync();
@@ -686,6 +689,7 @@ Dexie-shaped stub as `get` / `raw`, then per test `vi.resetModules()`, import th
 | Copying a seed entity into `appSchema` to add a field | `mergeSchemas` throws (two schemas claim it), or the table loses its seed domain | `pick(...).extendEntities(...)` |
 | Activating a class B domain from a page | needless re-fetch, worker churn | class B runs at login |
 | Sync started only in `postLogin` | nothing syncs after a reload | the `isAuthenticated` watch in `App.vue`; `checkSyncLifecycle` reports it |
+| `App.vue` starts the sync on `isAuthenticated` alone | a login rejected for the app permission leaves the worker syncing | also require the permissions status `"success"`, reset in `postLogin` |
 | A second `defineAppDb` or Dexie instance for app data | bypasses sync; lint fails | one `appDb`, more tables in `appSchema` |
 
 ## Before you finish

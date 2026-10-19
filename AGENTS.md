@@ -28,7 +28,9 @@ The build's lint (`dbConfig` in `eslint.config.js`) enforces most of this.
    the labels; it shares its live reads with every component below it and closes them on unmount.
    Never in `App.vue` (lint rejects it): one there holds every seed table open for the session. A
    store action or util that needs seed rows takes them as an argument.
-6. **Sync lifecycle:** `App.vue` starts sync when `useAuth().isAuthenticated` turns true;
+6. **Sync lifecycle:** `App.vue` starts sync when `useAuth().isAuthenticated` is true **and** the
+   app-permission check has passed (the user store's permissions status is `"success"`, reset to
+   `"pending"` at the top of `postLogin`), so a login rejected for the app permission never starts it;
    `postLogin` stops then restarts it; `postLogout` stops it (which clears the tables). A page that
    activates class A domains deactivates them with the same owner in `onIonViewDidLeave`.
 7. **Any schema change bumps the app db `version`.** Nothing detects a forgotten bump.

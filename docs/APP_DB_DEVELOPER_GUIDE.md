@@ -913,13 +913,17 @@ appDb.setOmsInstanceResolver(() => commonUtil.getOMSInstanceName());
 ```
 
 ```ts
-// 6. src/App.vue — start on login. WATCH, don't check once.
-watch(useAuth().isAuthenticated, (authed) => { if (authed) void startAppDbSync() }, { immediate: true });
+// 6. src/App.vue — start on login. WATCH, don't check once. Gate on the app permission as well:
+// isAuthenticated turns true when the profile loads, before fetchPermissions() can reject the login.
+const userStore = useUserStore();
+const canSync = computed(() => useAuth().isAuthenticated.value && userStore.permissionsStatus === "success");
+watch(canSync, (ready) => { if (ready) void startAppDbSync() }, { immediate: true });
 ```
 
 ```ts
 // 7. src/store/user.ts — stop and clear at the start of postLogin, and again on logout
 async postLogin() {
+  this.permissionsStatus = "pending";   // close App.vue's gate until this login's permissions pass
   // A session that expired silently never ran postLogout, so its rows and once-per-login
   // markers are still there. Clear them before anything reads, then start fresh.
   await stopAppDbSync().catch((error) => logger.error("Failed to clear the local database on login", error));
@@ -1106,7 +1110,7 @@ apps/<app>/
 │   ├── config/
 │   │   └── appSyncConfig.ts             optional: polling scopes, windows, intervals
 │   ├── main.ts                          registers the real OMS resolver
-│   ├── App.vue                          starts the sync when isAuthenticated turns true
+│   ├── App.vue                          starts the sync once authenticated and the app permission passed
 │   ├── store/user.ts                    postLogin / postLogout → stopAppDbSync / startAppDbSync
 │   └── views/Settings.vue               the status card (useDbStatus)
 ├── eslint.config.js                     ...dbConfig from the root; the build lints first
@@ -1181,8 +1185,8 @@ default `intervalMs` values. Imported by domains and by pages that build their a
 | File | Adds |
 |---|---|
 | `src/main.ts` | `appDb.setOmsInstanceResolver(() => commonUtil.getOMSInstanceName())` |
-| `src/App.vue` | `watch(useAuth().isAuthenticated, (on) => { if (on) void startAppDbSync() }, { immediate: true })` |
-| `src/store/user.ts` | `postLogin`: `await stopAppDbSync()` first, then `void startAppDbSync()` after profile and permissions. `postLogout`: `await stopAppDbSync()` |
+| `src/App.vue` | `watch(() => useAuth().isAuthenticated.value && userStore.permissionsStatus === "success", (on) => { if (on) void startAppDbSync() }, { immediate: true })` |
+| `src/store/user.ts` | `postLogin`: set the permissions status to `"pending"`, `await stopAppDbSync()`, then `void startAppDbSync()` after profile and permissions. `postLogout`: `await stopAppDbSync()` |
 | `src/views/Settings.vue` | `useDbStatus(appDb.client(), async () => catalogFrom((await import("@/workers/appSyncDomains")).appSyncDomains), { resyncDomain, resyncAll: resyncReferenceData })` |
 
 ### Everywhere else
