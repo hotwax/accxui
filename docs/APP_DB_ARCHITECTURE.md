@@ -278,11 +278,24 @@ A **domain** says how one table is filled from the server: `{ name, table, label
 intervalMs?, sync(ctx, args), refetchOne?(ctx, pk, args) }`. The name is what
 `refreshAfterMutation(name, pk)` and page activation refer to.
 
-| Class | Data | Built with | Runs | Writes |
+The **class** decides *when* a domain runs; the **builder** decides *how* it fetches. They are
+separate choices:
+
+| Class | Data | Runs | Built with | Writes |
 |---|---|---|---|---|
-| **B** | Reference / config | `defineSnapshotDomain` | Once per login, then on mutation or manual refresh | `snapshotReplace`: upsert + prune, one transaction |
-| **A** | Live, append-mostly (logs, job runs, messages) | `defineCursorDomain` or hand-written `defineSyncDomain` | Every `intervalMs`, only while a page activates it | `upsertMany` of rows newer than the stored cursor; never prunes |
-| **C** | On request only (the `product` master) | `defineSyncDomain` with a `refetchOne` | Never ticked; only when `refreshAfterMutation(name, pk)` asks | via `refetchOne` |
+| **B** | Reference / config | In the base set `startAppDbSync` starts: once per login, then on mutation or manual refresh | `defineSnapshotDomain`, or hand-written `defineSyncDomain` that checks and marks `syncedThisLogin` | snapshot: `snapshotReplace` (upsert + prune, one transaction); hand-written: its own |
+| **A** | Live, append-mostly (logs, job runs, messages) | Every `intervalMs`, only while a page activates it | hand-written `defineSyncDomain` (every app today), or `defineCursorDomain` | depends on the fetch pattern: a cursor upserts rows newer than the stored cursor and never prunes; a re-check pass re-upserts unfinished rows; a window re-read upserts the newest page; a snapshot window uses `snapshotReplace` and does prune |
+| **C** | On request only (the `product` master) | Never ticked or activated: `sync` returns `0`, so ticks, `resyncDomain` and Settings Refresh fetch nothing. Only `refreshAfterMutation(name, pk)` fills it, and a stored row is not refreshed on its own | `defineSyncDomain` with `sync` returning `0` and a `refetchOne` | via `refetchOne`: upsert one record, or `snapshotReplace` the pk's slice when the pk owns a set of rows (`dataManagerErrorRecord`) |
+
+Builder × class: `defineSyncDomain` works as A, B or C. `defineSnapshotDomain` works only as B (its
+type accepts A and C, but it has no `intervalMs` and skips after its first pass each login).
+`defineCursorDomain` is always A. The class A fetch patterns, with Company examples, are in the
+developer guide §3.
+
+Scheduling: `syncClass` only picks the login base set (B); it doesn't gate polling. Any activated
+domain with an `intervalMs` (activation's, else domain's) is polled. One without an interval stays
+due until a pass completes (forced, or `syncedThisLogin`) and retries every 30 s
+(`RETRY_WITHOUT_INTERVAL_MS`) until then, so a class A domain needs an explicit interval.
 
 ```ts
 // Class B: whole set, replaced
@@ -300,12 +313,13 @@ defineCursorDomain({
 });
 ```
 
-**Refetch strategies** (used after a mutation), checked in this order on a snapshot domain:
+**Refetch strategies** (used after a mutation) on a snapshot domain. `byPk` wins when set; `fanOut`
+is used only without it:
 
 | Strategy | When | Effect |
 |---|---|---|
-| `fanOut` | child rows exist only under a parent (per product store) | re-list that parent's children, replace that slice |
 | `byPk` | a `GET /thing/{id}` route exists | upsert the one record, or remove it if gone |
+| `fanOut` | child rows exist only under a parent (per product store) | re-list that parent's children, replace that slice |
 | `refetchScope` | no by-id route, but the list filters by id | re-list that slice, replace it |
 | none | | nothing happens: use `resyncDomain(name)` |
 

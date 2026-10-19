@@ -56,6 +56,38 @@ domain or seed pick goes in (for example: a Company class B table from one list 
 | Live, append-mostly; polled only while a screen is open | **A** | `defineSyncDomain` with a cursor read, or `defineCursorDomain` | `dataManagerLogDomain.ts`, `systemMessageDomain.ts` |
 | One record at a time, when a screen asks; never polled | **C** | `defineSyncDomain`: `sync` returns `0`, `refetchOne` fetches | `systemMessageErrorDomain.ts`, `shopifyBulkOperationDomain.ts` |
 
+The class says **when** a domain runs, the builder **how** it fetches:
+
+- **When:** class B domains are the base set `startAppDbSync` runs at login; one without `intervalMs`
+  stays due until a pass completes (`syncedThisLogin`, or forced). Class A runs only while a page
+  activates it, and `intervalMs` (activation's, else domain's) is what repeats a pass.
+  `refreshAfterMutation` calls `refetchOne` in any class.
+- **`syncClass` doesn't gate polling:** any activated domain with an interval is polled. An activated
+  domain with **no** interval that never marks `syncedThisLogin` (a cursor or hand-written domain)
+  retries every 30 s (`RETRY_WITHOUT_INTERVAL_MS`): give every class A domain an explicit
+  `intervalMs`.
+- **Class C** is never activated or in the base set, and its `sync` returns `0`, so ticks,
+  `resyncDomain` and the Settings Refresh fetch nothing. Rows come only from `refreshAfterMutation`
+  → `refetchOne`, and a stored row is **not refreshed on its own**: it stays until that pk is asked
+  for again or logout clears the table (`retainOnLogout` tables survive). A `refetchOne` that must
+  stay fresh checks its own age (`dataManagerErrorRecordDomain.ts`: two hours).
+- **Builder × class:** `defineSyncDomain` works as A, B or C. `defineSnapshotDomain` works only as
+  **B**: its type accepts `"A" | "C"`, but it has no `intervalMs` and skips after its first pass
+  each login, so it would never poll. `defineCursorDomain` is always A, and no app uses it yet.
+- **Class A fetch patterns** (pick by what the endpoint does; all hand-written in Company):
+
+| Pattern | One pass | Use when | Example |
+|---|---|---|---|
+| Cursor | rows newer than the newest stored stamp, upsert | a stamp the endpoint filters on (`_from`) or sorts by; rows don't change once written | `productUpdateHistoryDomain.ts` |
+| Cursor + re-check | cursor, then a bounded re-fetch of unfinished rows | events whose status settles later | `systemMessageDomain.ts`, `dataManagerLogDomain.ts`, `serviceJobRunDomain.ts` |
+| Window re-read | the newest page(s), upsert | no usable cursor (stamp doesn't move on change, or filters ignored) | `syncRunDomain.ts` |
+| Snapshot window | the current set, `snapshotReplace` | a small list whose dropped rows must disappear | `shopifyPendingFulfillmentDomain.ts` |
+| Status row | one computed record per scope, overwrite | a health / summary value | `shopifyFulfillmentHealthDomain.ts` |
+
+Only a snapshot (or an explicit delete) removes rows; cursor, re-check and status passes never do. A
+cursor on a creation stamp (`createdDate`, `initDate`) misses edits; use `lastUpdatedStamp` or add a
+re-check pass.
+
 ## Files, in build order
 
 | # | File | Contains |
@@ -352,8 +384,9 @@ export const returnDomain: SyncDomain = { ...cursor, sync: (ctx, args: any) => (
 ``` `narrowOf(args)` adds a filter that applies both server-side and to the local
 count and cursor; `orderByField` defaults to `-cursorField`.
 
-Hand-write it when you need client-side scoping or a refresh of in-flight rows, as every Company
-class A domain does:
+Hand-write it when the endpoint is not a plain feed: client-side scoping, a re-check of in-flight
+rows, enrichment from other tables, a window re-read, or an endpoint that may 404. Every Company
+class A domain is hand-written (the patterns are under "Which sync class"):
 
 ```ts
 // src/workers/domains/cycleCountItemDomain.ts
@@ -453,7 +486,9 @@ watch(hydrated, (ready) => {
 **Freshness:** "fetch when empty" never refreshes rows already held, and `upsertMany` never drops
 rows the server deleted. For data that changes, refetch every time the screen opens (cached rows show
 at once, the live read updates when the fetch lands), and store the parent's slice with
-`snapshotReplace(rows, { field: "cycleCountId", value: cycleCountId })` so removed rows go too. Fetch
+`snapshotReplace(rows, { field: "cycleCountId", value: cycleCountId })` so removed rows go too
+(Company's `dataManagerErrorRecordDomain.ts` does this per log, and skips the download while its
+rows are under two hours old). Fetch
 these with `pageAll({ …, requireComplete: true })` ([worker-remote-api.md](worker-remote-api.md)).
 
 ### A record built from several calls

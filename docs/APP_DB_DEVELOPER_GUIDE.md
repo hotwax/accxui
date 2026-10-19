@@ -538,9 +538,70 @@ only store more of each row, see [Extending an entity](#extending-an-entity)):
 
 | Class | Meaning | Cadence | Use |
 |---|---|---|---|
-| **B** | Reference / config. Rarely changes. | Once per login, then only on mutation | `defineSnapshotDomain` |
-| **A** | Live, append-mostly. Transactional. | `intervalMs`, only while a view needs it | `defineCursorDomain`, or hand-written |
+| **B** | Reference / config. Rarely changes. | Once per login, then only on mutation | `defineSnapshotDomain`, or hand-written `defineSyncDomain` |
+| **A** | Live, append-mostly. Transactional. | `intervalMs`, only while a view needs it | hand-written `defineSyncDomain` (every app today), or `defineCursorDomain` |
 | **C** | One record at a time, when a screen asks. | Never polled; filled by `refreshAfterMutation` | `defineSyncDomain` with `sync` returning `0` and a `refetchOne` |
+
+### Class versus builder: two separate choices
+
+The **class** says *when* a domain syncs. The **builder** says *how* it fetches. Pick the class from
+the data, then the builder from what the endpoint can do.
+
+**How the worker uses the class** (`pollingWorkerHarness.ts`):
+
+- Class **B** domains are the base set: `startAppDbSync` runs them at login. One without
+  `intervalMs` stays due until a pass completes — `syncedThisLogin(name)` is true, or the pass was
+  forced — then waits for the next login, a forced refresh, or `refreshAfterMutation`.
+- Class **A** runs only while a page activates it (`activateSyncDomains`). `intervalMs` (the
+  activation's, else the domain's) is what makes a pass repeat.
+- `syncClass` only picks the login base set (B); it does not gate polling. Any activated domain with
+  an interval is polled. An activated domain **without** one stays due until a pass completes
+  (forced, or `syncedThisLogin(name)` true) and is retried every `RETRY_WITHOUT_INTERVAL_MS`
+  (30 s) until then — so a cursor or hand-written domain that never marks `syncedThisLogin`,
+  activated with no `intervalMs`, polls every 30 s. Give every class A domain an explicit interval.
+- Class **C** is never activated and never in the base set; its `sync` returns `0`, so ticks,
+  `resyncDomain` and the Settings Refresh fetch nothing for it. Rows arrive only through
+  `refreshAfterMutation(name, pk)` → `refetchOne`, and a stored row is **not refreshed on its own**:
+  it stays as fetched until something calls `refreshAfterMutation` for that pk again, or logout
+  clears the table (`retainOnLogout` tables, like `products`, survive). A `refetchOne` that should
+  return fresh data checks its own age (`dataManagerErrorRecord` re-downloads after two hours).
+- `refreshAfterMutation(name, pk)` calls the domain's `refetchOne` whatever its class.
+
+**What each builder gives you:**
+
+| Builder | `sync` | `refetchOne` | Classes it works as |
+|---|---|---|---|
+| `defineSyncDomain` | yours | yours (optional, required for C) | **A, B, C** — you set `syncClass` and `intervalMs`. A hand-written B checks and marks `syncedThisLogin` itself |
+| `defineSnapshotDomain` | `pageAll` (or one call per parent with `fanOut`), then `snapshotReplace`: upserts what came back, **prunes** what didn't (within `scopeOnSync`). Skips once synced this login unless forced; refuses an empty fetch over a filled table | `byPk` (one GET; empty answer removes the row), `refetchScope` (re-list and replace a slice) or `fanOut` (re-list one parent) | **B only.** Its type accepts `"A" \| "C"`, but it has no `intervalMs` and skips after its first pass, so as A it never polls and as C an activation fetches the whole list |
+| `defineCursorDomain` | fills each scope to `total`, then `pageNewestFirst` from the newest stored `cursorField` (sent as `cursorParam`), `keepNewerThan`, `upsertMany`. **Never prunes** | re-lists by the first pk field only, upserts | **A only** (`syncClass` is hard-coded). No app uses it today |
+
+**How a class A domain fetches.** "Append-mostly" describes the data, not the code: every class A
+domain in Company is hand-written, and they use these patterns:
+
+| Pattern | One pass | Use when | Company example |
+|---|---|---|---|
+| Cursor | rows newer than the newest stored stamp; upsert | a feed ordered by a stamp the endpoint filters on (`_from`) or at least sorts by; rows don't change once written | `productUpdateHistory`, `shopifyFulfillmentHistory`, inventory events |
+| Cursor + re-check | the cursor pass, then a bounded re-fetch of rows still unfinished (no end time / processed date) | events whose status settles after they arrive | `systemMessage`, `dataManagerLog`, `serviceJobRun` |
+| Window re-read | the newest page(s) every pass; upsert | no usable cursor: the stamp doesn't move when the row changes, or the endpoint ignores filters | `syncRun` |
+| Snapshot window | the current set; `snapshotReplace` (and deletes) | the list is small and rows must disappear when the server drops them | `shopifyPendingFulfillment`, `shopifyTransferSync` |
+| Status row | one computed record per scope; overwrite | the screen shows a health or summary value, not a list | `shopifyFulfillmentHealth`, `shopifyOrderSyncHistory` |
+
+A cursor on `lastUpdatedStamp` returns edited rows as well as new ones; a cursor on a creation stamp
+(`createdDate`, `initDate`) misses edits, so pair it with a re-check pass. A cursor or status domain
+never removes a row; only a snapshot (or an explicit delete) does.
+
+**Which builder:**
+
+- **B** — `defineSnapshotDomain` when one list endpoint (or one per parent row) returns the whole
+  set; hand-written `defineSyncDomain` when it takes several calls or assembly (`organization`).
+- **A** — `defineCursorDomain` only for a plain feed: one forward-moving stamp, a `cursorParam` the
+  endpoint honours (probe it), rows that don't change, one scope. Anything else — a re-check pass,
+  client-side scoping, enrichment from other tables, an endpoint that may 404 — is a hand-written
+  `defineSyncDomain` using `pageNewestFirst` / `keepNewerThan` from the patterns above.
+- **C** — always `defineSyncDomain`: `sync` returns `0`, `refetchOne` fetches what belongs to the
+  pk. Usually that is one record, upserted (`systemMessageError`, `product`); when the pk owns a set
+  of rows, `refetchOne` replaces that slice with `snapshotReplace(rows, { field, value })` so rows
+  the server no longer returns are pruned (`dataManagerErrorRecord`: every error row of one log).
 
 **Class B — the common case.** Fetch the whole set, replace what's stored:
 
@@ -1087,7 +1148,7 @@ flowchart LR
 
 | Contains | Rules |
 |---|---|
-| One exported domain: `defineSnapshotDomain` (class B), `defineCursorDomain` or `defineSyncDomain` (class A), or `defineSyncDomain` with `sync` returning `0` and a `refetchOne` (class C, §3). Hand-written domains hold their tables in module scope: `const widgets = appDb.entity(appDb.tables.widgets)` | Deep imports only; HTTP through `@common/core/workerRemoteApi` (`pageAll`, `pageNewestFirst`, `workerGet`), never `api()`. `refetchOne(ctx, pk, args)` takes the context first. Name the file after the domain |
+| One exported domain: `defineSnapshotDomain` or `defineSyncDomain` (class B), `defineSyncDomain` or `defineCursorDomain` (class A), or `defineSyncDomain` with `sync` returning `0` and a `refetchOne` (class C, §3). Hand-written domains hold their tables in module scope: `const widgets = appDb.entity(appDb.tables.widgets)` | Deep imports only; HTTP through `@common/core/workerRemoteApi` (`pageAll`, `pageNewestFirst`, `workerGet`), never `api()`. `refetchOne(ctx, pk, args)` takes the context first. Name the file after the domain |
 
 `referenceDomains.ts` collects the APP's class-B domains and any seed domain it re-declares under
 the seed domain's name (the "same table, your own domain" case in §2).
