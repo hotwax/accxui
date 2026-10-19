@@ -1,6 +1,6 @@
 ---
 name: accxui-permissions
-description: "Use when AccxUI app code (apps/company, apps/order-manager, apps/bopis or a new app) checks what the logged-in user may see or do: gating a route, hiding or disabling a button, filtering menu entries, adding a permission, or the app-access check at login. Triggers include hasPermission, Actions, src/authorization/actions.ts, permissionId, meta.permissionId, requirePermission, fetchPermissions, admin/user/permissions, VITE_APP_PERMISSION_ID, 'You do not have permission to access the app', 'You do not have permission to access this page', COMMON_ADMIN, an OR / AND permission string, and Company's useAuth().hasPermission from composables/useSecurity.ts."
+description: "Use when AccxUI app code (apps/company, apps/order-manager, apps/bopis, apps/fulfillment or a new app) checks what the logged-in user may see or do: gating a route, hiding or disabling a button, filtering menu entries, adding a permission, or the app-access check at login. Triggers include hasPermission, Actions, src/authorization/actions.ts, permissionId, meta.permissionId, requirePermission, fetchPermissions, admin/user/permissions, VITE_APP_PERMISSION_ID, 'You do not have permission to access the app', 'You do not have permission to access this page', COMMON_ADMIN, an OR / AND permission string, and Company's useAuth().hasPermission from composables/useSecurity.ts."
 ---
 
 # Permissions
@@ -14,7 +14,7 @@ Permissions are app-level: each app has the same pieces, and the framework only 
 |---|---|---|
 | Action map | `src/authorization/actions.ts` | `export default { APP_X_VIEW: "PERM_A OR PERM_B", … } as const satisfies Record<string, string>`. The **only** place permission ids appear |
 | Loading | `fetchPermissions()` in `src/store/user.ts`, called from `postLogin` | pages `GET admin/user/permissions` (`viewSize: 200`) into `state.permissions: string[]`; persisted with the user store, cleared by `$reset()` in `postLogout` |
-| App access | same action | if `VITE_APP_PERMISSION_ID` (e.g. `COMPANY_APP_VIEW`, `ORDERMGR_APP_VIEW`, `BOPIS_APP_VIEW`) isn't in the list: toast "You do not have permission to access the app." and reject, which fails the login |
+| App access | same action | if `VITE_APP_PERMISSION_ID` (e.g. `COMPANY_APP_VIEW`, `ORDERMGR_APP_VIEW`, `BOPIS_APP_VIEW`, `FULFILLMENT_APP_VIEW`) isn't in the list: toast "You do not have permission to access the app." and reject, which fails the login |
 | Check | `hasPermission` getter on the user store | `useUserStore().hasPermission(Actions.APP_X)` |
 
 **`hasPermission(value)`**: an empty value is `true` (every logged-in user); `"A OR B"` = any;
@@ -26,7 +26,7 @@ bypass: include the admin permission in the action's value (`"ORDERMGR_VIEW OR O
 1. **Add an action** to `src/authorization/actions.ts` (name `APP_<AREA>_<VERB>`), with the server
    permission ids, admin ones included. Never put a raw permission id in a view, route or store.
 2. **Gate the route**, the way the app does it:
-   - **Order Manager, BOPIS** (and a new app): `meta: { permissionId: Actions.APP_X_VIEW }` on the route;
+   - **Order Manager, BOPIS, Fulfillment** (and a new app): `meta: { permissionId: Actions.APP_X_VIEW }` on the route;
      the global `router.beforeEach` sends a denied user back to `from.path` with "You do not have
      permission to access this page.", or to Settings without a toast when coming from `/login` or `/`.
    - **Company**: `beforeEnter: requirePermission(Actions.APP_X_VIEW)` (in `src/router/index.ts`);
@@ -34,7 +34,7 @@ bypass: include the admin permission in the action's value (`"ORDERMGR_VIEW OR O
 3. **Gate the controls** (below).
 
 ```ts
-// Order Manager / BOPIS router
+// Order Manager / BOPIS / Fulfillment router
 { path: "/carrier-accounts", component: CarrierAccounts, beforeEnter: authGuard, meta: { permissionId: Actions.APP_CARRIER_ACCOUNTS_VIEW } }
 
 // Company router

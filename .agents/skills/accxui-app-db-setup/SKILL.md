@@ -34,7 +34,9 @@ domain or seed pick goes in (for example: a Company class B table from one list 
 5. **Every schema change bumps `version`.** *Why:* the database is rebuilt only on a version change;
    nothing detects a forgotten bump, and old-shaped rows stay.
 6. **Domain HTTP goes through `@common/core/workerRemoteApi`** (`pageAll`, `pageNewestFirst`,
-   `workerGet`, `workerPost`). Never `api()` or `fetch` in a domain.
+   `workerGet`, `workerPost`). Never `api()` or `fetch` in a domain. **Before writing a fetch in a
+   hand-written domain, read [worker-remote-api.md](worker-remote-api.md)**: every option, how
+   arrays, empty bodies and errors behave, and when a snapshot needs `requireComplete`.
 7. **Wire the lifecycle exactly:** `App.vue` starts the sync when `isAuthenticated` turns true;
    `postLogin` stops it, then starts it; `postLogout` stops it (which clears the tables).
    `checkSyncLifecycle` catches a mistake.
@@ -264,12 +266,14 @@ export const cycleCountDomain = defineSnapshotDomain({
   syncClass: "B",
   table: "cycleCounts",
   listUrl: "oms/cycleCounts",
-  collectionKey: null,                // null = bare array; "cycleCountList" = resp.cycleCountList
+  collectionKey: null,                // null = a bare array (or the first array in the answer); "cycleCountList" = resp.cycleCountList
   byPk: (pk) => ({ url: `oms/cycleCounts/${encodeURIComponent(String(pk.cycleCountId))}` }),
 });
 ```
 
-It fetches the whole set and **prunes** rows it didn't get back, so get `collectionKey` right. It
+It fetches the whole set and **prunes** rows it didn't get back, so get `collectionKey` right
+(`null` also accepts the first array of an envelope; set `strictCollection: true` when the shape is
+known, so an unexpected answer throws instead of unwrapping to `[]`). It
 runs once per login (skipped while `syncedThisLogin`), refuses to wipe a filled table on an empty
 answer during an automatic sync, and stores rows through the app's composed entity. That holds for
 every factory and for `appDb.entity(...)` in a hand-written domain: `projection` defaults to
@@ -337,7 +341,15 @@ export const returnDomain = defineCursorDomain({   // syncClass is always "A"
 ```
 
 Its `refetchOne` re-lists by the **first** primary-key field (`{ [pk0]: id }`, one row) and upserts;
-it never removes a row. `narrowOf(args)` adds a filter that applies both server-side and to the local
+it never removes a row. It sends **none** of `paramsOf(args)`, so it is right only if the endpoint
+filters by that field (probe it); otherwise reconcile writes with `syncNow()` (**accxui-page-sync**).
+Its `sync` runs unscoped when called with no args (the Settings Refresh does that when no screen holds
+the domain): wrap it to return `0` without the scope arg:
+
+```ts
+const cursor = defineCursorDomain({ /* …as above… */ });
+export const returnDomain: SyncDomain = { ...cursor, sync: (ctx, args: any) => (args?.facilityId ? cursor.sync(ctx, args) : Promise.resolve(0)) };
+``` `narrowOf(args)` adds a filter that applies both server-side and to the local
 count and cursor; `orderByField` defaults to `-cursorField`.
 
 Hand-write it when you need client-side scoping or a refresh of in-flight rows, as every Company
@@ -438,6 +450,12 @@ watch(hydrated, (ready) => {
 });
 ```
 
+**Freshness:** "fetch when empty" never refreshes rows already held, and `upsertMany` never drops
+rows the server deleted. For data that changes, refetch every time the screen opens (cached rows show
+at once, the live read updates when the fetch lands), and store the parent's slice with
+`snapshotReplace(rows, { field: "cycleCountId", value: cycleCountId })` so removed rows go too. Fetch
+these with `pageAll({ …, requireComplete: true })` ([worker-remote-api.md](worker-remote-api.md)).
+
 ### A record built from several calls
 
 - Write **one** fetch-and-assemble function and call it from both `sync` and `refetchOne`.
@@ -459,7 +477,9 @@ watch(hydrated, (ready) => {
   (`appDb.entity(appDb.tables.productStores).all()`); never `.live()` in a worker.
 - `appDb.client()`: `syncedThisLogin(name)` / `markSyncedThisLogin(name)` for class B.
 - HTTP: `pageAll` (every page), `pageNewestFirst` (newest first, up to `total`), `workerGet`,
-  `workerPost` from `@common/core/workerRemoteApi`. All take `ctx` first.
+  `workerPost` from `@common/core/workerRemoteApi`. All take `ctx` first. A `pageAll` result you
+  `snapshotReplace` needs `requireComplete: true`; options and edge cases in
+  [worker-remote-api.md](worker-remote-api.md).
 - `sync(ctx, args, options)` and `refetchOne(ctx, pk, args)` both take the context **first**; `args`
   are the activation's. Return the number of rows written.
 - A `refetchOne` that throws makes `refreshAfterMutation` reject with `CacheReconciliationError`; one
@@ -604,6 +624,12 @@ it("stamps the parent id onto each note", async () => {
 A class B domain that checks `syncedThisLogin` also needs `client: () => ({ syncedThisLogin,
 markSyncedThisLogin, count })` on the mocked `appDb`. A composable that calls `refreshAfterMutation` mocks
 `@/db/appDbSync`.
+
+**A factory domain** (`defineSnapshotDomain`, `defineCursorDomain`) doesn't write through
+`appDb.entity(...)`: it resolves the database through the registry, so the mock above never sees its
+writes. Follow Company's `tests/workers/carrierReferenceDomains.spec.ts`: mock `@/db/<app>Db` with a
+Dexie-shaped stub as `get` / `raw`, then per test `vi.resetModules()`, import the app db,
+`setAppDb(appDb)` from `@common/db/schema/appDbRegistry`, and import the domain module after it.
 
 ## Common mistakes
 

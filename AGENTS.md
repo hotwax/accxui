@@ -3,10 +3,13 @@
 AccxUI is a framework (`common/`) plus apps under `apps/*`. Each app is its **own git repo**: a
 change to `common/` and a change to an app are separate commits in separate repos.
 
-## Local database (IndexedDB) — non-negotiable
+## Local database (IndexedDB) — non-negotiable in apps that have one
 
-Every app keeps server data in one IndexedDB database per OMS instance, filled by a background
-sync worker. The build's lint (`dbConfig` in `eslint.config.js`) enforces most of this.
+**Which apps:** Company, Order Manager and every **new** app keep server data in one IndexedDB
+database per OMS instance, filled by a background sync worker; the rules below apply there. **BOPIS
+and Fulfillment have no app db**: their data lives in Pinia stores, the rules below don't apply, and
+`accxui-apps-without-app-db` says how to work in them (moving one onto an app db is its own project).
+The build's lint (`dbConfig` in `eslint.config.js`) enforces most of this.
 
 1. **Read** only with `useLiveEntity(appDb.tables.x, options)` (and `useSeedData()` for seed
    tables), in a composable or a `.vue` file. No `appDb.entity(...)` or `loadSeedData()` in app code:
@@ -42,8 +45,12 @@ permissions (`hasPermission`, `src/authorization`) → `accxui-permissions`; pro
 search (`useProducts`) → `accxui-product-search`; Shopify embedded / POS (`useShopify`, `ShopifyLogin`) →
 `accxui-shopify-embedded`; packages, env variables, running, releasing or deploying →
 `accxui-dependencies-and-config`. Toasts, loader, logging, translations, date / status / product-id
-formatting (`commonUtil`, `logger`, `translate`, `emitter`) → `accxui-common-helpers`. Full reference:
-`docs/APP_DB_DEVELOPER_GUIDE.md`.
+formatting (`commonUtil`, `logger`, `translate`, `emitter`) → `accxui-common-helpers`. A new app,
+or an app's shell (`main.ts`, `App.vue`, router, user store, `vite.config`) → `accxui-new-app`; changing
+BOPIS or Fulfillment → `accxui-apps-without-app-db`; pages, modals, menus, Settings, forms and
+framework components → `accxui-ui-conventions`; links to other HotWax apps (`buildAppUrl`,
+`FastTravel`) → `accxui-fast-travel`; writing or running tests → `accxui-app-testing`; anything under
+`common/` → `accxui-framework-change`. Full reference: `docs/APP_DB_DEVELOPER_GUIDE.md`.
 
 ## App layout
 
@@ -67,4 +74,8 @@ The build's lint enforces these too (the `use…` / `use…Store` naming rules o
 
 - Framework: `npx vitest run common/tests` from this root. Never bare `vitest` here: it collects the
   apps' specs, which fail on `@/` aliases.
-- An app: `pnpm test:unit` and `pnpm build` from `apps/<app>` (the build lints first).
+- An app: `pnpm test:unit` and `pnpm build` from `apps/<app>` (the build lints first in Company and
+  Order Manager). BOPIS and Fulfillment: `npx vitest run` (their `test:unit` watches) and
+  `npx eslint <changed files>`, since their build doesn't lint.
+- Style findings from the root lint are pre-existing noise: match the surrounding file. The layer,
+  data-access and translation-key findings are the ones that count.
