@@ -47,10 +47,12 @@ page. Writing the domain itself is **accxui-app-db-setup**; reading its rows is
    with only `{ <first pk field>: id }` (none of the activation's `paramsOf` scope), so it is right
    only if that endpoint really filters by that field; otherwise it stores some other row. A write
    that bumps `lastUpdatedStamp` is picked up by the next cursor pass anyway.
-7. **A class A domain must do nothing without its scope.** The Settings status card's Refresh
+7. **A scoped class A domain must do nothing without its scope.** The Settings status card's Refresh
    (`resyncDomain(name)`) runs the domain with **no args** when no screen holds it. A domain whose
-   `sync` would then page every facility's rows returns `0` when its scope arg is missing (wrap
-   `defineCursorDomain`'s `sync`, or check `args` in a hand-written one).
+   requests depend on an activation arg (a facility, shop or job name), and whose `sync` would then
+   page every facility's rows, returns `0` when that arg is missing (wrap `defineCursorDomain`'s
+   `sync`, or check `args` in a hand-written one). A global domain, with no `scopeOf` and no
+   scope-derived `paramsOf`, needs no guard: running it with no args is its normal pass.
 
 ## The API (`@/db/appDbSync`, plus `serviceState` from `@common`)
 
