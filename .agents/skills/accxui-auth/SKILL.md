@@ -106,9 +106,18 @@ const authGuard = () => { if (!useAuth().isAuthenticated.value) return { path: "
 // { path: "/orders", component: Orders, beforeEnter: authGuard }
 router.beforeEach(() => { if (useAuth().checkAppVersionRedirect()) return false });
 
-// App.vue: work that must run on a reload too (postLogin doesn't run on a reload)
-watch(useAuth().isAuthenticated, (authenticated) => { if (authenticated) void startAppDbSync() }, { immediate: true });
+// App.vue: work that must run on a reload too (postLogin doesn't run on a reload). The app db sync
+// waits for the app permission as well: isAuthenticated turns true as soon as
+// fetchUserProfile() calls updateUserId, BEFORE fetchPermissions() can reject the login; a worker
+// started then keeps syncing for a user the app turned away (clearAuth() doesn't stop it).
+const canSync = computed(() => useAuth().isAuthenticated.value && userStore.permissionsStatus === "success");
+watch(canSync, (ready) => { if (ready) void startAppDbSync() }, { immediate: true });
 ```
+
+`permissionsStatus` is set to `"success"` only after `fetchPermissions()` stores permissions (they are
+stored only once `VITE_APP_PERMISSION_ID` passes), and to `"pending"` at the top of `postLogin`, so a
+persisted `"success"` from a stale session can't open the gate early. The store is persisted, so a
+reload keeps it. Company and Order Manager use `fetchStatus.permissions` for the same flag.
 
 ## Session-scoped state
 
@@ -137,6 +146,7 @@ onSessionCleared(() => cache.clear());
 | `postLogin` doesn't call `updateUserId` (or `current` lacks `userId`) | valid token, `isAuthenticated` false, back to `/login` | set `current`, then `updateUserId(current.userId)` |
 | Work that needs the session in `postLogout` | the call fails: the token is already cleared | `preLogout` |
 | Starting per-session work only in `postLogin` | nothing runs after a page reload | also a `watch(isAuthenticated, …, { immediate: true })` in `App.vue` |
+| Starting the app db sync on `isAuthenticated` alone | a login rejected by `fetchPermissions()` leaves the sync worker running | gate it on the permissions status being `"success"` as well (above) |
 | Module-level cache in a shared composable with no reset | the next user sees the previous tenant's data | `onSessionCleared` |
 | Toasting `INVALID_APP_CONTEXT` | a second error over the logout | ignore it |
 | Calling `logout()` again on a 401 handler | double teardown | the interceptor already does it |

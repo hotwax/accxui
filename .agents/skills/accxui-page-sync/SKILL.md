@@ -43,8 +43,18 @@ page. Writing the domain itself is **accxui-app-db-setup**; reading its rows is
    `firstPassPending(name)`; with no rows, show the skeleton until the pass lands or fails.
 6. **After a write, reconcile through the worker**: `refreshAfterMutation(domain, pk)` for one record,
    `syncNow()` to re-poll everything on screen. Activating the same list again does not re-run it.
+   For a **`defineCursorDomain`** domain prefer `syncNow()`: its `refetchOne` re-lists the endpoint
+   with only `{ <first pk field>: id }` (none of the activation's `paramsOf` scope), so it is right
+   only if that endpoint really filters by that field; otherwise it stores some other row. A write
+   that bumps `lastUpdatedStamp` is picked up by the next cursor pass anyway.
+7. **A scoped class A domain must do nothing without its scope.** The Settings status card's Refresh
+   (`resyncDomain(name)`) runs the domain with **no args** when no screen holds it. A domain whose
+   requests depend on an activation arg (a facility, shop or job name), and whose `sync` would then
+   page every facility's rows, returns `0` when that arg is missing (wrap `defineCursorDomain`'s
+   `sync`, or check `args` in a hand-written one). A global domain, with no `scopeOf` and no
+   scope-derived `paramsOf`, needs no guard: running it with no args is its normal pass.
 
-## The API (`@/db/appDbSync`, plus `serviceState` from `@common/db`)
+## The API (`@/db/appDbSync`, plus `serviceState` from `@common`)
 
 | Call | What it does |
 |---|---|
@@ -96,7 +106,9 @@ const { records: returns, hydrated } = useLiveEntity<any>(
 );
 // Loading until this visit's first pass lands or fails; only then is "no rows" real. Keyed by the
 // DOMAIN name (`return`), not the table (`returns`). Use it for each polled list (`returnItem`, …).
-const firstPassPending = (domain: string) => !serviceState.syncedAt[domain] && !serviceState.errors[domain];
+// `__start` is set when the worker itself failed to start: without it the skeleton never ends.
+const firstPassPending = (domain: string) =>
+  !serviceState.syncedAt[domain] && !serviceState.errors[domain] && !serviceState.errors.__start;
 const isLoading = computed(() => !hydrated.value || (!returns.value.length && firstPassPending("return")));
 const isEmpty = computed(() => !isLoading.value && !returns.value.length);
 const isRefreshing = computed(() => returns.value.length > 0 && firstPassPending("return")); // cached rows shown, this visit's pass still running
@@ -154,6 +166,9 @@ from parameters (Company's `utils/shopifyFulfillment.ts`); the calls stay in the
 | `deactivateSyncDomains()` with no owner | clears the page being entered | pass the owner (lint rejects the bare call) |
 | Skeleton until `hydrated` only | "No returns" flashes before the first poll lands | also wait on `serviceState.syncedAt[name]` / `errors[name]` |
 | Skeleton until `syncDomainsReady` | it is true before any data arrives | the same `syncedAt` check |
+| First-pass check without `errors.__start` | the skeleton spins forever when the worker fails to start | include it, as in the recipe |
+| `refreshAfterMutation` on a cursor domain whose endpoint ignores the pk filter | another row is stored, the edited one stays stale | `syncNow()` |
+| A class A domain that syncs unscoped when `args` is empty | the Settings Refresh pages every scope into the table | return `0` without the scope arg |
 | Refresh button calls `activateSyncDomains` with the same list | nothing re-runs: those activations keep their clocks | `syncNow()` (all screen domains) |
 | Activating a domain while its scope arg is still `undefined` | an unscoped pass caches another scope's rows | activate `[]`, then again from the `watch` once known |
 | A `watch` that activates while the page is in the back stack | a hidden page takes the worker from the visible one | guard with an `isActive` flag set by the two hooks |

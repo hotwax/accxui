@@ -63,8 +63,17 @@ const { records, first, hydrated } = useLiveEntity<any>(
 );
 ```
 
-- Returns `{ records, first, count, hydrated, error }` refs. `hydrated` tells "not loaded yet" from
-  "really empty": use it for loading and empty states.
+- Returns `{ records, first, count, hydrated, synced, error }` refs. `hydrated`: the first read
+  landed (and the worker isn't still starting). Use it for loading states.
+- **"Not synced yet" vs "really empty" for one domain's table:** pass `syncDomain: "<domain name>"`
+  in the options. The rows are then read in the same transaction as that domain's login marker, and
+  `synced` is true only once the domain has written this login. Show the skeleton while `!synced`,
+  the empty state when `synced && !records.length`. (Seed getters have `.withSync` for the same
+  thing: **accxui-seed-data**; a polled class A list uses the first-pass check: **accxui-page-sync**.)
+
+  ```ts
+  const { records: audits, synced } = useLiveEntity<any>(appDb.tables.audits, { syncDomain: "audit" });
+  ```
 - While an id is unknown, return `{ filter: () => false }`, not `{}` (which reads the whole table).
 - `QueryOptions`: `scope` / `equals` (equalities; a dotted path reaches a nested field, and a list
   matches when any value does), `dateField` + `since` / `until` / `order` (newest first by default),
@@ -133,7 +142,7 @@ watch(hydrated, (ready) => {
 import { refreshAfterMutation, resyncDomain } from "@/db/appDbSync";
 
 const response = await api({ url: `oms/serviceJobs/${jobName}`, method: "put", data });
-if (commonUtil.hasError(response)) throw new Error(getResponseErrorMessage(response, "Failed to save the job."));
+if (commonUtil.hasError(response)) throw new Error("Failed to save the job.");   // the caller toasts translate(...)
 await refreshAfterMutation("serviceJob", { jobName });   // re-reads that one record through the domain
 // or, when the write touches more than one record:
 await resyncDomain("facilityGroup");                     // re-snapshots the whole domain

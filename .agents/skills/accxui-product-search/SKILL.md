@@ -112,8 +112,12 @@ and a store getter that needs product fields takes a lookup from its caller (Ord
 `mapDocToProduct` and the `products` entity (framework), with a `version` bump in every app that
 picks the table, or an app adds it for itself with `extendEntities`.
 
-BOPIS keeps products in its own persisted Pinia store (`src/store/product.ts`: `fetchProducts`,
-`getProduct`, `findProduct`).
+BOPIS and Fulfillment keep products in their own persisted Pinia store (`src/store/product.ts`:
+`fetchProducts({ productIds })` skips cached ids and runs its own Solr query; templates read
+`getProduct(id)`). Work inside those apps through that store; don't add `useProducts` beside it
+(**accxui-apps-without-app-db**). Fulfillment also has `store/productStore.ts`, whose export is
+*also* named `useProductStore` (ids `"product"` and `"productStore"`): files import the product one
+as `useProduct`.
 
 ## Common mistakes
 
