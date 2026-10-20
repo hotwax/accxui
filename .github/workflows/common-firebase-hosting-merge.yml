@@ -13,6 +13,10 @@ on:
       firebaseProject:
         default: 'dev'
         type: string
+      buildEnvironment:
+        description: 'Optional JSON object of public environment values for this app build only'
+        default: '{}'
+        type: string
     secrets:
       envPAT:
         required: true
@@ -83,6 +87,7 @@ jobs:
         working-directory: apps/${{ inputs.appDir }}
 
       - name: Build
+        env: ${{ fromJSON(inputs.buildEnvironment) }}
         run: pnpm --filter ${{ inputs.appDir }} build
 
       - name: Firebase Install and Deploy
