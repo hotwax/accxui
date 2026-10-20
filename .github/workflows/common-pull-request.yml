@@ -55,3 +55,6 @@ jobs:
 
     - name: Build
       run: pnpm --filter ${{ inputs.appDir }} build
+
+    - name: Validate hosting compatibility output
+      run: node scripts/hosting/prepare.mjs "apps/${{ inputs.appDir }}"

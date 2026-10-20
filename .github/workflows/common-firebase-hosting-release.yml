@@ -53,6 +53,16 @@ jobs:
           fetch-depth: 0 # full history + tags: every release is built from its own tag
           fetch-tags: true
 
+      # Deployment compatibility must also work when app tags pin an older framework.
+      # Keep these tools outside the framework files changed by use_accxui below.
+      - name: Checkout current hosting compatibility tools
+        uses: actions/checkout@v4
+        with:
+          repository: hotwax/accxui
+          ref: main
+          path: .hosting-tools
+          sparse-checkout: scripts/hosting
+
       - name: Install pnpm
         uses: pnpm/action-setup@v4
         with:
@@ -178,6 +188,9 @@ jobs:
           jq -c '.hosting[] | {target, rewrites}' firebase.json
           find dist -mindepth 1 -maxdepth 1 -type d | sort
           echo "DEPLOY_MSG=Root $latest + versions ${versions[*]:-none}" >> "$GITHUB_ENV"
+
+      - name: Prepare legacy service-worker recovery
+        run: node .hosting-tools/scripts/hosting/prepare.mjs "apps/${{ inputs.appDir }}"
 
       - name: Deploy to Firebase
         working-directory: apps/${{ inputs.appDir }}
