@@ -29,7 +29,7 @@ import { useNotificationStore } from './store/notification'
 import { useEmbeddedAppStore } from './store/embeddedApp'
 import { initialiseConfig } from './core/configRegistry'
 import { onSessionCleared, clearSessionScopedState } from './core/sessionScope'
-import { useAuth } from './composables/useAuth'
+import { useAuth, isMoquiOmsRef } from './composables/useAuth'
 
 // ✅ These are pure types (erased during build)
 export { api, client, axios }
@@ -61,6 +61,7 @@ export {
   getFastTravelApp,
   buildAppUrl,
   moduleFederationUtil,
+  isMoquiOmsRef,
   useSolrSearch,
   useProducts,
   useShopify,
