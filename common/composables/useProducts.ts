@@ -96,7 +96,8 @@ function mapDocToProduct(doc: any): ResolvedProduct {
     internalName: String(doc?.internalName || ""),
     mainImageUrl: String(doc?.mainImageUrl || ""),
     goodIdentifications,
-    productFeatures: doc?.productFeatures || [],
+    productFeatures: (Array.isArray(doc?.productFeatures) ? doc.productFeatures : [doc?.productFeatures])
+      .filter((feature: unknown) => typeof feature === "string" && feature.trim().length > 0),
   };
 }
 

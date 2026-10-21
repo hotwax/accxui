@@ -8,6 +8,30 @@ on:
     branches: [ main ]
 
 jobs:
+  shared-tests:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout accxui
+      uses: actions/checkout@v4
+
+    - name: Install pnpm
+      uses: pnpm/action-setup@v4
+      with:
+        version: 9
+        run_install: false
+
+    - name: Use Node.js 22.x
+      uses: actions/setup-node@v4
+      with:
+        node-version: 22.x
+        cache: 'pnpm'
+
+    - name: Install Dependencies
+      run: pnpm install --frozen-lockfile
+
+    - name: Test shared code
+      run: pnpm test:unit --run
+
   build:
     runs-on: ubuntu-latest
 
