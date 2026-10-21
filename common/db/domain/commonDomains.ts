@@ -1,6 +1,7 @@
 /**
- * Standard HotWax OMS domains: the reference (class B) snapshot domains, and the product master
- * (class C, `productDomain.ts`).
+ * The common module's domains: one class B snapshot domain per seed reference table, and the
+ * product master (class C, `./productDomain.ts`). An app registers the ones for the tables it picked
+ * from `commonSchema`; `./domainRegistry.ts` keeps them for the framework's own lookups.
  */
 
 import { defineSnapshotDomain } from "../sync/defineSnapshotDomain";
@@ -300,10 +301,3 @@ export const commonDomains: Record<string, SyncDomain> = {
 
   product: productDomain,
 };
-
-export const commonDomainsByTable: Record<string, SyncDomain> = Object.fromEntries(
-  Object.values(commonDomains).map((domain) => [domain.table, domain])
-);
-
-export const COMMON_TABLE_NAMES = Object.keys(commonDomainsByTable);
-export const COMMON_DOMAIN_NAMES = Object.keys(commonDomains);

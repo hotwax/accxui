@@ -26,8 +26,8 @@ importing a main-thread helper there pulls Vue, Ionic, Pinia or DOM-only code in
 breaks it (`cookieHelper` reads `document.cookie`; `commonUtil` imports `@ionic/vue`, the i18n
 module and a Pinia store; `logger` and `translate` are Vue plugins):
 
-- `common/core/workerRemoteApi.ts`, `common/db/types.ts`, `common/db/schema/**`,
-  `common/db/seed/**`, `common/db/storage/**`, and `common/db/sync/**` **except** the main-thread
+- `common/core/workerRemoteApi.ts`, `common/db/types.ts`, `common/db/model/**`,
+  `common/db/schema/**`, `common/db/domain/**`, `common/db/storage/**`, and `common/db/sync/**` **except** the main-thread
   `syncService.ts` and `setupAppDbSync.ts`, plus anything these import.
 
 In those files never import `commonUtil`, `cookieHelper`, `translate` / `../core/i18n`, `logger`,

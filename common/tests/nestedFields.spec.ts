@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { defineEntity } from "../db/schema/defineEntity";
-import { defineSchema } from "../db/schema/defineSchema";
+import { defineEntity } from "../db/model/defineEntity";
+import { defineSchema } from "../db/model/defineSchema";
 import { projectRow, valuesAtPath } from "../db/storage/projection";
 import { dbClient } from "../db/storage/dbClient";
 import type { BaseDB } from "../db/storage/baseDb";

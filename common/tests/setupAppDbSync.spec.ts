@@ -31,7 +31,7 @@ vi.mock("../db/sync/channels", () => ({
 import { getAppDbSync, setupAppDbSync } from "../db/sync/setupAppDbSync";
 import { cacheScopeKey } from "../db/sync/reconciliation";
 import { createSyncService, __resetErrorState, serviceState } from "../db/sync/syncService";
-import type { AppDb } from "../db/schema/defineAppDb";
+import type { AppDb } from "../db/model/defineAppDb";
 import { dbClient } from "../db/storage/dbClient";
 
 /** An `AppDb` over a fake handle; `client()` is a real dbClient over it, as `defineAppDb` builds. */

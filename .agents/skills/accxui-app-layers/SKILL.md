@@ -31,7 +31,7 @@ what.
 7. **There is no `src/services/`.** API code goes in composables and stores, pure logic in `src/utils/`.
 8. **Names:** a composable is `useThing` (file in `src/composables/`), a store is `useThingStore`.
 9. **Worker code** (`src/db/**`, `src/workers/**`, apps with an app db) imports framework code by deep
-   path only (`@common/db/schema/*`, `@common/core/workerRemoteApi`, …), never `@common`, `commonUtil`,
+   path only (`@common/db/model/*`, `@common/core/workerRemoteApi`, …), never `@common`, `commonUtil`,
    `api()`, stores or composables (**accxui-app-db-setup**).
 
 ## Where code goes

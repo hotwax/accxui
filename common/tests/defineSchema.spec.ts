@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { defineEntity } from "../db/schema/defineEntity";
-import { defineSchema, mergeSchemas } from "../db/schema/defineSchema";
+import { defineEntity } from "../db/model/defineEntity";
+import { defineSchema, mergeSchemas } from "../db/model/defineSchema";
 import { projectRow } from "../db/storage/projection";
 
 const facilities = defineEntity({
@@ -260,40 +260,40 @@ describe("mergeSchemas", () => {
 
 describe("seed provenance", () => {
   it("marks nothing as a seed table by default", () => {
-    expect(base().seedTables.size).toBe(0);
+    expect(base().frameworkTables.size).toBe(0);
   });
 
   it("marks every table when the schema declares itself the seed schema", () => {
-    const seed = defineSchema({ facilities, productStores }, { seed: true });
+    const seed = defineSchema({ facilities, productStores }, { framework: true });
 
-    expect([...seed.seedTables].sort()).toEqual(["facilities", "productStores"]);
+    expect([...seed.frameworkTables].sort()).toEqual(["facilities", "productStores"]);
   });
 
   it("narrows provenance through pick", () => {
-    const seed = defineSchema({ facilities, productStores }, { seed: true });
+    const seed = defineSchema({ facilities, productStores }, { framework: true });
 
-    expect([...seed.pick(["facilities"]).seedTables]).toEqual(["facilities"]);
+    expect([...seed.pick(["facilities"]).frameworkTables]).toEqual(["facilities"]);
   });
 
   it("preserves provenance through extendIndexes", () => {
-    const seed = defineSchema({ facilities }, { seed: true });
+    const seed = defineSchema({ facilities }, { framework: true });
 
-    expect([...seed.extendIndexes({ facilities: ["ownerPartyId"] }).seedTables]).toEqual(["facilities"]);
+    expect([...seed.extendIndexes({ facilities: ["ownerPartyId"] }).frameworkTables]).toEqual(["facilities"]);
   });
 
   it("preserves provenance through extendEntities", () => {
-    const seed = defineSchema({ facilities }, { seed: true });
+    const seed = defineSchema({ facilities }, { framework: true });
 
-    expect([...seed.extendEntities({ facilities: { fields: { externalId: "text" } } }).seedTables]).toEqual(["facilities"]);
+    expect([...seed.extendEntities({ facilities: { fields: { externalId: "text" } } }).frameworkTables]).toEqual(["facilities"]);
   });
 
   it("keeps the two sides distinct when merged, even on a NAME COLLISION-free merge", () => {
-    const seed = defineSchema({ facilities }, { seed: true });
+    const seed = defineSchema({ facilities }, { framework: true });
     const own = defineSchema({ widgets: defineEntity({ primaryKey: "widgetId", fields: { widgetId: "text" } }) });
     const merged = mergeSchemas(seed, own);
 
-    expect(merged.seedTables.has("facilities")).toBe(true);
-    expect(merged.seedTables.has("widgets")).toBe(false);
+    expect(merged.frameworkTables.has("facilities")).toBe(true);
+    expect(merged.frameworkTables.has("widgets")).toBe(false);
   });
 
   it("treats an app's OWN table as app-owned even when its name matches a seed table", () => {
@@ -301,6 +301,6 @@ describe("seed provenance", () => {
     // admin/status while Company fetches oms/statuses.
     const own = defineSchema({ statuses: defineEntity({ primaryKey: "statusId", fields: { statusId: "text" } }) });
 
-    expect(own.seedTables.has("statuses")).toBe(false);
+    expect(own.frameworkTables.has("statuses")).toBe(false);
   });
 });

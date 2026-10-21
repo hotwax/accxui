@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { defineAppDb, type AppDbTables } from "../db/schema/defineAppDb";
-import { defineEntity } from "../db/schema/defineEntity";
-import { defineSchema, mergeSchemas } from "../db/schema/defineSchema";
+import { defineAppDb, type AppDbTables } from "../db/model/defineAppDb";
+import { defineEntity } from "../db/model/defineEntity";
+import { defineSchema, mergeSchemas } from "../db/model/defineSchema";
 
 /**
  * An app database type-checks table names against the tables ITS schema declared: the ones it
@@ -12,7 +12,7 @@ import { defineSchema, mergeSchemas } from "../db/schema/defineSchema";
 const seed = defineSchema({
   statuses: defineEntity({ primaryKey: "statusId", fields: { statusId: "text" } }),
   enums: defineEntity({ primaryKey: "enumId", fields: { enumId: "text" } }),
-}, { seed: true });
+}, { framework: true });
 
 const own = defineSchema({
   widgets: defineEntity({ primaryKey: "widgetId", fields: { widgetId: "text" } }),

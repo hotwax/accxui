@@ -1,6 +1,6 @@
 import type { BaseDB } from "../storage/baseDb";
 import { dbClient } from "../storage/dbClient";
-import type { Entity } from "../schema/defineEntity";
+import type { Entity } from "../model/defineEntity";
 import type { DbKey, QueryOptions } from "../types";
 
 /**

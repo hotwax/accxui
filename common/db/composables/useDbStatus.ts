@@ -3,7 +3,7 @@ import type { Subscription } from "dexie";
 import type { BaseDB } from "../storage/baseDb";
 import { type DbClient, type TxReader, dbClient } from "../storage/dbClient";
 import { DB_SYNC_CHANNEL } from "../sync/channels";
-import { COMMON_TABLE_NAMES, commonDomainsByTable } from "../seed/seedDomains";
+import { domainsByTable } from "../domain/domainRegistry";
 import type { CatalogItem } from "../sync/pollingWorkerHarness";
 
 export interface SyncDomainCatalogItem {
@@ -26,12 +26,12 @@ export interface SyncDomainStatus extends SyncDomainCatalogItem {
   status: "success" | "empty" | "none";
 }
 
-/** Every seed domain, derived from commonDomainsByTable. Prefer `appDb.statusCatalog`. */
-export const DEFAULT_COMMON_SYNC_CATALOG: SyncDomainCatalogItem[] = COMMON_TABLE_NAMES.map((table) => ({
-  name: commonDomainsByTable[table].name,
+/** Every framework domain, one per primary table, from the domain registry. Prefer `appDb.statusCatalog`. */
+export const DEFAULT_COMMON_SYNC_CATALOG: SyncDomainCatalogItem[] = Object.keys(domainsByTable).map((table) => ({
+  name: domainsByTable[table].name,
   table,
-  label: commonDomainsByTable[table].label,
-  syncClass: commonDomainsByTable[table].syncClass,
+  label: domainsByTable[table].label,
+  syncClass: domainsByTable[table].syncClass,
 }));
 
 /**

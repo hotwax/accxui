@@ -1,6 +1,6 @@
 /**
  * Product master from Solr (class C): fetched when a screen shows a product, never polled. Fills the
- * `products` seed table, which an app picks like any other (`commonSchema.pick([..., "products"])`).
+ * `products` table, which an app picks like any other (`commonSchema.pick([..., "products"])`).
  *
  * `refreshAfterMutation("product", { productIds })` asks for any number of ids. Only the ones the
  * table lacks, or holds for longer than PRODUCT_STALE_MS, are fetched, so a screen can ask for every
@@ -10,7 +10,7 @@
  */
 
 import { workerPost } from "../../core/workerRemoteApi";
-import { getAppDb } from "../schema/appDbRegistry";
+import { getAppDb } from "../model/appDbRegistry";
 import { defineSyncDomain } from "../sync/defineSyncDomain";
 // Type only, erased at build: the composable's runtime (vue) never reaches the worker.
 import type { ProductIdentification, ProductRow } from "../composables/useProductMaster";

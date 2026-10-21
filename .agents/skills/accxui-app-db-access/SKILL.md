@@ -199,7 +199,7 @@ AGENTS.md (App layout)": API calls, composables, stores in utils) are in **accxu
 | `useSeedData` in `App.vue` | call it in the page or component that shows the labels |
 | `appDb.entity(...)` or `loadSeedData()` outside `src/workers/**` and `src/db/**` | `useLiveEntity` / `useSeedData` in a composable or `.vue`; elsewhere take the rows as arguments |
 | an app db module (`@/db/companyDb`, …) imported in a store | a page or domain composable joins store data with `useLiveEntity` rows (a store may import `@/db/appDbSync`) |
-| `import Dexie / liveQuery from "dexie"`; `dbClient`, `getAppDb`, `ensureDbReady`, `hasSyncedThisLogin` …, or value imports from `@common/db/storage/dbClient` / `baseDb` / `schema/appDbRegistry` | `useLiveEntity` (type-only imports are fine) |
+| `import Dexie / liveQuery from "dexie"`; `dbClient`, `getAppDb`, `ensureDbReady`, `hasSyncedThisLogin` …, or value imports from `@common/db/storage/dbClient` / `baseDb` / `model/appDbRegistry` | `useLiveEntity` (type-only imports are fine) |
 | `appDb.raw()` | doesn't exist: `useLiveEntity` |
 | `appDb.get(oms)` | worker entry (`src/workers/*.worker.ts`) and `src/db/**` only |
 | `appDb.client()` | worker sync domains, and as the `useDbStatus(...)` argument only |

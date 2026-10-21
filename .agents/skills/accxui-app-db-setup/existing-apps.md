@@ -31,9 +31,9 @@ files or folders for something one of these already holds. Paths are under `apps
 
 | File | Holds | Add here when… |
 |---|---|---|
-| `src/db/orderManagerDb.ts` | `orderManagerDb = defineAppDb({ suffix: "OrderManagerDB", version, schema: commonSchema })`: **the whole common schema** (seed reference tables and the `products` master), **no own tables**; `getOrderManagerDb(oms)` for the worker; the `vN:` history comments | a schema change: bump `version` with a `vN:` line |
+| `src/db/orderManagerDb.ts` | `orderManagerDb = defineAppDb({ suffix: "OrderManagerDB", version, schema: commonSchema })`: **the whole seed module** (seed reference tables and the `products` master), **no own tables**; `getOrderManagerDb(oms)` for the worker; the `vN:` history comments | a schema change: bump `version` with a `vN:` line |
 | `src/db/appDbSync.ts` | `setupAppDbSync(...)`; exports only start / stop / `refreshAfterMutation` / `resyncDomain` / `resyncReferenceData` / `bootstrapState` (no class A functions) | the first class A domain: also export `activateSyncDomains` and the rest |
-| `src/workers/appSync.worker.ts` | `registerDomains(Object.values(commonDomains))` (the `product` domain included) + `exposeWorkerHarness` (registers the resolver in the worker, which the product domain writes through) | — |
+| `src/workers/appSync.worker.ts` | `registerDomains(Object.values(commonDomains))` (the `product` domain included; `src/main.ts` registers the same list on the main thread) + `exposeWorkerHarness` (registers the resolver in the worker, which the product domain writes through) | — |
 | `src/composables/useProductIdentity.ts` | names products the Settings product-identifier way (`primaryId` / `secondaryId`, …) over the framework's `useProductMaster`, which screens call directly (**accxui-product-search**) | — |
 
 - No `src/workers/domains/`, no own schema, no `appSyncDomains.ts` today. **Order Manager's first own
@@ -50,6 +50,6 @@ files or folders for something one of these already holds. Paths are under `apps
 ## Both
 
 - Build: `eslint src && pnpm check:wiring && vite build`; `pnpm test:unit` runs every spec.
-- Files under `src/db` and `src/workers` import framework code by deep path (`@common/db/schema/*`,
+- Files under `src/db` and `src/workers` import framework code by deep path (`@common/db/model/*`,
   `@common/db/sync/*`, `@common/core/workerRemoteApi`); the worker chunk must not pull in `vue` or
   `commonUtil`. Follow that in new files even where an older domain still imports a helper from `@common/db`.

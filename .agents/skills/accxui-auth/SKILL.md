@@ -19,7 +19,7 @@ import { accxuiConfig, initialiseConfig } from "../core/configRegistry";
 ```
 
 **Not in worker-reachable framework modules** (`common/core/workerRemoteApi.ts`, `common/db/types.ts`,
-`common/db/schema/**`, `common/db/seed/**`, `common/db/storage/**`, `common/db/sync/**` except the
+`common/db/model/**`, `common/db/schema/**`, `common/db/domain/**`, `common/db/storage/**`, `common/db/sync/**` except the
 main-thread `syncService.ts` / `setupAppDbSync.ts`). `useAuth` pulls in `commonUtil`, `cookieHelper`,
 `remoteApi`, a Pinia store and Vue, and `configRegistry` imports Vue, so either breaks the sync worker.
 `onSessionCleared` has no imports but does nothing there: the worker is a separate realm, so

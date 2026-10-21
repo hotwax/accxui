@@ -1,5 +1,5 @@
 import { computed, reactive, ref, type ComputedRef, type Ref } from "vue";
-import type { AppDb } from "../schema/defineAppDb";
+import type { AppDb } from "../model/defineAppDb";
 import {
   clearDomainErrors,
   clearScopeError,

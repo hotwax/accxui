@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { defineEntity } from "../db/schema/defineEntity";
+import { defineEntity } from "../db/model/defineEntity";
 import { canonicalKey, entityKeyOf, projectRow } from "../db/storage/projection";
 import { snapshotKeyOf } from "../db/sync/defineSnapshotDomain";
 

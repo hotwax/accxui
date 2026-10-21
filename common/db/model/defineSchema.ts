@@ -50,8 +50,8 @@ export interface AppSchema<Tables extends string = string> {
   tables: TableNames<Tables>;
   /** Table name → Dexie schema string, ready for `version().stores()`. `syncMeta` is not included — BaseDB adds it. */
   stores: Record<Tables, string>;
-  /** Tables that came from the framework seed schema. An app's own tables are absent, even when the name matches. */
-  seedTables: ReadonlySet<string>;
+  /** Tables that came from a framework module schema. An app's own tables are absent, even when the name matches. */
+  frameworkTables: ReadonlySet<string>;
   /** A subset of this schema. Throws on a table this schema does not have. */
   pick<Picked extends Tables>(tables: readonly Picked[]): AppSchema<Picked>;
   /** Extra secondary indexes appended after an entity's own. Throws on an unknown table, a pk restatement, or an unprojected field. */
@@ -101,8 +101,8 @@ function storesOf(entities: Record<string, Entity>): Record<string, string> {
 }
 
 // The table names are a compile-time view; at runtime every map is keyed by plain strings.
-function build<Tables extends string>(entities: Record<string, Entity>, seedTables: ReadonlySet<string>): AppSchema<Tables>;
-function build(entities: Record<string, Entity>, seedTables: ReadonlySet<string>): AppSchema {
+function build<Tables extends string>(entities: Record<string, Entity>, frameworkTables: ReadonlySet<string>): AppSchema<Tables>;
+function build(entities: Record<string, Entity>, frameworkTables: ReadonlySet<string>): AppSchema {
   function extendEntities(map: Partial<Record<string, EntityExtension>>): AppSchema {
     const extended: Record<string, Entity> = { ...entities };
 
@@ -143,14 +143,14 @@ function build(entities: Record<string, Entity>, seedTables: ReadonlySet<string>
       });
     }
 
-    return build(extended, seedTables);
+    return build(extended, frameworkTables);
   }
 
   return {
     entities,
     tables: Object.freeze(Object.fromEntries(Object.keys(entities).map((table) => [table, table]))) as any,
     stores: storesOf(entities),
-    seedTables,
+    frameworkTables,
 
     pick(tables: readonly string[]) {
       const picked: Record<string, Entity> = {};
@@ -163,7 +163,7 @@ function build(entities: Record<string, Entity>, seedTables: ReadonlySet<string>
         }
         picked[table] = entity;
       }
-      return build(picked, new Set(tables.filter((t) => seedTables.has(t))));
+      return build(picked, new Set(tables.filter((t) => frameworkTables.has(t))));
     },
 
     extendIndexes(map: Partial<Record<string, string[]>>) {
@@ -184,26 +184,27 @@ function build(entities: Record<string, Entity>, seedTables: ReadonlySet<string>
 }
 
 /**
- * `options.seed` marks every table in the map as framework seed data. Only `commonSchema` passes
- * it. It exists because an app may legitimately declare its OWN table with a seed table's name —
- * Company's `statuses` hits `oms/statuses` while the seed one hits `admin/status` — and deciding
- * provenance by name alone would point the app's table at the wrong endpoint.
+ * `options.framework` marks every table in the map as framework data. Only the framework module
+ * schemas (`common/db/schema/*`) pass it. It exists because an app may legitimately declare its OWN
+ * table with a framework table's name — Company's `statuses` hits `oms/statuses` while the seed one
+ * hits `admin/status` — and deciding provenance by name alone would point the app's table at the
+ * wrong endpoint.
  */
 export function defineSchema<Map extends Record<string, Entity>>(
   map: Map,
-  options: { seed?: boolean } = {},
+  options: { framework?: boolean } = {},
 ): AppSchema<Extract<keyof Map, string>> {
   if("syncMeta" in map) {
     throw new Error('[db] defineSchema: "syncMeta" is provided by BaseDB and must not be declared.');
   }
-  return build({ ...map }, new Set(options.seed ? Object.keys(map) : []));
+  return build({ ...map }, new Set(options.framework ? Object.keys(map) : []));
 }
 
 export function mergeSchemas<Schemas extends AppSchema<any>[]>(
   ...schemas: Schemas
 ): AppSchema<TablesOf<Schemas[number]>> {
   const merged: Record<string, Entity> = {};
-  const mergedSeed = new Set<string>();
+  const mergedFramework = new Set<string>();
 
   for (const schema of schemas) {
     for (const [table, entity] of Object.entries(schema.entities as Record<string, Entity>)) {
@@ -214,9 +215,9 @@ export function mergeSchemas<Schemas extends AppSchema<any>[]>(
         );
       }
       merged[table] = entity;
-      if(schema.seedTables.has(table)) mergedSeed.add(table);
+      if(schema.frameworkTables.has(table)) mergedFramework.add(table);
     }
   }
 
-  return build<TablesOf<Schemas[number]>>(merged, mergedSeed);
+  return build<TablesOf<Schemas[number]>>(merged, mergedFramework);
 }

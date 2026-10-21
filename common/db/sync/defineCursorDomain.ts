@@ -9,10 +9,10 @@
  */
 
 import type { BaseDB } from "../storage/baseDb";
-import type { Entity } from "../schema/defineEntity";
+import type { Entity } from "../model/defineEntity";
 import { keepNewerThan } from "../storage/projection";
 import type { SyncContext, SyncDomain } from "../types";
-import { getAppDb } from "../schema/appDbRegistry";
+import { getAppDb } from "../model/appDbRegistry";
 import { defineCachedEntity } from "./cachedEntity";
 import { registerSyncDomain } from "./syncRegistry";
 import { pageNewestFirst } from "../../core/workerRemoteApi";

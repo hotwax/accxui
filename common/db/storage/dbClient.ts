@@ -19,7 +19,7 @@ import {
   markSyncedThisLogin,
 } from "./baseDb";
 import type { DbKey, QueryOptions } from "../types";
-import { listIndexField, type Entity } from "../schema/defineEntity";
+import { listIndexField, type Entity } from "../model/defineEntity";
 import { diffStaleKeys, entityKeyOf, newestValue, projectRows, valuesAtPath } from "./projection";
 
 function keysOfRows(rows: Array<Record<string, unknown>>, entity: Entity): DbKey[] {

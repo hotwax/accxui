@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { dbClient } from "../db/storage/dbClient";
-import { defineEntity } from "../db/schema/defineEntity";
+import { defineEntity } from "../db/model/defineEntity";
 import type { BaseDB } from "../db/storage/baseDb";
 
 function fakeDb() {

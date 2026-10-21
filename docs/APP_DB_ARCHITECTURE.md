@@ -173,8 +173,8 @@ are all derived from them.
 
 ```mermaid
 flowchart LR
-    subgraph FW["common/db/seed"]
-      CE["defineEntity × N"] --> CS["commonSchema<br/>defineSchema(map, { seed: true })"]
+    subgraph FW["common/db/schemas"]
+      CE["defineEntity × N"] --> CS["commonSchema<br/>defineSchema(map, { framework: true })"]
     end
     subgraph AP["APP: src/db"]
       AE["defineEntity × N"] --> AS["appSchema<br/>defineSchema(map)"]
@@ -183,7 +183,7 @@ flowchart LR
     PICK --> MERGE["mergeSchemas(picked, appSchema)"]
     AS --> MERGE
     MERGE --> DEF["defineAppDb({ suffix: 'AppDB', version, schema })"]
-    DEF --> APPDB["appDb<br/>tables · entities · seedTables · statusCatalog<br/>client() · entity(t) · get(oms)"]
+    DEF --> APPDB["appDb<br/>tables · entities · frameworkTables · statusCatalog<br/>client() · entity(t) · get(oms)"]
     DEF --> REG[("appDbRegistry<br/>setAppDb (per realm)")]
     APPDB -. "first use: get(oms)" .-> BDB["new BaseDB('{oms}-AppDB', stores + syncMeta, version)"]
 ```
@@ -228,8 +228,8 @@ still drops the rows.
     facilities: { fields: { externalId: "text" }, indexes: ["externalId"], rename: { externalId: "externalFacilityId" } },
   })
   ```
-- `seedTables` records which tables came from `commonSchema`. It is tracked by origin, not by name,
-  because the APP may declare its own table with a seed table's name.
+- `frameworkTables` records which tables came from a framework module schema. It is tracked by
+  origin, not by name, because the APP may declare its own table with a framework table's name.
 
 ### 3.3 `defineAppDb`: the APP's database
 
@@ -334,14 +334,14 @@ flowchart TB
     subgraph FW["Framework: common/db (deep imports only)"]
       direction TB
       BLD["Builders — common/db/sync<br/>defineSnapshotDomain (class B)<br/>defineCursorDomain · defineSyncDomain (class A / C)"]
-      CD["commonDomains — seed/seedDomains.ts<br/>one snapshot domain per seed table<br/>(status, enum, facility, geo, …)<br/>+ product (class C, seed/productDomain.ts)"]
+      CD["commonDomains — domain/commonDomains.ts<br/>one snapshot domain per seed table<br/>(status, enum, facility, geo, …)<br/>+ product (class C, domain/productDomain.ts)"]
       BLD --> CD
     end
 
     subgraph APP["APP: src/workers"]
       direction TB
       OWN["domains/*.ts<br/>the APP's own domains<br/>+ overrides of seed domains<br/>(same name, APP-specific config)"]
-      FILT["appSyncDomains.ts<br/>commonDomains filtered to<br/>appDb.seedTables, minus OVERRIDDEN_SEED_TABLES"]
+      FILT["appSyncDomains.ts<br/>each used module's domains filtered to<br/>appDb.frameworkTables, minus OVERRIDDEN_SEED_TABLES"]
       LIST["appSyncDomains = [...filtered seed, ...own]"]
       FILT --> LIST
       OWN --> LIST
@@ -349,7 +349,7 @@ flowchart TB
 
     BLD -- "same builders" --> OWN
     CD --> FILT
-    SEEDT["appDb.seedTables<br/>(tables picked from commonSchema)"] -. filter .-> FILT
+    SEEDT["appDb.frameworkTables<br/>(tables picked from the module schemas)"] -. filter .-> FILT
 
     subgraph WREALM["Worker realm: appSync.worker.ts"]
       direction TB
@@ -368,7 +368,7 @@ flowchart TB
     HAR -- "domain.sync(ctx) / refetchOne(ctx, pk)" --> RUN["the domain runs:<br/>projection = getAppDb().entities[table]<br/>(the APP's composed entity)<br/>writes via the access layer:<br/>snapshotReplace · upsertMany"]
 ```
 
-- **Framework domains are definitions, not registrations.** Importing `commonDomains` runs
+- **Framework domains are definitions, not registrations.** Importing a module's domains runs
   nothing; a domain runs only once the APP's list puts it in the registry. A seed table the APP
   did not pick has no domain registered, and a domain that is not registered never runs, with no
   error. The `product` domain is in `commonDomains` too, so an APP that picks the `products` table
@@ -385,7 +385,7 @@ In code:
 ```ts
 // src/workers/appSyncDomains.ts
 const appSeedDomains = Object.values(commonDomains)
-  .filter((d) => d.table && appDb.seedTables.has(d.table) && !OVERRIDDEN_SEED_TABLES.has(d.table));
+  .filter((d) => d.table && appDb.frameworkTables.has(d.table) && !OVERRIDDEN_SEED_TABLES.has(d.table));
 export const appSyncDomains = [...appSeedDomains, ...appOwnDomains];
 
 // src/workers/appSync.worker.ts
@@ -441,10 +441,10 @@ The APP's folder structure, with what each file must contain, is in
 
 | Layer | Framework (`common/db/`) | APP (`src/`) |
 |---|---|---|
-| Schema | `schema/defineEntity.ts`, `schema/defineSchema.ts`, `seed/seedSchema.ts` | `db/appSchema.ts` |
-| Database | `schema/defineAppDb.ts`, `schema/appDbRegistry.ts`, `storage/baseDb.ts` | `db/appDb.ts` |
+| Schema | `model/defineEntity.ts`, `model/defineSchema.ts`, `schema/commonSchema.ts` (`schema/schemaRegistry.ts` merges them for framework checks) | `db/appSchema.ts` |
+| Database | `model/defineAppDb.ts`, `model/appDbRegistry.ts`, `storage/baseDb.ts` | `db/appDb.ts` |
 | Access | `storage/dbClient.ts`, `storage/projection.ts` | — |
 | Read surface | `composables/useLiveEntity.ts`, `useSeedData.ts`, `useProductMaster.ts`, `useDbStatus.ts` | pages, components, composables; `views/Settings.vue` |
-| Domains | `sync/defineSnapshotDomain.ts`, `defineCursorDomain.ts`, `defineSyncDomain.ts`, `cachedEntity.ts`, `seed/seedDomains.ts`, `seed/productDomain.ts` | `workers/domains/*.ts`, `workers/appSyncDomains.ts` |
+| Domains | `sync/defineSnapshotDomain.ts`, `defineCursorDomain.ts`, `defineSyncDomain.ts`, `cachedEntity.ts`, `domain/commonDomains.ts`, `domain/productDomain.ts` (`domain/domainRegistry.ts` merges them for framework lookups) | `workers/domains/*.ts`, `workers/appSyncDomains.ts` |
 | Worker runtime | `sync/pollingWorkerHarness.ts`, `sync/syncRegistry.ts`, `core/workerRemoteApi.ts` | `workers/appSync.worker.ts` |
 | Main-thread runtime | `sync/syncService.ts`, `sync/setupAppDbSync.ts`, `sync/channels.ts`, `sync/reconciliation.ts` | `db/appDbSync.ts`, `main.ts`, `App.vue`, `store/user.ts` |
