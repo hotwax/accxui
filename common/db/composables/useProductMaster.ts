@@ -14,7 +14,7 @@
 import { computed, effectScope, getCurrentScope, onScopeDispose, type EffectScope, type Ref } from "vue";
 import logger from "../../core/logger";
 import { onSessionCleared } from "../../core/sessionScope";
-import { buildProductQuery, mapDocToProduct, PRODUCT_BATCH_SIZE, PRODUCT_STALE_MS } from "../seed/productDomain";
+import { buildProductQuery, mapDocToProduct, PRODUCT_BATCH_SIZE, PRODUCT_STALE_MS } from "../domain/productDomain";
 import { getAppDbSync } from "../sync/setupAppDbSync";
 import { useLiveEntity } from "./useLiveEntity";
 

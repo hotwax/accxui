@@ -95,10 +95,10 @@ Company still uses `useProducts`.
 
 | Piece | Where (`@common/db`) | Role |
 |---|---|---|
-| `products` table | `common/db/seed/seedSchema.ts` | an app picks it like any seed table (`commonSchema.pick([..., "products"])`; Order Manager takes the whole `commonSchema`) and registers the seed domains as usual. A `version` bump drops its rows |
-| `product` domain (class C) | `common/db/seed/productDomain.ts` | `refreshAfterMutation("product", { productIds })` fetches only the ids missing or stale (`force: true`: all), from Maarg's `admin/search/query`, 200 per query, and stores them through the app's composed entity |
+| `products` table | `common/db/schema/commonSchema.ts` | an app picks it like any seed table (`commonSchema.pick([..., "products"])`; Order Manager takes the whole `commonSchema`) and registers the seed domains as usual. A `version` bump drops its rows |
+| `product` domain (class C) | `common/db/domain/productDomain.ts` | `refreshAfterMutation("product", { productIds })` fetches only the ids missing or stale (`force: true`: all), from Maarg's `admin/search/query`, 200 per query, and stores them through the app's composed entity |
 | `useProductMaster()` | `common/db/composables/useProductMaster.ts` | during setup: `getProduct(id)` (live; also queues the id, and queued ids go to the worker in one batch), `prefetch(ids)` (awaitable, never rejects) and `getByIds(ids)` (Solr, not stored: a picker's results). One live read shared by every mounted caller. It asks through the app's `refreshAfterMutation`, found with `getAppDbSync()` (registered by `setupAppDbSync`). Also exports `ProductRow` |
-| `PRODUCT_FIELDS`, `mapDocToProduct`, `buildProductQuery`, `PRODUCT_STALE_MS` | `common/db/seed/productDomain.ts` | the Solr query and doc mapping, beside the domain that uses them; worker-safe |
+| `PRODUCT_FIELDS`, `mapDocToProduct`, `buildProductQuery`, `PRODUCT_STALE_MS` | `common/db/domain/productDomain.ts` | the Solr query and doc mapping, beside the domain that uses them; worker-safe |
 
 How a product is named stays in the app: Order Manager's `useProductIdentity()` has `primaryId(product,
 fallbacks)` / `secondaryId(...)` (the Settings product identifier) and the per-productId helpers

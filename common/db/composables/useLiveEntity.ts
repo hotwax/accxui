@@ -15,7 +15,7 @@ import { computed, getCurrentScope, onScopeDispose, ref, shallowRef, watch, type
 import type { Observable, Subscription } from "dexie";
 import { type BaseDB, loginMarkerKey } from "../storage/baseDb";
 import { type DbClient, dbClient } from "../storage/dbClient";
-import { getAppDb } from "../schema/appDbRegistry";
+import { getAppDb } from "../model/appDbRegistry";
 import type { QueryOptions } from "../types";
 import { serviceState } from "../sync/syncService";
 

@@ -20,7 +20,7 @@ is a **separate commit in the accxui repo** from any app change, each app being 
    (`../utils/commonUtil`, `../core/i18n`), never `@common` or `../index`: the barrel creates
    circular imports. Never import from an app (`@/…`).
 4. **Respect the worker boundary.** `common/core/workerRemoteApi.ts`, `common/db/types.ts`,
-   `common/db/schema/**`, `common/db/seed/**`, `common/db/storage/**` and `common/db/sync/**` (except
+   `common/db/model/**`, `common/db/schema/**`, `common/db/domain/**`, `common/db/storage/**` and `common/db/sync/**` (except
    `syncService.ts` / `setupAppDbSync.ts`) run inside sync workers: no Vue, Ionic, Pinia, `commonUtil`,
    `logger`, `translate`, `cookieHelper`, `useAuth`, `configRegistry` there, not even indirectly
    (the worker-safe replacements are in **accxui-common-helpers**).
@@ -41,9 +41,11 @@ is a **separate commit in the accxui repo** from any app change, each app being 
    the keys each consuming app must add.
 10. **Seed-set changes break pinned tests and need version bumps.** A new or changed seed table also
    updates `common/tests/fixtures/seedSchemaAfter.json`, the domain-name list in
-   `common/tests/commonSchema.spec.ts` and the catalog length in `common/tests/defineAppDb.spec.ts`,
+   `common/tests/schemaRegistry.spec.ts` and the catalog length in `common/tests/defineAppDb.spec.ts`,
    and bumps the app db `version` of **every app that picks the table**, including Order Manager, which
-   takes the whole `commonSchema` (a separate commit in its repo).
+   takes the whole `commonSchema` (a separate commit in its repo). A new module is a schema file and
+   a domains file plus an entry in `schemaRegistry.ts` and `domainRegistry.ts`; no app changes until it
+   picks from it.
 11. **Names in `composables/*.ts`:** every exported function there must start with `use` (root lint).
    A plain helper goes in `common/utils/`.
 
@@ -57,7 +59,7 @@ is a **separate commit in the accxui repo** from any app change, each app being 
 | A directive | `common/directives/<name>.ts` | `common/index.ts`; apps register it in `main.ts` |
 | Shared CSS | `common/css/theme.css` (global) or `settings.css` (under `.settings`) | imported by every app's `main.ts` |
 | A Vite plugin | `common/vite/` | imported by path from each app's `vite.config` |
-| A framework seed table / domain / lookup | `common/db/seed/*`, `useSeedData`'s `createSeedLookups` | **accxui-app-db-setup**, **accxui-seed-data** |
+| A framework table / domain / lookup | `common/db/schema/*`, `common/db/domain/*`, `useSeedData`'s `createSeedLookups` | **accxui-app-db-setup**, **accxui-seed-data** |
 
 ## Moving a component from apps into `common/`
 

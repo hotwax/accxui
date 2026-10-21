@@ -1,16 +1,18 @@
 /**
- * The HotWax OMS seed reference tables, and the `products` master, each declared exactly once.
+ * The common module: the HotWax OMS seed reference tables, and the `products` master, each
+ * declared exactly once. Apps pick from it; `./schemaRegistry.ts` merges it with the other modules
+ * for the framework's own checks.
  *
- * Keyed by IndexedDB store name, so `commonSchema.stores` is what Dexie's `version().stores()`
- * wants with no name/table mapping in between. Standard domains live in the sibling
- * `commonDomains.ts`, keyed by the same table names.
+ * Keyed by IndexedDB store name, so `.stores` is what Dexie's `version().stores()` wants with no
+ * name/table mapping in between. Its domains live in the sibling `commonDomains.ts`, keyed by the
+ * same table names.
  *
  * Imports only `defineEntity`/`defineSchema`, both of which import only `./types` — app db modules
  * reach this file and the sync workers import those, so nothing here may pull in `vue`.
  */
 
-import { defineEntity } from "../schema/defineEntity";
-import { defineSchema } from "../schema/defineSchema";
+import { defineEntity } from "../model/defineEntity";
+import { defineSchema } from "../model/defineSchema";
 import type { FieldKind } from "../types";
 
 /** A description-carrying lookup table: `<id>` plus `description`, plus whatever else is passed. */
@@ -359,4 +361,4 @@ export const commonSchema = defineSchema({
     },
     retainOnLogout: true,
   }),
-}, { seed: true });
+}, { framework: true });

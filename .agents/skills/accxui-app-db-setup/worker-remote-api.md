@@ -1,6 +1,6 @@
 # `workerRemoteApi`: HTTP inside a sync domain
 
-`@common/core/workerRemoteApi` is the only way a sync domain (`src/workers/**`, `common/db/seed/*`)
+`@common/core/workerRemoteApi` is the only way a sync domain (`src/workers/**`, `common/db/domain/*`)
 talks to the server. It uses `fetch`, not axios: no interceptors, no cookies, no `commonUtil`, so it
 runs in the worker. Main-thread code uses `api()` instead (**accxui-app-layers**), never this.
 

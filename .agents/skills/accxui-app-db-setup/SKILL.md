@@ -21,7 +21,7 @@ domain or seed pick goes in (for example: a Company class B table from one list 
 ## Rules
 
 1. **Worker code uses deep imports only.** `src/db/**` and `src/workers/**` run in the sync worker:
-   import `@common/db/schema/*`, `@common/db/seed/*`, `@common/db/sync/*`, `@common/db/types`,
+   import `@common/db/model/*`, `@common/db/schema/*`, `@common/db/domain/*`, `@common/db/sync/*`, `@common/db/types`,
    `@common/core/workerRemoteApi`. Never `@common`, `@common/db`, `commonUtil`, `api()`, stores or
    composables. *Why:* the barrel pulls in Vue and the worker chunk breaks or bloats.
 2. **Only sync domains write the app db.** A screen missing a record calls `refreshAfterMutation`; a
@@ -111,8 +111,8 @@ re-check pass.
 
 ```ts
 // src/db/appSchema.ts
-import { defineEntity } from "@common/db/schema/defineEntity";
-import { defineSchema } from "@common/db/schema/defineSchema";
+import { defineEntity } from "@common/db/model/defineEntity";
+import { defineSchema } from "@common/db/model/defineSchema";
 
 export const appSchema = defineSchema({
   cycleCounts: defineEntity({
@@ -131,9 +131,9 @@ export const appSchema = defineSchema({
 
 ```ts
 // src/db/appDb.ts
-import { defineAppDb } from "@common/db/schema/defineAppDb";
-import { mergeSchemas } from "@common/db/schema/defineSchema";
-import { commonSchema } from "@common/db/seed/seedSchema";
+import { defineAppDb } from "@common/db/model/defineAppDb";
+import { mergeSchemas } from "@common/db/model/defineSchema";
+import { commonSchema } from "@common/db/schema/commonSchema";
 import { appSchema } from "./appSchema";
 
 const APP_SEED_TABLES = ["statuses", "facilities"] as const;   // only the seed tables you read
@@ -161,9 +161,12 @@ appDb.setOmsInstanceResolver(() => "default");        // test fallback; main.ts 
 
 ### Framework (seed) entities: pick, extend, override
 
-Seed tables are declared in `common/db/seed/seedSchema.ts` and filled by the class B domains in
-`common/db/seed/seedDomains.ts`. Check the seed domain's `listUrl` / `collectionKey` against your API
-before relying on one.
+Framework tables live in modules, each a file in `common/db/schema/` (`commonSchema.ts`) and one
+in `common/db/domain/` (`commonDomains.ts`);
+an app picks from each module schema it uses and registers that module's domains, filtered to its
+picked tables (`schemaRegistry` / `domainRegistry` are framework-internal; lint rejects them). The
+reference tables are filled by class B snapshot domains. Check the seed domain's `listUrl` /
+`collectionKey` against your API before relying on one.
 
 | Seed table | Seed domain name | Refetch after a write |
 |---|---|---|
@@ -280,7 +283,7 @@ export const facilityDomain = defineSnapshotDomain({
 });
 
 // src/workers/appSyncDomains.ts — no OVERRIDDEN_SEED_TABLES entry: the seed `facility` domain is
-// already filtered out, because `facilities` is not in appDb.seedTables any more
+// already filtered out, because `facilities` is not in appDb.frameworkTables any more
 export const appSyncDomains: SyncDomain[] = [...appSeedDomains, facilityDomain, /* own domains */];
 ```
 
@@ -527,14 +530,14 @@ these with `pageAll({ …, requireComplete: true })` ([worker-remote-api.md](wor
 ```ts
 // src/workers/appSyncDomains.ts
 import type { SyncDomain } from "@common/db/types";
-import { commonDomains } from "@common/db/seed/seedDomains";
+import { commonDomains } from "@common/db/domain/commonDomains";
 import { appDb } from "@/db/appDb";
 import { cycleCountDomain } from "./domains/cycleCountDomain";
 import { cycleCountItemDomain } from "./domains/cycleCountItemDomain";
 
 const OVERRIDDEN_SEED_TABLES = new Set<string>([]);   // seed tables filled by your own domain instead
 const appSeedDomains = Object.values(commonDomains).filter((d) =>
-  d.table && appDb.seedTables.has(d.table) && !OVERRIDDEN_SEED_TABLES.has(d.table));
+  d.table && appDb.frameworkTables.has(d.table) && !OVERRIDDEN_SEED_TABLES.has(d.table));
 export const appSyncDomains: SyncDomain[] = [...appSeedDomains, cycleCountDomain, cycleCountItemDomain];
 ```
 
@@ -667,7 +670,7 @@ markSyncedThisLogin, count })` on the mocked `appDb`. A composable that calls `r
 `appDb.entity(...)`: it resolves the database through the registry, so the mock above never sees its
 writes. Follow Company's `tests/workers/carrierReferenceDomains.spec.ts`: mock `@/db/<app>Db` with a
 Dexie-shaped stub as `get` / `raw`, then per test `vi.resetModules()`, import the app db,
-`setAppDb(appDb)` from `@common/db/schema/appDbRegistry`, and import the domain module after it.
+`setAppDb(appDb)` from `@common/db/model/appDbRegistry`, and import the domain module after it.
 
 ## Common mistakes
 

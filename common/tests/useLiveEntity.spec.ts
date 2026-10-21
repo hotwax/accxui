@@ -10,7 +10,7 @@ const harness = vi.hoisted(() => ({
   unsubscribed: [] as string[],
 }));
 
-vi.mock("../db/schema/appDbRegistry", () => ({
+vi.mock("../db/model/appDbRegistry", () => ({
   getAppDb: () => ({
     client: () => ({
       entity: () => ({

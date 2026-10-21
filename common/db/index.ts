@@ -4,18 +4,18 @@
 
 export * from "./types";
 
-export * from "./schema/defineEntity";
-export * from "./schema/defineSchema";
-export * from "./schema/defineAppDb";
-export * from "./schema/appDbRegistry";
+export * from "./model/defineEntity";
+export * from "./model/defineSchema";
+export * from "./model/defineAppDb";
+export * from "./model/appDbRegistry";
 
 export * from "./storage/projection";
 export * from "./storage/baseDb";
 export * from "./storage/dbClient";
 
-export * from "./seed/seedSchema";
-export * from "./seed/seedDomains";
-export * from "./seed/productDomain";
+export { commonSchema } from "./schema/commonSchema";
+export { commonDomains } from "./domain/commonDomains";
+export * from "./domain/productDomain";
 
 export * from "./composables/useLiveEntity";
 export * from "./composables/useDbStatus";

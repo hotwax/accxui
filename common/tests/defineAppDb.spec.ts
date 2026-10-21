@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { defineEntity } from "../db/schema/defineEntity";
-import { defineSchema, mergeSchemas } from "../db/schema/defineSchema";
-import { defineAppDb } from "../db/schema/defineAppDb";
-import { commonSchema } from "../db/seed/seedSchema";
-import { COMMON_DOMAIN_NAMES, commonDomainsByTable } from "../db/seed/seedDomains";
+import { defineEntity } from "../db/model/defineEntity";
+import { defineSchema, mergeSchemas } from "../db/model/defineSchema";
+import { defineAppDb } from "../db/model/defineAppDb";
+import { commonSchema } from "../db/schema/commonSchema";
+import { REGISTRY_DOMAIN_NAMES, domainsByTable } from "../db/domain/domainRegistry";
 import { clearSyncRegistry, getAllSyncDomains, registerDomains } from "../db/sync/syncRegistry";
 import { DEFAULT_COMMON_SYNC_CATALOG } from "../db/composables/useDbStatus";
 
@@ -61,7 +61,7 @@ describe("registerDomains", () => {
   beforeEach(() => clearSyncRegistry());
 
   it("registers domain definitions provided to it", () => {
-    registerDomains([commonDomainsByTable.facilities, commonDomainsByTable.productStores]);
+    registerDomains([domainsByTable.facilities, domainsByTable.productStores]);
 
     expect(getAllSyncDomains().map((d) => d.name).sort()).toEqual(["facility", "productStore"]);
   });
@@ -69,15 +69,15 @@ describe("registerDomains", () => {
 
 describe("seed fetch config", () => {
   it("re-lists and snapshots just the one facility group, pruning members that left it", () => {
-    expect(commonDomainsByTable.groupFacilities.name).toBe("groupFacility");
+    expect(domainsByTable.groupFacilities.name).toBe("groupFacility");
   });
 
   it("scopes the carrier list to the CARRIER role", () => {
-    expect(commonDomainsByTable.carriers.name).toBe("carrier");
+    expect(domainsByTable.carriers.name).toBe("carrier");
   });
 
   it("fans productStoreFacility out over cached product stores", () => {
-    expect(commonDomainsByTable.productStoreFacilities.name).toBe("productStoreFacility");
+    expect(domainsByTable.productStoreFacilities.name).toBe("productStoreFacility");
   });
 });
 
@@ -156,16 +156,16 @@ describe("provenance keeps an app's own table out of the seed machinery", () => 
     expect(db.statusCatalog).toEqual([]);
   });
 
-  it("includes common status table in statusCatalog when picked from commonSchema", () => {
+  it("includes the framework status table in statusCatalog when picked from commonSchema", () => {
     const db = defineAppDb({ suffix: "TestDB", schema: commonSchema.pick(["statuses"]) });
     expect(db.statusCatalog.map((s) => s.name)).toEqual(["status"]);
   });
 });
 
 describe("DEFAULT_COMMON_SYNC_CATALOG", () => {
-  it("derives one entry per seed table, with its singular domain name and label", () => {
-    expect(DEFAULT_COMMON_SYNC_CATALOG).toHaveLength(30);
-    expect(DEFAULT_COMMON_SYNC_CATALOG.map((e) => e.name).sort()).toEqual([...COMMON_DOMAIN_NAMES].sort());
+  it("derives one entry per framework domain, with its primary table and label", () => {
+    expect(DEFAULT_COMMON_SYNC_CATALOG).toHaveLength(REGISTRY_DOMAIN_NAMES.length);
+    expect(DEFAULT_COMMON_SYNC_CATALOG.map((e) => e.name).sort()).toEqual([...REGISTRY_DOMAIN_NAMES].sort());
     for (const entry of DEFAULT_COMMON_SYNC_CATALOG) {
       expect(entry.table, `${entry.name} missing table`).toBeTruthy();
       expect(entry.label, `${entry.name} missing label`).toBeTruthy();

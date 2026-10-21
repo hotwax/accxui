@@ -271,8 +271,8 @@ const { domains, totalRows, lastSyncedAt, refreshDomain, refreshAll } = useDbSta
 
 Build the catalog from `appSyncDomains`, not from the worker (`syncService()?.catalog()`): the card
 then lists every domain even before the worker is up or after it failed to start, when its
-per-domain Refresh is the way back. `appDb.statusCatalog` exists too, but it lists only the seed
-tables' common domains, not the APP's own or overridden ones.
+per-domain Refresh is the way back. `appDb.statusCatalog` exists too, but it lists only the framework
+domains of the framework tables the APP picked, not the APP's own or overridden ones.
 
 Actions are injected rather than imported, because the card must refresh through the same service
 that owns your app's worker.
@@ -475,7 +475,8 @@ export const appDb = defineAppDb({
 });
 ```
 
-`sharedSchema` stands for whichever schema declares the entity: `commonSchema` for a seed table, or
+`sharedSchema` stands for whichever schema declares the entity: a framework module schema
+(`commonSchema`) for a framework table, or
 any other shared schema the APP picks from. Then read the field as usual:
 `useLiveEntity(appDb.tables.products, () => ({ equals: { brandName } }))`.
 
@@ -516,8 +517,10 @@ const APP_SEED_TABLES = ["productStores", "statuses", "enums", "facilities", /* 
 mergeSchemas(commonSchema.pick([...APP_SEED_TABLES]), appSchema)
 ```
 
-To take every seed table, pass `commonSchema` itself. Picking seven gives seven tables, not all of
-them.
+To take every table of a module, pass the module schema itself (`schema: commonSchema`, as Order
+Manager does). Picking seven gives seven tables, not all of them. To use more than one module,
+merge them: `mergeSchemas(commonSchema.pick([...]), otherSchema.pick([...]), appSchema)`. Register
+the matching domains from each module's domains file, filtered to `appDb.frameworkTables` (below).
 
 Two ways to fill a seed table differently from the framework (to keep the framework's domain and
 only store more of each row, see [Extending an entity](#extending-an-entity)):
@@ -531,6 +534,31 @@ only store more of each row, see [Extending an entity](#extending-an-entity)):
 - **Your own table under a seed name.** Declare it in your own schema and don't `pick` the seed one.
   The framework tracks provenance, so `appDb.statusCatalog` leaves it out instead of pointing it at
   the seed endpoint.
+
+### Framework modules
+
+The framework's tables are grouped in modules. Each module is one file in `common/db/schema/`
+(declared `{ framework: true }`) and one in `common/db/domain/`; the API they are written with is in
+`common/db/model/` (`defineEntity`, `defineSchema`, `defineAppDb`):
+
+| Module | Tables (`schema/`) | Domains (`domain/`) |
+|---|---|---|
+| common | `commonSchema.ts`: the seed reference tables and `products` | `commonDomains.ts`: class B snapshots, and `product` (C) from `productDomain.ts` |
+
+`commonSchema` / `commonDomains` are the framework's base module: the seed reference tables and
+`products`, which every app with a database picks from. Further modules are opt-in. "Seed tables"
+(`useSeedData`, `APP_SEED_TABLES`) are the common module's.
+
+An app imports the modules it uses: it picks tables from each module schema and registers the
+domains from that module's domains file, filtered to the tables it picked. A new module therefore
+changes nothing for an app that does not take it.
+
+The framework also keeps every module merged, for its own use only: `domain/domainRegistry.ts`
+(every domain by name, and `domainsByTable`), which `defineAppDb`'s status catalog, `useSeedData` and
+`useDbStatus` look domains up in whatever modules an app took, and `schema/schemaRegistry.ts`, which
+its specs check against the domain registry. Both throw at load when two modules declare the same
+table or domain name. Lint rejects an import of either from an app's `src/`. A new module is a file
+in each folder plus one entry in each registry.
 
 ---
 
@@ -841,8 +869,8 @@ Seven steps. The resulting folder structure, and what each file must contain, is
 
 ```ts
 // 1. src/db/appSchema.ts — the APP's own entities (§2). DEEP imports only.
-import { defineEntity } from "@common/db/schema/defineEntity";
-import { defineSchema } from "@common/db/schema/defineSchema";
+import { defineEntity } from "@common/db/model/defineEntity";
+import { defineSchema } from "@common/db/model/defineSchema";
 
 export const appSchema = defineSchema({
   widgets: defineEntity({ primaryKey: "widgetId", fields: { widgetId: "text", statusId: "text" }, indexes: ["statusId"] }),
@@ -851,9 +879,9 @@ export const appSchema = defineSchema({
 
 ```ts
 // 2. src/db/appDb.ts — DEEP imports only, never "@common/db" (the worker reaches this file)
-import { defineAppDb } from "@common/db/schema/defineAppDb";
-import { mergeSchemas } from "@common/db/schema/defineSchema";
-import { commonSchema } from "@common/db/seed/seedSchema";
+import { defineAppDb } from "@common/db/model/defineAppDb";
+import { mergeSchemas } from "@common/db/model/defineSchema";
+import { commonSchema } from "@common/db/schema/commonSchema";
 import { appSchema } from "./appSchema";
 
 const APP_SEED_TABLES = ["productStores", "statuses", "enums", "facilities"] as const;
@@ -868,14 +896,14 @@ appDb.setOmsInstanceResolver(() => "default");          // test fallback; main.t
 
 ```ts
 // 3a. src/workers/appSyncDomains.ts — every domain the APP registers (worker-safe imports)
-import { commonDomains } from "@common/db/seed/seedDomains";
+import { commonDomains } from "@common/db/domain/commonDomains";
 import { appDb } from "@/db/appDb";
 import { widgetDomain } from "./domains/widgetDomain";
 
 // Seed tables the APP fills with its own domain (§2, "Picking seed tables"); none yet.
 const OVERRIDDEN_SEED_TABLES = new Set<string>([]);
 const appSeedDomains = Object.values(commonDomains)
-  .filter((d) => d.table && appDb.seedTables.has(d.table) && !OVERRIDDEN_SEED_TABLES.has(d.table));
+  .filter((d) => d.table && appDb.frameworkTables.has(d.table) && !OVERRIDDEN_SEED_TABLES.has(d.table));
 export const appSyncDomains = [...appSeedDomains, widgetDomain];
 
 // 3b. src/workers/appSync.worker.ts — registration happens here
@@ -958,9 +986,10 @@ Deep imports follow the folder layout of `common/db`:
 | Folder | What you import from it | Worker-safe |
 |---|---|---|
 | `@common/db/types` | `DbRow`, `DbKey`, `FieldKind`, `SyncContext`, `SyncDomain` | yes |
-| `@common/db/schema/*` | `defineEntity`, `defineSchema` / `mergeSchemas`, `defineAppDb`; `appDbRegistry` is framework-only | yes |
+| `@common/db/model/*` | `defineEntity`, `defineSchema` / `mergeSchemas`, `defineAppDb`; `appDbRegistry` is framework-only | yes |
 | `@common/db/storage/*` | `projection` (`toMillis`, `canonicalKey`, …); from `dbClient` / `baseDb`, **types only** (`EntityClient`, `BaseDB`) in app code | yes |
-| `@common/db/seed/*` | `seedSchema` (`commonSchema`), `seedDomains` (`commonDomains`, including the class C `product` domain from `productDomain`) | yes |
+| `@common/db/schema/*` | the module schemas, `commonSchema` today (not `schemaRegistry`: framework-internal) | yes |
+| `@common/db/domain/*` | the module domains `commonDomains` (with the class C `product` domain from `productDomain`), (not `domainRegistry`: framework-internal) | yes |
 | `@common/db/sync/*` | `defineSyncDomain`, `defineSnapshotDomain`, `defineCursorDomain`, `syncRegistry`, `pollingWorkerHarness` | yes, except `syncService` and `setupAppDbSync` |
 | `@common/db/composables/*` | `useLiveEntity`, `useSeedData`, `useProductMaster`, `useDbStatus` | **no** — main thread only; import them from the barrel |
 
@@ -986,7 +1015,7 @@ An "app db" is any identifier ending in `Db` (`appDb`, `companyDb`, …).
 | `@typescript-eslint/no-restricted-imports` | `@/composables/*` (value imports; types are fine): composables are used only by composables and `.vue` files | everywhere except `src/composables` and `.vue` files |
 | `@typescript-eslint/no-restricted-imports` | an app db module (`@/db/*` except `@/db/appDbSync`) | `src/store` |
 | `@typescript-eslint/no-restricted-imports` | `@/store/*`, `pinia`, `@/db/*`, and `useLiveEntity` / `useSeedData` / `loadSeedData` from `@common` / `@common/db` | `src/utils` (stores and `pinia` also in `src/db` and `src/workers`) |
-| `@typescript-eslint/no-restricted-imports` | value imports of `dexie`, `@common/db/storage/dbClient` / `baseDb`, `@common/db/schema/appDbRegistry`, or low-level names (`dbClient`, `getAppDb`, `ensureDbReady`, `hasSyncedThisLogin`, …) from `@common` / `@common/db` | all of `src/` |
+| `@typescript-eslint/no-restricted-imports` | value imports of `dexie`, `@common/db/storage/dbClient` / `baseDb`, `@common/db/model/appDbRegistry`, or low-level names (`dbClient`, `getAppDb`, `ensureDbReady`, `hasSyncedThisLogin`, …) from `@common` / `@common/db` | all of `src/` |
 | `no-restricted-syntax` | `appDb.raw()`; a string-literal table in `appDb.entity("x")`, `useLiveEntity("x")`, `appDb.client().get("x")` or `appDb.client().liveRead(["x"])`, and the same on a client held in a variable named `…Client` (`companyClient.count("x")`); also behind `as any` | all of `src/` |
 | `no-restricted-syntax` | `appDb.entity(...)` and `loadSeedData()`: read with `useLiveEntity` / `useSeedData` | outside `src/db/**` and `src/workers/**` |
 | `no-restricted-syntax` | `useLiveEntity(...)`, `useSeedData()`, `useDbStatus(...)`: the caller passes the rows | outside `src/composables` and `.vue` files |
@@ -1140,7 +1169,7 @@ flowchart LR
 
 | Contains | Rules |
 |---|---|
-| `export const appSchema = defineSchema({ table: defineEntity({...}), ... })`: one entry per APP-owned table, keyed by IndexedDB store name | Deep imports only (`@common/db/schema/defineEntity`, `.../defineSchema`), because the worker reaches this file. Every field a screen reads is in `fields`; an index for every way the table is queried. No `syncMeta`. Omit the file if the APP owns no tables |
+| `export const appSchema = defineSchema({ table: defineEntity({...}), ... })`: one entry per APP-owned table, keyed by IndexedDB store name | Deep imports only (`@common/db/model/defineEntity`, `.../defineSchema`), because the worker reaches this file. Every field a screen reads is in `fields`; an index for every way the table is queried. No `syncMeta`. Omit the file if the APP owns no tables |
 
 ### `src/db/appDb.ts`
 
@@ -1161,7 +1190,7 @@ the seed domain's name (the "same table, your own domain" case in §2).
 
 | Contains | Rules |
 |---|---|
-| `OVERRIDDEN_SEED_TABLES`; `appSeedDomains` = `commonDomains` filtered to `appDb.seedTables` minus the overrides; `export const appSyncDomains: SyncDomain[] = [...appSeedDomains, ...appOwnDomains]` | Worker-safe imports only. It is the single list: the worker registers it and the status card builds its catalog from it, so the two never disagree |
+| `OVERRIDDEN_SEED_TABLES`; `appSeedDomains` = each used module's domains (`commonDomains`, …) filtered to `appDb.frameworkTables` minus the overrides; `export const appSyncDomains: SyncDomain[] = [...appSeedDomains, ...appOwnDomains]` | Worker-safe imports only. It is the single list: the worker registers it and the status card builds its catalog from it, so the two never disagree |
 
 ### `src/workers/appSync.worker.ts`
 

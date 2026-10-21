@@ -12,7 +12,7 @@
 import type { AppSchema, TableNames } from "./defineSchema";
 import type { Entity } from "./defineEntity";
 import type { SyncDomainCatalogItem } from "../composables/useDbStatus";
-import { commonDomainsByTable } from "../seed/seedDomains";
+import { domainsByTable } from "../domain/domainRegistry";
 import { BaseDB } from "../storage/baseDb";
 import { type DbClient, type EntityClient, dbClient } from "../storage/dbClient";
 import { setAppDb } from "./appDbRegistry";
@@ -29,7 +29,7 @@ export interface AppDbDefinition<Tables extends string = string> {
    * build's shape with no error — so treat bumping this as part of changing the schema.
    */
   version?: number;
-  /** The composed schema: `commonSchema.pick([...])` merged with the app's own via `mergeSchemas`. */
+  /** The composed schema: the picked framework modules (`commonSchema.pick([...])`, …) merged with the app's own via `mergeSchemas`. */
   schema: AppSchema<Tables>;
 }
 
@@ -62,10 +62,10 @@ export interface AppDb<Tables extends string = string> {
   readonly version: number;
   /** The composed data tables. Excludes `syncMeta`, which BaseDB injects. */
   readonly tableNames: Tables[];
-  /** One entry per composed table that has a seed source. The app's own tables are absent. */
+  /** One entry per composed framework table that has a domain of its own. The app's own tables are absent. */
   readonly statusCatalog: SyncDomainCatalogItem[];
-  /** Tables that came from the framework seed schema. The app's own tables are absent. */
-  readonly seedTables: ReadonlySet<string>;
+  /** Tables that came from a framework module schema (`commonSchema`, …). The app's own tables are absent. */
+  readonly frameworkTables: ReadonlySet<string>;
 }
 
 /** The table names of an app database, e.g. `AppDbTables<typeof companyDb>` for a helper's `table` parameter. */
@@ -81,13 +81,13 @@ export function defineAppDb<Tables extends string>(def: AppDbDefinition<Tables>)
 
   // Derived from the composed tables, so it can never list a table the database does not have.
   const statusCatalog: SyncDomainCatalogItem[] = Object.keys(stores)
-    // Provenance, not name. An app may declare its own table with a seed table's name.
-    .filter((table) => def.schema.seedTables.has(table) && table in commonDomainsByTable)
+    // Provenance, not name. An app may declare its own table with a framework table's name.
+    .filter((table) => def.schema.frameworkTables.has(table) && table in domainsByTable)
     .map((table) => ({
-      name: commonDomainsByTable[table].name,
+      name: domainsByTable[table].name,
       table,
-      label: commonDomainsByTable[table].label,
-      syncClass: commonDomainsByTable[table].syncClass,
+      label: domainsByTable[table].label,
+      syncClass: domainsByTable[table].syncClass,
     }));
 
   const entities: Record<string, Entity> = def.schema.entities;
@@ -153,7 +153,7 @@ export function defineAppDb<Tables extends string>(def: AppDbDefinition<Tables>)
     version,
     tableNames: Object.keys(stores) as Tables[],
     statusCatalog,
-    seedTables: def.schema.seedTables,
+    frameworkTables: def.schema.frameworkTables,
   };
 
   setAppDb(appDb);

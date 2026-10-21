@@ -21,7 +21,7 @@ The build's lint (`dbConfig` in `eslint.config.js`) enforces most of this.
    landed. Never write a response into a table.
 3. **No Dexie, `dbClient`, `appDb.raw()` / `.get()` in app code; `appDb.client()` only in workers** (and as the `useDbStatus(...)` argument).
    Table names always from `appDb.tables`, never a string.
-4. **Worker code (`src/db/**`, `src/workers/**`) uses deep imports only** (`@common/db/schema/*`,
+4. **Worker code (`src/db/**`, `src/workers/**`) uses deep imports only** (`@common/db/model/*`,
    `@common/db/sync/*`, `@common/core/workerRemoteApi`, …): never `@common`, `@common/db`,
    `commonUtil`, `api()`, stores or composables.
 5. **Seed lookups:** `useSeedData()` during setup, in the page, component or composable that shows

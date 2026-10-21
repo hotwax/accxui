@@ -15,7 +15,7 @@ vi.mock("../core/workerRemoteApi", () => ({
     return state.response;
   }),
 }));
-vi.mock("../db/schema/appDbRegistry", () => ({
+vi.mock("../db/model/appDbRegistry", () => ({
   getAppDb: () => ({
     entity: () => ({
       getMany: vi.fn(async (ids: string[]) => state.stored.filter((row) => ids.includes(row.productId))),
@@ -24,7 +24,7 @@ vi.mock("../db/schema/appDbRegistry", () => ({
   }),
 }));
 
-import { PRODUCT_STALE_MS, productDomain } from "../db/seed/productDomain";
+import { PRODUCT_STALE_MS, productDomain } from "../db/domain/productDomain";
 
 const ctx = { maargUrl: "https://example.test/rest/s1/", token: "t", omsInstance: "demo", now: Date.now() } as any;
 const solr = (docs: any[]) => ({ response: { response: { docs } } });

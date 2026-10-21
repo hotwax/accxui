@@ -1,7 +1,7 @@
 import type { BaseDB } from "../storage/baseDb";
 import { dbClient } from "../storage/dbClient";
-import { getAppDb } from "../schema/appDbRegistry";
-import type { Entity } from "../schema/defineEntity";
+import { getAppDb } from "../model/appDbRegistry";
+import type { Entity } from "../model/defineEntity";
 
 import { canonicalKey, entityKeyOf, isUnkeyableFetch, projectRow } from "../storage/projection";
 import type { SyncContext, SyncDomain } from "../types";

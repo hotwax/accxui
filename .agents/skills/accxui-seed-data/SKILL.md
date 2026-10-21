@@ -206,6 +206,6 @@ composables, not stores (lint).
 | `useSeedData` / `loadSeedData` / app db reads in a store or util | lint error | the composable passes the rows as an argument |
 | `useSeedData` for the app's own table | always empty | `useLiveEntity(appDb.tables.x)` |
 | A label showing the raw id | the table isn't picked, the row isn't synced yet, or the row has no label field | pick the table; it fills after the login sync |
-| `useDbStatus(appDb.client())` with no catalog | lists every framework seed domain, most with 0 rows | `catalogFrom(appSyncDomains)` or `appDb.statusCatalog` |
+| `useDbStatus(appDb.client())` with no catalog | lists every framework domain, most with 0 rows | `catalogFrom(appSyncDomains)` or `appDb.statusCatalog` |
 | No actions argument | Refresh buttons do nothing | `{ resyncDomain, resyncAll: resyncReferenceData }` |
 | A Refresh button on class C rows | it re-runs nothing | "fetched when opened", no button |

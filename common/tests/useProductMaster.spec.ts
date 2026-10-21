@@ -15,7 +15,7 @@ vi.mock("../db/sync/setupAppDbSync", () => ({
 }));
 
 import { useProductMaster } from "../db/composables/useProductMaster";
-import { PRODUCT_STALE_MS } from "../db/seed/productDomain";
+import { PRODUCT_STALE_MS } from "../db/domain/productDomain";
 import { clearSessionScopedState } from "../core/sessionScope";
 
 const HOUR = 60 * 60 * 1000;

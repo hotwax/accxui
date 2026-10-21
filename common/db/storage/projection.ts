@@ -4,7 +4,7 @@
  * Deliberately free of Dexie and Vue so every rule here is unit-testable without IndexedDB.
  */
 
-import { isFieldKind, isListSpec, type Entity } from "../schema/defineEntity";
+import { isFieldKind, isListSpec, type Entity } from "../model/defineEntity";
 import type { DbKey, DbRow, FieldKind, FieldSpec, NestedFields } from "../types";
 
 /** Coerce a server date field (epoch-millis number, numeric string, or ISO string) to millis. */

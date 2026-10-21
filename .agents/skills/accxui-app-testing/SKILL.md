@@ -25,7 +25,7 @@ macOS has no `timeout` command: `timeout 300 npx …` fails at once and prints n
 
 | Code under test | Spec | Imports |
 |---|---|---|
-| `common/**` (`.ts`) | `common/tests/<thing>.spec.ts` | **relative** (`../db/schema/defineEntity`); `import { describe, it, expect, vi } from "vitest"`; `// @vitest-environment jsdom` on the first line when it needs the DOM |
+| `common/**` (`.ts`) | `common/tests/<thing>.spec.ts` | **relative** (`../db/model/defineEntity`); `import { describe, it, expect, vi } from "vitest"`; `// @vitest-environment jsdom` on the first line when it needs the DOM |
 | `common/components/*.vue` | `common/components/<Name>.spec.ts`, beside it | the accxui root has no Vue plugin, so a `.vue` can't be mounted from `common/tests`. Order Manager's config includes `../../common/components/**/*.spec.ts` (and `common/core/**`): run it with Order Manager's `pnpm test:unit` |
 | An app's `src/**` | `apps/<app>/tests/<same folder as src>/<file>.spec.ts` (`tests/composables/`, `tests/store/`, `tests/utils/`, `tests/components/`, `tests/views/`, `tests/workers/`, `tests/db/`) | `@/…` and `@common` aliases |
 
