@@ -7,17 +7,22 @@ vi.mock("../core/remoteApi", () => ({ default: (...args: any[]) => api(...args) 
 vi.mock("../core/logger", () => ({ default: logger }));
 vi.mock("../core/i18n", () => ({ translate: (key: string) => key }));
 vi.mock("../helpers/cookieHelper", () => ({ cookieHelper: () => ({ get: () => "", set: vi.fn(), remove: vi.fn() }) }));
-vi.mock("../utils/commonUtil", () => ({
-  commonUtil: {
-    isMoqui: () => true,
-    getMaargURL: () => "https://maarg.test/rest/s1/",
-    getOmsURL: () => "https://oms.test/api/",
-    getTokenExpiration: () => undefined,
-    isAppEmbedded: () => false,
-    getToken: vi.fn(() => ""),
-    showToast: vi.fn()
-  }
-}));
+vi.mock("../utils/commonUtil", async (importOriginal) => {
+  const actual: any = await importOriginal();
+
+  return {
+    commonUtil: {
+      ...actual.commonUtil,
+      isMoqui: () => true,
+      getMaargURL: () => "https://maarg.test/rest/s1/",
+      getOmsURL: () => "https://oms.test/api/",
+      getTokenExpiration: () => undefined,
+      isAppEmbedded: () => false,
+      getToken: vi.fn(() => ""),
+      showToast: vi.fn()
+    }
+  };
+});
 
 const { useAuth } = await import("../composables/useAuth");
 const { accxuiConfig } = await import("../core/configRegistry");
@@ -101,5 +106,57 @@ describe("logout reads the server's logout response", () => {
     expect(logger.error).not.toHaveBeenCalled();
     // Redirected to the identity provider instead.
     expect(replace).not.toHaveBeenCalled();
+  });
+});
+
+describe("login displays and logs extracted server error", () => {
+  beforeEach(() => {
+    api.mockReset();
+    logger.error.mockReset();
+    vi.mocked(commonUtil.showToast).mockClear();
+    useAuth().clearAuth();
+  });
+
+  it("extracts OFBiz error message, displays toast, and logs error", async () => {
+    api.mockResolvedValue({
+      status: 200,
+      data: { _ERROR_MESSAGE_: "User does not exist" }
+    });
+
+    await expect(useAuth().login("user", "pass")).rejects.toThrow("User does not exist");
+    expect(commonUtil.showToast).toHaveBeenCalledWith("Failed to login. User does not exist");
+    expect(logger.error).toHaveBeenCalledWith("Failed to login", "User does not exist");
+  });
+
+  it("extracts Moqui rejected error message, displays toast, and logs error", async () => {
+    api.mockRejectedValue({
+      response: {
+        data: { errors: "Invalid password" }
+      }
+    });
+
+    await expect(useAuth().login("user", "pass")).rejects.toThrow("Invalid password");
+    expect(commonUtil.showToast).toHaveBeenCalledWith("Failed to login. Invalid password");
+    expect(logger.error).toHaveBeenCalledWith("Failed to login", "Invalid password");
+  });
+
+  it("uses error.message on a network error", async () => {
+    api.mockRejectedValue(new Error("Network Error"));
+
+    await expect(useAuth().login("user", "pass")).rejects.toThrow("Network Error");
+    expect(commonUtil.showToast).toHaveBeenCalledWith("Failed to login. Network Error");
+    expect(logger.error).toHaveBeenCalledWith("Failed to login", "Network Error");
+  });
+
+  it("shows only the static prefix when the server returns no extractable error", async () => {
+    api.mockRejectedValue({
+      response: {
+        data: {}
+      }
+    });
+
+    await expect(useAuth().login("user", "pass")).rejects.toBeInstanceOf(Error);
+    expect(commonUtil.showToast).toHaveBeenCalledWith(expect.stringContaining("Failed to login."));
+    expect(logger.error).toHaveBeenCalledWith("Failed to login", "");
   });
 });

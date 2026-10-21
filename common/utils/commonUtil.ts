@@ -100,6 +100,32 @@ function hasError(response: any): boolean {
   return false;
 }
 
+function getErrorMessage(error: any): string {
+  const data = error?.response?.data ?? error?.data ?? error;
+
+  const clean = (v: any): string => {
+    if (typeof v !== "string") return "";
+    const trimmed = v.trim();
+    // Ignore empty strings and HTML error pages (e.g. 502 Bad Gateway)
+    if (!trimmed || trimmed.startsWith("<")) return "";
+    // Moqui separates multiple messages with line breaks; show them on one line
+    return trimmed.split(/\r?\n/).map(line => line.trim()).filter(Boolean).join("; ");
+  };
+
+  const fromList = (list: any): string =>
+    Array.isArray(list) ? list.map(clean).filter(Boolean).join(", ") : "";
+
+  return (
+    clean(data?._ERROR_MESSAGE_) ||
+    fromList(data?._ERROR_MESSAGE_LIST_) ||
+    clean(data?.errors) ||
+    clean(data?.errorMessage) ||
+    clean(data?.error) ||
+    clean(data) ||
+    clean(error?.message)
+  );
+}
+
 function isError(response: any): boolean {
   return response.code === 'error'
 }
@@ -983,6 +1009,7 @@ export const commonUtil = {
   getDateAndTimeShort,
   getDateTimeWithOrdinalSuffix,
   getDateWithOrdinalSuffix,
+  getErrorMessage,
   getFacilityChipLabel,
   getFeature,
   getFeatures,

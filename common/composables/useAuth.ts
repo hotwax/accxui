@@ -108,12 +108,13 @@ export function useAuth() {
         });
 
         if(commonUtil.hasError(resp)) {
-          commonUtil.showToast(translate("Sorry, your username or password is incorrect. Please try again."));
-          logger.error("error", resp.data._ERROR_MESSAGE_);
+          const serverError = commonUtil.getErrorMessage(resp);
+          logger.error("Failed to login", serverError);
+          commonUtil.showToast(`${translate("Failed to login.")} ${serverError}`);
           updateUserId("")
           updateToken("", "")
 
-          return Promise.reject(new Error(resp.data._ERROR_MESSAGE_));
+          return Promise.reject(new Error(serverError));
         }
 
         omsToken = resp.data.token
@@ -135,11 +136,11 @@ export function useAuth() {
 
       // Moqui login returns a non-2xx status (e.g. bad credentials), so axios rejects
       // before `hasError()` can inspect the body - surface that message here instead.
-      const loginErrorMessage = err?.response?.data?.errors;
-      commonUtil.showToast(loginErrorMessage ? translate(loginErrorMessage) : translate("Something went wrong while login. Please contact administrator."));
-      logger.error("error: ", err.toString());
+      const serverError = commonUtil.getErrorMessage(err);
+      logger.error("Failed to login", serverError);
+      commonUtil.showToast(`${translate("Failed to login.")} ${serverError}`);
 
-      return Promise.reject(loginErrorMessage ? new Error(loginErrorMessage) : (err instanceof Object ? err : new Error(err)));
+      return Promise.reject(new Error(serverError));
     }
   }
 
