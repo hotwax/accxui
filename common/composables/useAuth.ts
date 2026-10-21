@@ -21,7 +21,7 @@ const loginOption = ref<LoginOption>({})
 export const omsRef = ref("")
 // Which backend fetchLoginOptions() actually found the entered OMS to be — kept in sync so
 // login() hits the matching URL instead of assuming the static VITE_OMS_TYPE build flag.
-const isMoquiOmsRef = ref(commonUtil.isMoqui())
+export const isMoquiOmsRef = ref(commonUtil.isMoqui())
 const token = ref(cookieHelper().get("token") || "")
 const expirationTime = ref(cookieHelper().get("expirationTime") || "")
 let explicitlyLoggedOut = false;
