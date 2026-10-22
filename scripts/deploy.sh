@@ -228,6 +228,8 @@ jq --argjson versions "$vs_json" '
       + [ { source: "**", destination: "/index.html" } ]
   )
 ' firebase.json > firebase.json.tmp && mv firebase.json.tmp firebase.json
+# Always preserve update endpoints for previously installed apps, including old version scopes.
+node "$ROOT_DIR/scripts/hosting/prepare.mjs" "$APP_DIR"
 echo ">> firebase.json rewrites:"; jq -c '.hosting[].rewrites' firebase.json
 
 # ----------------------------------------------------------------------------- pre-deploy gate

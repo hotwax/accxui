@@ -8,6 +8,15 @@ on:
     branches: [ main ]
 
 jobs:
+  hosting-compatibility:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-node@v4
+      with:
+        node-version: 22.x
+    - run: node --test scripts/hosting/*.test.mjs
+
   build:
     runs-on: ubuntu-latest
 
@@ -50,3 +59,6 @@ jobs:
 
     - name: Build
       run: pnpm --filter ${{ matrix.app }} build
+
+    - name: Validate hosting compatibility output
+      run: node scripts/hosting/prepare.mjs "apps/${{ matrix.app }}"

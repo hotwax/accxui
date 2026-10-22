@@ -90,6 +90,9 @@ jobs:
         env: ${{ fromJSON(inputs.buildEnvironment) }}
         run: pnpm --filter ${{ inputs.appDir }} build
 
+      - name: Prepare legacy service-worker recovery
+        run: node scripts/hosting/prepare.mjs "apps/${{ inputs.appDir }}"
+
       - name: Firebase Install and Deploy
         run: |
           npm install -g firebase-tools
