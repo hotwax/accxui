@@ -36,7 +36,7 @@ describe('iOS keyboard viewport scrolling', () => {
     viewport = Object.assign(new EventTarget(), { height: 938, offsetTop: 0, scale: 1 });
     vi.stubGlobal('visualViewport', viewport);
     wrapper = mount(defineComponent({
-      setup() { useIosKeyboardScroll({ pinnedElementSelector: '.scanner', scrollContainerSelector: '.nested-scroll' }); return () => h('ion-content', h('div', h('ion-input', h('input')))); }
+      setup() { useIosKeyboardScroll({ pinnedElementSelector: '.scanner, .footer', scrollContainerSelector: '.nested-scroll' }); return () => h('ion-content', h('div', h('ion-input', h('input')))); }
     }), { attachTo: document.body });
     content = wrapper.element as HTMLElement;
     scroll = content.querySelector('div')!;
@@ -72,6 +72,23 @@ describe('iOS keyboard viewport scrolling', () => {
     scroll.scrollTop = 500;
     await resize(454);
     expect(input.parentElement!.getBoundingClientRect().top).toBe(136);
+  });
+
+  it('keeps an input above a pinned footer when scrolled into view', async () => {
+    const footer = document.createElement('div'); footer.className = 'footer'; content.append(footer);
+    footer.getBoundingClientRect = () => rect(394, 60);
+    scroll.scrollTop = 0;
+    await resize(454);
+    expect(input.parentElement!.getBoundingClientRect().bottom).toBe(394);
+  });
+
+  it('does not offset the bottom boundary for a pinned footer containing the focused input', async () => {
+    const footer = document.createElement('div'); footer.className = 'footer'; content.append(footer);
+    footer.getBoundingClientRect = () => rect(394, 60);
+    footer.append(input.parentElement!);
+    input.parentElement!.getBoundingClientRect = () => rect(398, 56);
+    await resize(454);
+    expect(scroll.scrollTop).toBe(0);
   });
 
   it('scrolls a configured inner panel instead of moving the outer page', async () => {

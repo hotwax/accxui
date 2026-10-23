@@ -58,13 +58,18 @@ export function useIosKeyboardScroll(options: IosKeyboardScrollOptions = {}) {
     for (const container of containers) {
       const bounds = container.getBoundingClientRect();
       const visibleTop = Math.max(bounds.top, viewport.offsetTop);
+      const visibleBottom = Math.min(bounds.bottom, viewport.offsetTop + viewport.height);
       const top = pinnedElements.reduce((edge, pinned) => {
-        const bounds = pinned.getBoundingClientRect();
-        return !pinned.contains(input) && bounds.top <= visibleTop && bounds.bottom > visibleTop
-          ? Math.max(edge, bounds.bottom) : edge;
+        const pinnedBounds = pinned.getBoundingClientRect();
+        return !pinned.contains(input) && pinnedBounds.top <= visibleTop && pinnedBounds.bottom > visibleTop
+          ? Math.max(edge, pinnedBounds.bottom) : edge;
       }, visibleTop);
+      const bottom = pinnedElements.reduce((edge, pinned) => {
+        const pinnedBounds = pinned.getBoundingClientRect();
+        return !pinned.contains(input) && pinnedBounds.bottom >= visibleBottom && pinnedBounds.top < visibleBottom
+          ? Math.min(edge, pinnedBounds.top) : edge;
+      }, visibleBottom);
       const rect = field.getBoundingClientRect();
-      const bottom = Math.min(bounds.bottom, viewport.offsetTop + viewport.height);
       // Prefer the top edge if a very short viewport cannot fit the entire control.
       const delta = rect.top < top || rect.height > bottom - top
         ? rect.top - top : Math.max(0, rect.bottom - bottom);
