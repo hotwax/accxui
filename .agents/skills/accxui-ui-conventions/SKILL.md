@@ -293,3 +293,10 @@ in `common/`.
 | A new `data-testid` with an index | flaky tests | the entity id |
 | Copying a component from another app | two versions drift | move it into `common/` |
 | `useFormValidator` messages shown as is | English text in a translated UI | the manual pattern, or translate in `common/` first |
+
+## iPad keyboard and input visibility
+
+For iOS keyboard viewport handling, use `useIosKeyboardScroll` with its paired
+`supportsIosKeyboardScroll` Ionic configuration. See `docs/IOS_KEYBOARD_SCROLL.md`
+for opt-in setup, pinned elements, inner scroll containers, and physical-device
+validation. Keep app-specific layout selectors in the app.
