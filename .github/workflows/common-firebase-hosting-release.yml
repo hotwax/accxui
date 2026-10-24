@@ -150,7 +150,7 @@ jobs:
           versions=()
           while read -r tag; do
             latest="$tag"
-            if git show "$tag:.env.example" 2>/dev/null | grep -q '^VITE_APP_VERSION_CONFIG='; then
+            if git show "$tag:.env.example" 2>/dev/null | grep '^VITE_APP_VERSION_CONFIG=' >/dev/null; then
               versions+=("$tag")
             else
               echo "::warning::$tag predates multi-version support; skipping /$tag/"
@@ -178,13 +178,26 @@ jobs:
           done
           [ -f dist/index.html ] || { echo "::error::root bootstrap was overwritten"; exit 1; }
 
+          # Company discovers only the stable versions actually included in this deployment.
+          if git show "$latest:.env.example" 2>/dev/null | grep '^VITE_APP_VERSION_CONFIG=' >/dev/null; then
+            app_id=$(git show "$latest:.env.example" | grep '^VITE_APP_VERSION_CONFIG=' | cut -d= -f2- | jq -r .appId)
+            jq -n --arg appId "$app_id" --arg rootVersion "$latest" --args '
+              {schemaVersion:1,appId:$appId,environmentTypeId:"AppEnvUAT",rootVersion:$rootVersion,
+               versions:[$ARGS.positional[] | select(length > 0) | {version:.,environmentTypeId:"AppEnvUAT"}]}
+              ' "${versions[@]:-}" > dist/hosted-versions.json
+          fi
+
           # Hosting config comes from the release serving root; the loop left us on the oldest one.
           # Version rewrites first, catch-all last: Firebase is first-match-wins and the catch-all has to
           # fall through to the root bootstrap.
           git checkout --quiet "$latest" -- firebase.json .firebaserc
           rewrites=$(printf '%s\n' "${versions[@]:-}" | { grep -v '^$' || true; } | jq -R . | jq -s \
             'map({source:("/"+.+"/**"), destination:("/"+.+"/index.html")}) + [{source:"**",destination:"/index.html"}]')
-          jq --argjson r "$rewrites" '.hosting |= map(.rewrites = $r)' firebase.json > fb.tmp && mv fb.tmp firebase.json
+          jq --argjson r "$rewrites" '.hosting |= map(.rewrites = $r | .headers = ((.headers // []) + [
+            {source:"**",headers:[{key:"Cache-Control",value:"no-cache"}]},
+            {source:"**/assets/**",headers:[{key:"Cache-Control",value:"public,max-age=31536000,immutable"}]},
+            {source:"/hosted-versions.json",headers:[{key:"Cache-Control",value:"no-store"},{key:"Access-Control-Allow-Origin",value:"*"}]}
+          ]))' firebase.json > fb.tmp && mv fb.tmp firebase.json
           jq -c '.hosting[] | {target, rewrites}' firebase.json
           find dist -mindepth 1 -maxdepth 1 -type d | sort
           echo "DEPLOY_MSG=Root $latest + versions ${versions[*]:-none}" >> "$GITHUB_ENV"
@@ -212,6 +225,6 @@ jobs:
           echo "LABEL=$(git describe --tags `git rev-list --tags --max-count=1`)" >> $GITHUB_ENV
 
       - name: "Create label"
-        run: gh label create "release-${{ env.LABEL }}" --color FF7F7E
+        run: gh label create "release-${{ env.LABEL }}" --color FF7F7E --force
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
