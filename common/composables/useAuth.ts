@@ -19,9 +19,24 @@ interface LoginOption {
 
 const loginOption = ref<LoginOption>({})
 export const omsRef = ref("")
-// Which backend fetchLoginOptions() actually found the entered OMS to be — kept in sync so
-// login() hits the matching URL instead of assuming the static VITE_OMS_TYPE build flag.
-export const isMoquiOmsRef = ref(commonUtil.isMoqui())
+// The verified backend is scoped to this tab and OMS, just like the in-memory auth state.
+// Persist only the detection result, never credentials, so reload does not revert to the build flag.
+const backendStorageKey = "accxui.omsBackend";
+const readBackendMode = (): boolean => {
+  try {
+    const saved = JSON.parse(sessionStorage.getItem(backendStorageKey) || "null");
+    const oms = cookieHelper().get("oms");
+    if (oms && saved?.oms === oms && typeof saved?.isMoqui === "boolean") {
+      return saved.isMoqui;
+    }
+  } catch { /* Storage may be unavailable; detection still works for this page. */ }
+  return commonUtil.isMoqui();
+};
+export const isMoquiOmsRef = ref(readBackendMode());
+const clearBackendMode = () => {
+  isMoquiOmsRef.value = commonUtil.isMoqui();
+  try { sessionStorage.removeItem(backendStorageKey); } catch { /* Optional persistence. */ }
+};
 const token = ref(cookieHelper().get("token") || "")
 const expirationTime = ref(cookieHelper().get("expirationTime") || "")
 let explicitlyLoggedOut = false;
@@ -45,6 +60,7 @@ export function useAuth() {
   }
 
   const updateOMS = (oms: any) => {
+    if (oms !== cookieHelper().get("oms")) clearBackendMode();
     cookieHelper().set("oms", oms, getDuration())
     omsRef.value = oms
   }
@@ -54,6 +70,7 @@ export function useAuth() {
   }
 
   const clearAuth = () => {
+    clearBackendMode();
     cookieHelper().remove("token");
     cookieHelper().remove("expirationTime");
     cookieHelper().remove("maarg");
@@ -245,6 +262,7 @@ export function useAuth() {
   // cleared first: it belongs to whichever OMS was verified last, and keeping it after a
   // failed check would send the next login to that other instance.
   const fetchLoginOptions = async () => {
+    clearBackendMode();
     loginOption.value = {}
     cookieHelper().remove("maarg")
     try {
@@ -278,9 +296,13 @@ export function useAuth() {
         }
       }
 
-      isMoquiOmsRef.value = isMoquiOms
-
       if(!commonUtil.hasError(resp)) {
+        isMoquiOmsRef.value = isMoquiOms;
+        try {
+          sessionStorage.setItem(backendStorageKey, JSON.stringify({
+            oms: cookieHelper().get("oms"), isMoqui: isMoquiOms
+          }));
+        } catch { /* A storage restriction must not prevent login. */ }
         loginOption.value = resp.data
         if (resp.data.maargInstanceUrl) {
           // OFBiz deployment: OFBiz tells the PWA where its Moqui instance is

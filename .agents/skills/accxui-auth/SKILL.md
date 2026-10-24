@@ -152,3 +152,14 @@ onSessionCleared(() => cache.clear());
 | Calling `logout()` again on a 401 handler | double teardown | the interceptor already does it |
 | Omitting fields in `initialiseConfig` | `oms` / `current` undefined, auth never true | pass every field |
 | An app composable also named `useAuth` (Company's `composables/useSecurity.ts` has one for `hasPermission` / `userProfile`) | the wrong one imported | `isAuthenticated`, `login`, `logout` come from `@common` |
+
+## Verified backend mode
+
+`isMoquiOmsRef` is exported by `common/composables/useAuth` and the common barrel. It reflects the
+successful login-options probe, rather than only the build-time `VITE_OMS_TYPE` default. The
+non-sensitive detection result is persisted in sessionStorage under `accxui.omsBackend`, scoped to
+the exact OMS cookie value, so a reload in the same tab keeps the backend mode. Changing OMS,
+clearing authentication, or starting a new probe discards the old detection. Only a successful probe
+persists a replacement. Missing, malformed or unavailable storage falls back to the build default;
+login still works when storage is unavailable. Older sessions without a saved detection obtain one
+on their next login. Apps read the ref for backend-specific UI; they do not manage this storage.
