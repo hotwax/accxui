@@ -76,5 +76,3 @@ export * from './db';
 export { useIosKeyboardScroll } from './composables/useIosKeyboardScroll';
 export type { IosKeyboardScrollOptions } from './composables/useIosKeyboardScroll';
 export { supportsIosKeyboardScroll } from './utils/keyboardScroll';
-
-export { useBuildUpdate } from "./composables/useBuildUpdate";
