@@ -43,3 +43,21 @@ References:
 - https://firebase.google.com/docs/hosting/full-config#hosting_priority_order
 - https://developer.mozilla.org/en-US/docs/Web/API/ExtendableEvent/waitUntil
 - https://developer.mozilla.org/en-US/docs/Web/API/Clients/matchAll
+
+## Retaining deployed versions
+
+Release callers can set `reuseHostedVersions: true` to build only the newest release
+(root and versioned URL) and keep older versions without reinstalling their historical
+dependencies. The default remains rebuilding each retained tag.
+
+`retain-versions.mjs` reads the current UAT Firebase file manifest, downloads only the
+requested version directories, and verifies every file against its deployed SHA-256.
+A missing version, changed content, unsafe path, occupied directory, or concurrent
+release aborts before deployment. It never writes to Firebase. Run it after compatibility
+preparation so even the retained workers stay unchanged; the root and new version
+still receive current recovery endpoints. The final Firebase deployment includes the
+complete tree and the usual hosted-version manifest and rewrites.
+
+The helper uses the pinned Firebase CLI's authentication and Hosting API client.
+For a read-only local trial, use `FIREBASE_ACCOUNT` with an existing CLI login;
+`FIREBASE_TOOLS_LIB` can point to that installation's `firebase-tools/lib` directory.

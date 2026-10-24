@@ -21,6 +21,10 @@ on:
         description: 'How many releases to keep live (latest patch of each MAJOR.MINOR, newest first)'
         default: 2
         type: number
+      reuseHostedVersions:
+        description: 'Preserve deployed older versions instead of rebuilding their tags'
+        default: false
+        type: boolean
     secrets:
       envPAT:
         required: true
@@ -34,6 +38,9 @@ jobs:
   build_and_deploy:
     runs-on: ubuntu-latest
     environment: development
+    concurrency:
+      group: release-${{ inputs.app }}
+      cancel-in-progress: false
 
     steps:
       - name: Checkout accxui
@@ -79,6 +86,7 @@ jobs:
         working-directory: apps/${{ inputs.appDir }}
         env:
           MAX_VERSIONS: ${{ inputs.maxVersions }}
+          REUSE_HOSTED_VERSIONS: ${{ inputs.reuseHostedVersions }}
           VITE_FIREBASE_CONFIG: ${{ secrets.VITE_FIREBASE_CONFIG }}
           VITE_FIREBASE_VAPID_KEY: ${{ secrets.VITE_FIREBASE_VAPID_KEY }}
         run: |
@@ -171,11 +179,17 @@ jobs:
           # Still checked out, so build its versioned bundle now and skip a second checkout + install.
           if printf '%s\n' "${versions[@]:-}" | grep -qx "$latest"; then build "$latest"; fi
 
+          retained_versions=()
           for v in "${versions[@]:-}"; do
             if [ -z "$v" ] || [ "$v" = "$latest" ]; then continue; fi
+            if [ "$REUSE_HOSTED_VERSIONS" = "true" ]; then
+              retained_versions+=("$v")
+              continue
+            fi
             checkout "$v"
             build "$v"
           done
+          echo "RETAINED_VERSIONS=${retained_versions[*]:-}" >> "$GITHUB_ENV"
           [ -f dist/index.html ] || { echo "::error::root bootstrap was overwritten"; exit 1; }
 
           # Company discovers only the stable versions actually included in this deployment.
@@ -205,13 +219,26 @@ jobs:
       - name: Prepare legacy service-worker recovery
         run: node .hosting-tools/scripts/hosting/prepare.mjs "apps/${{ inputs.appDir }}"
 
+      - name: Install Firebase CLI
+        run: npm install -g firebase-tools@15.34.1
+
+      # Restore after compatibility preparation so retained files remain byte-for-byte unchanged.
+      - name: Retain deployed versions
+        if: inputs.reuseHostedVersions
+        env:
+          HOTWAX_PUBLIC_SECRET: ${{ secrets.HOTWAX_PUBLIC_SECRET }}
+          FIREBASE_PROJECT: ${{ inputs.firebaseProject }}
+          APP_DIRECTORY: apps/${{ inputs.appDir }}
+        run: |
+          read -r -a versions <<< "$RETAINED_VERSIONS"
+          node .hosting-tools/scripts/hosting/retain-versions.mjs "$APP_DIRECTORY" "$FIREBASE_PROJECT" "${versions[@]}"
+
       - name: Deploy to Firebase
         working-directory: apps/${{ inputs.appDir }}
         env:
           HOTWAX_PUBLIC_SECRET: ${{ secrets.HOTWAX_PUBLIC_SECRET }}
         run: |
           set -euo pipefail
-          npm install -g firebase-tools
           firebase use ${{ inputs.firebaseProject }} --token "$HOTWAX_PUBLIC_SECRET"
           firebase deploy --token "$HOTWAX_PUBLIC_SECRET" -m "$DEPLOY_MSG" --only hosting:uat
 
