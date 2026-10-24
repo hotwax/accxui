@@ -161,6 +161,7 @@ The user identity values, active facility entitlements, and user-level component
 - `oms`: Stored as a browser cookie. It persists across browsing sessions to accelerate the login pipeline by pre-filling the environment identifier.
 - `Marg`: Accompanying tracking parameter retrieved seamlessly alongside the network configuration rules.
 - Core Identity: Authenticated state entirely depends on validation cookies encapsulating bearer token durations/dates.
+- Verified backend: `useAuth` stores only `{ oms, isMoqui }` in `localStorage` under `accxui.omsBackend`, so same-origin tabs and reloads retain the backend selected by a successful login-options probe. The OMS must match the current cookie. Legacy tab-local metadata is migrated on load. Changing OMS, clearing authentication, or starting a new probe clears the saved detection. This metadata does not authenticate a user or contain credentials.
 
 #### 4.4.3 Data Flow & Sync
 - Navigation (Guest) → Redirect via Route Guards → `Login.vue` loads parameters/cookies.

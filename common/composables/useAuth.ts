@@ -19,14 +19,16 @@ interface LoginOption {
 
 const loginOption = ref<LoginOption>({})
 export const omsRef = ref("")
-// The verified backend is scoped to this tab and OMS, just like the in-memory auth state.
-// Persist only the detection result, never credentials, so reload does not revert to the build flag.
+// Share the verified backend across tabs, scoped to the OMS cookie. Only detection metadata
+// is stored here; credentials and authentication still follow the existing session flow.
 const backendStorageKey = "accxui.omsBackend";
 const readBackendMode = (): boolean => {
   try {
-    const saved = JSON.parse(sessionStorage.getItem(backendStorageKey) || "null");
+    // Migrate a previously verified tab when upgrading from tab-local persistence.
+    const saved = JSON.parse(localStorage.getItem(backendStorageKey) || sessionStorage.getItem(backendStorageKey) || "null");
     const oms = cookieHelper().get("oms");
     if (oms && saved?.oms === oms && typeof saved?.isMoqui === "boolean") {
+      try { localStorage.setItem(backendStorageKey, JSON.stringify(saved)); } catch { /* Optional persistence. */ }
       return saved.isMoqui;
     }
   } catch { /* Storage may be unavailable; detection still works for this page. */ }
@@ -35,6 +37,7 @@ const readBackendMode = (): boolean => {
 export const isMoquiOmsRef = ref(readBackendMode());
 const clearBackendMode = () => {
   isMoquiOmsRef.value = commonUtil.isMoqui();
+  try { localStorage.removeItem(backendStorageKey); } catch { /* Optional persistence. */ }
   try { sessionStorage.removeItem(backendStorageKey); } catch { /* Optional persistence. */ }
 };
 const token = ref(cookieHelper().get("token") || "")
@@ -299,7 +302,7 @@ export function useAuth() {
       if(!commonUtil.hasError(resp)) {
         isMoquiOmsRef.value = isMoquiOms;
         try {
-          sessionStorage.setItem(backendStorageKey, JSON.stringify({
+          localStorage.setItem(backendStorageKey, JSON.stringify({
             oms: cookieHelper().get("oms"), isMoqui: isMoquiOms
           }));
         } catch { /* A storage restriction must not prevent login. */ }
