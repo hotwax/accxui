@@ -31,3 +31,16 @@ test("copies identical bytes and refuses HTML fallbacks, changed bytes, and over
   assert.deepEqual(await readFile(path.join(directory, "v5.2.1/index.html")), contents);
   await assert.rejects(writeVerifiedFile(directory, file, contents), { code: "EEXIST" });
 });
+
+test("retains identical content uploaded from another operating system", async t => {
+  const directory = await mkdtemp(path.join(tmpdir(), "retain-hosting-os-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  for (const os of [0, 3, 19, 255]) {
+    const compressed = gzipSync(contents, { level: 9 });
+    compressed[9] = os;
+    const hosted = { ...file, path: `/v5.2.1/${os}.js`, hash: createHash("sha256").update(compressed).digest("hex") };
+    await writeVerifiedFile(directory, hosted, contents);
+    assert.deepEqual(await readFile(path.join(directory, hosted.path)), contents);
+    await assert.rejects(writeVerifiedFile(directory, hosted, Buffer.from("different content")), /changed or returned a fallback/);
+  }
+});

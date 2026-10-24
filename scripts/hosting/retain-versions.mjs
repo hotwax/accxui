@@ -28,8 +28,14 @@ export function selectVersionFiles(files, versions) {
 
 export async function writeVerifiedFile(outputDirectory, file, contents) {
   // Firebase identifies files by the SHA-256 of their level-9 gzip representation.
-  const hash = createHash("sha256").update(gzipSync(contents, { level: 9 })).digest("hex");
-  if (hash !== file.hash) throw new Error(`Hosted content changed or returned a fallback: ${file.path}`);
+  const compressed = gzipSync(contents, { level: 9 });
+  // gzip's OS header differs between macOS, Linux, Windows and unknown-platform uploads.
+  // Only that metadata byte may vary; the compressed content must still match exactly.
+  const verified = [compressed[9], 0, 3, 19, 255].some(os => {
+    compressed[9] = os;
+    return createHash("sha256").update(compressed).digest("hex") === file.hash;
+  });
+  if (!verified) throw new Error(`Hosted content changed or returned a fallback: ${file.path}`);
   const destination = path.join(outputDirectory, file.path.slice(1));
   await mkdir(path.dirname(destination), { recursive: true });
   await writeFile(destination, contents, { flag: "wx" });
