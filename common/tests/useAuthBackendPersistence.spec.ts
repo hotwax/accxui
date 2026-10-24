@@ -28,7 +28,7 @@ const probeMoqui = async () => {
   return auth;
 };
 
-describe("verified OMS backend survives a tab reload", () => {
+describe("verified OMS backend survives reloads and new tabs", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     vi.resetModules();
@@ -36,6 +36,7 @@ describe("verified OMS backend survives a tab reload", () => {
     cookies.clear();
     cookies.set("oms", "moqui-test");
     sessionStorage.clear();
+    localStorage.clear();
     buildMode.moqui = false;
   });
 
@@ -45,11 +46,19 @@ describe("verified OMS backend survives a tab reload", () => {
     expect((await import("../composables/useAuth")).isMoquiOmsRef.value).toBe(true);
   });
 
+  it("restores the verified backend in a new tab without the original session storage", async () => {
+    await probeMoqui();
+    sessionStorage.clear();
+    vi.resetModules();
+    expect((await import("../composables/useAuth")).isMoquiOmsRef.value).toBe(true);
+  });
+
   it("restores an OFBiz result even if the next build defaults to Moqui", async () => {
     api.mockResolvedValueOnce({ data: { loginAuthType: "BASIC", maargInstanceUrl: "paired-maarg" } });
     const auth = await import("../composables/useAuth");
     await auth.useAuth().fetchLoginOptions();
     buildMode.moqui = true;
+    sessionStorage.clear();
     vi.resetModules();
     expect((await import("../composables/useAuth")).isMoquiOmsRef.value).toBe(false);
   });
@@ -65,6 +74,7 @@ describe("verified OMS backend survives a tab reload", () => {
     const auth = await probeMoqui();
     auth.useAuth().updateOMS("different-instance");
     expect(auth.isMoquiOmsRef.value).toBe(false);
+    expect(localStorage.getItem("accxui.omsBackend")).toBeNull();
     expect(sessionStorage.getItem("accxui.omsBackend")).toBeNull();
   });
 
@@ -88,13 +98,22 @@ describe("verified OMS backend survives a tab reload", () => {
     api.mockResolvedValueOnce({ data: { error: "Not available" } });
     const auth = await import("../composables/useAuth");
     expect(await auth.useAuth().fetchLoginOptions()).toBe(false);
-    expect(sessionStorage.getItem("accxui.omsBackend")).toBeNull();
+    expect(localStorage.getItem("accxui.omsBackend")).toBeNull();
     expect(auth.isMoquiOmsRef.value).toBe(false);
   });
 
   it("falls back safely for malformed storage", async () => {
-    sessionStorage.setItem("accxui.omsBackend", "invalid json");
+    localStorage.setItem("accxui.omsBackend", "invalid json");
     expect((await import("../composables/useAuth")).isMoquiOmsRef.value).toBe(false);
+  });
+
+  it("migrates a matching legacy tab so subsequent tabs retain its verified mode", async () => {
+    sessionStorage.setItem("accxui.omsBackend", JSON.stringify({ oms: "moqui-test", isMoqui: true }));
+    expect((await import("../composables/useAuth")).isMoquiOmsRef.value).toBe(true);
+    expect(JSON.parse(localStorage.getItem("accxui.omsBackend")!)).toEqual({ oms: "moqui-test", isMoqui: true });
+    sessionStorage.clear();
+    vi.resetModules();
+    expect((await import("../composables/useAuth")).isMoquiOmsRef.value).toBe(true);
   });
 
   it("keeps login working when browser storage is unavailable", async () => {
