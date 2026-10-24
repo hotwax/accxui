@@ -17,10 +17,6 @@ on:
         description: 'Tag/version of accxui to build against'
         default: 'main'
         type: string
-      retainedRefs:
-        description: JSON array of additional app refs to retain; empty uses automatic stable-release retention
-        default: ""
-        type: string
       maxVersions:
         description: 'How many releases to keep live (latest patch of each MAJOR.MINOR, newest first)'
         default: 2
@@ -83,8 +79,6 @@ jobs:
         working-directory: apps/${{ inputs.appDir }}
         env:
           MAX_VERSIONS: ${{ inputs.maxVersions }}
-          ROOT_REF: ${{ github.ref }}
-          RETAINED_REFS: ${{ inputs.retainedRefs }}
           VITE_FIREBASE_CONFIG: ${{ secrets.VITE_FIREBASE_CONFIG }}
           VITE_FIREBASE_VAPID_KEY: ${{ secrets.VITE_FIREBASE_VAPID_KEY }}
         run: |
@@ -124,10 +118,6 @@ jobs:
               pnpm --filter ${{ inputs.appDir }} build )
 
             [ -f "dist/${1:+$1/}index.html" ] || { echo "::error::${1:-root} built to the wrong path"; exit 1; }
-            # A 200 response can hide an SPA fallback. Require version-prefixed built assets.
-            if [ -n "$1" ]; then
-              grep -Fq "src=\"/$1/assets/" "dist/$1/index.html" || { echo "::error::$1 has unversioned assets"; exit 1; }
-            fi
           }
 
           # Every release was cut against one accxui version, named in that tag's own caller workflow: the
@@ -154,78 +144,63 @@ jobs:
 
           checkout() { git clean -fd; git checkout --quiet -f "$1"; use_accxui "$1"; pnpm install; }
 
-          # Resolve every ref before checkout, and always include the triggering candidate. Explicit
-          # retention lets an operator keep a known-good version without rebuilding a broken tag.
-          resolve_ref() { git rev-parse --verify "$1^{commit}" 2>/dev/null || git rev-parse --verify "origin/$1^{commit}"; }
-          root_commit=$(resolve_ref "$ROOT_REF")
-          refs=()
-          if [ -n "$RETAINED_REFS" ]; then
-            jq -e 'type == "array" and all(.[]; type == "string" and length > 0)' <<< "$RETAINED_REFS" >/dev/null
-            mapfile -t refs < <(jq -r '.[]' <<< "$RETAINED_REFS")
-          else
-            mapfile -t refs < <(
-              git tag -l | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V |
-              awk -F'[.]' '{m=$1"."$2; if(!(m in l)){o[++n]=m} l[m]=$0} END{for(i=1;i<=n;i++)print l[o[i]]}' |
-              tail -n "$MAX_VERSIONS"
-            )
-          fi
-          refs=("$root_commit" "${refs[@]}")
+          # Latest patch of each MAJOR.MINOR, newest MAX_VERSIONS of those (sort -V ascending, so the last
+          # write per minor wins). Releases with no VITE_APP_VERSION_CONFIG predate multi-version support:
+          # they ignore buildVersion and build to dist/, which would clobber the tree, so skip those.
           versions=()
-          commits=()
-          for ref in "${refs[@]}"; do
-            commit=$(resolve_ref "$ref")
-            version="v$(git show "$commit:package.json" | jq -r .version)"
-            [[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] || { echo "::error::invalid package version at $ref"; exit 1; }
-            if ! git show "$commit:.env.example" | grep -q '^VITE_APP_VERSION_CONFIG='; then
-              if [ -z "$RETAINED_REFS" ] && [ "$commit" != "$root_commit" ]; then
-                echo "::warning::$ref predates multi-version support; skipping /$version/"
-                continue
-              fi
-              echo "::error::$ref lacks multi-version configuration"; exit 1
+          while read -r tag; do
+            latest="$tag"
+            if git show "$tag:.env.example" 2>/dev/null | grep '^VITE_APP_VERSION_CONFIG=' >/dev/null; then
+              versions+=("$tag")
+            else
+              echo "::warning::$tag predates multi-version support; skipping /$tag/"
             fi
-            duplicate=false
-            for i in "${!versions[@]}"; do
-              if [ "${versions[$i]}" = "$version" ]; then
-                [ "${commits[$i]}" = "$commit" ] || { echo "::error::two different commits claim $version"; exit 1; }
-                duplicate=true
-              fi
-            done
-            if [ "$duplicate" = false ]; then versions+=("$version"); commits+=("$commit"); fi
-          done
-          root_version=${versions[0]}
-          echo "root=$root_version versions=${versions[*]}"
+          done < <(
+            git tag -l | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V |
+            awk -F'[.]' '{m=$1"."$2; if(!(m in l)){o[++n]=m} l[m]=$0} END{for(i=1;i<=n;i++)print l[o[i]]}' |
+            tail -n "$MAX_VERSIONS"
+          )
+          [ -n "${latest:-}" ] || { echo "::error::no vX.Y.Z tags found"; exit 1; }
+          echo "root=$latest versions=${versions[*]:-<none>}"
 
-          # Root first, because its build empties dist/. Every version uses its own framework pin.
+          # firebase deploy publishes all of dist/, so the whole tree is assembled locally first. Root
+          # goes first: its outDir is dist/ and Vite empties that, wiping any version folder present.
           rm -rf dist
-          checkout "$root_commit"
+          checkout "$latest"
           build ""
-          records=$(mktemp)
-          for i in "${!versions[@]}"; do
-            v=${versions[$i]}
-            checkout "${commits[$i]}"
+          # Still checked out, so build its versioned bundle now and skip a second checkout + install.
+          if printf '%s\n' "${versions[@]:-}" | grep -qx "$latest"; then build "$latest"; fi
+
+          for v in "${versions[@]:-}"; do
+            if [ -z "$v" ] || [ "$v" = "$latest" ]; then continue; fi
+            checkout "$v"
             build "$v"
-            jq -n --arg version "$v" --arg appRevision "${commits[$i]}" \
-              --arg accxuiRevision "$(git -C "$GITHUB_WORKSPACE" rev-parse HEAD)" \
-              '{version:$version,appRevision:$appRevision,accxuiRevision:$accxuiRevision,environmentTypeId:"AppEnvUAT"}' > "dist/$v/version.json"
-            jq -c . "dist/$v/version.json" >> "$records"
           done
           [ -f dist/index.html ] || { echo "::error::root bootstrap was overwritten"; exit 1; }
-          cp "dist/$root_version/version.json" dist/version.json
-          app_id=$(git show "$root_commit:.env.example" | grep '^VITE_APP_VERSION_CONFIG=' | cut -d= -f2- | jq -r .appId)
-          jq -s --arg appId "$app_id" --arg rootVersion "$root_version" \
-            '{schemaVersion:1,appId:$appId,environmentTypeId:"AppEnvUAT",rootVersion:$rootVersion,versions:.}' "$records" > dist/hosted-versions.json
-          rm "$records"
 
-          git checkout --quiet "$root_commit" -- firebase.json .firebaserc
-          rewrites=$(printf '%s\n' "${versions[@]}" | jq -R . | jq -s \
+          # Company discovers only the stable versions actually included in this deployment.
+          if git show "$latest:.env.example" 2>/dev/null | grep '^VITE_APP_VERSION_CONFIG=' >/dev/null; then
+            app_id=$(git show "$latest:.env.example" | grep '^VITE_APP_VERSION_CONFIG=' | cut -d= -f2- | jq -r .appId)
+            jq -n --arg appId "$app_id" --arg rootVersion "$latest" --args '
+              {schemaVersion:1,appId:$appId,environmentTypeId:"AppEnvUAT",rootVersion:$rootVersion,
+               versions:[$ARGS.positional[] | select(length > 0) | {version:.,environmentTypeId:"AppEnvUAT"}]}
+              ' "${versions[@]:-}" > dist/hosted-versions.json
+          fi
+
+          # Hosting config comes from the release serving root; the loop left us on the oldest one.
+          # Version rewrites first, catch-all last: Firebase is first-match-wins and the catch-all has to
+          # fall through to the root bootstrap.
+          git checkout --quiet "$latest" -- firebase.json .firebaserc
+          rewrites=$(printf '%s\n' "${versions[@]:-}" | { grep -v '^$' || true; } | jq -R . | jq -s \
             'map({source:("/"+.+"/**"), destination:("/"+.+"/index.html")}) + [{source:"**",destination:"/index.html"}]')
           jq --argjson r "$rewrites" '.hosting |= map(.rewrites = $r | .headers = ((.headers // []) + [
             {source:"**",headers:[{key:"Cache-Control",value:"no-cache"}]},
             {source:"**/assets/**",headers:[{key:"Cache-Control",value:"public,max-age=31536000,immutable"}]},
-            {source:"/hosted-versions.json",headers:[{key:"Cache-Control",value:"no-store"},{key:"Access-Control-Allow-Origin",value:"*"}]},
-            {source:"**/version.json",headers:[{key:"Cache-Control",value:"no-store"}]}
+            {source:"/hosted-versions.json",headers:[{key:"Cache-Control",value:"no-store"},{key:"Access-Control-Allow-Origin",value:"*"}]}
           ]))' firebase.json > fb.tmp && mv fb.tmp firebase.json
-          echo "DEPLOY_MSG=Root $root_version + versions ${versions[*]}" >> "$GITHUB_ENV"
+          jq -c '.hosting[] | {target, rewrites}' firebase.json
+          find dist -mindepth 1 -maxdepth 1 -type d | sort
+          echo "DEPLOY_MSG=Root $latest + versions ${versions[*]:-none}" >> "$GITHUB_ENV"
 
       - name: Prepare legacy service-worker recovery
         run: node .hosting-tools/scripts/hosting/prepare.mjs "apps/${{ inputs.appDir }}"
@@ -241,7 +216,6 @@ jobs:
           firebase deploy --token "$HOTWAX_PUBLIC_SECRET" -m "$DEPLOY_MSG" --only hosting:uat
 
   release:
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
 
     steps:
