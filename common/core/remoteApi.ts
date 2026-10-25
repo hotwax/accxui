@@ -119,6 +119,8 @@ const api = async (customConfig: any) => {
     paramsSerializer
   }
 
+  if(customConfig.timeout !== undefined) { config.timeout = customConfig.timeout; }
+
   // Honor the custom headers passed in the api call
   if(customConfig.headers) config["headers"] = { ...config["headers"], ...customConfig["headers"] }
 

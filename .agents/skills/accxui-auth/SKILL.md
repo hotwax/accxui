@@ -119,6 +119,23 @@ stored only once `VITE_APP_PERMISSION_ID` passes), and to `"pending"` at the top
 persisted `"success"` from a stale session can't open the gate early. The store is persisted, so a
 reload keeps it. Company and Order Manager use `fetchStatus.permissions` for the same flag.
 
+## Instance app-version refresh
+
+`checkAppVersionRedirect()` keeps its synchronous boolean contract. On the first authenticated
+navigation of a document, it starts one deduplicated `fetchAppVersion()` before enforcing a
+persisted pin. Reloading an authenticated app therefore applies the instance's latest version
+selection without login re-entry. Ordinary SPA navigation reuses the result; there is no polling
+or automatic reload of an idle form. Login can still explicitly fetch before authentication.
+
+The request is bounded to five seconds. Only a valid successful response can change the pin
+(an empty result means Default). A failed or malformed response retains the pin and current URL
+for this document, including later SPA navigation. A subsequent reload or explicit fetch retries.
+Session clearing resets the lookup; late responses from a different instance or login are ignored.
+The canonical redirect preserves the current route, query, and hash.
+
+This behavior requires the updated framework in **each hosted build** involved in a switch.
+An older retained build continues to use its original login-only refresh behavior until patched.
+
 ## Session-scoped state
 
 - **App state:** reset it in `postLogout` (`store.$reset()`, stop sync, clear caches).

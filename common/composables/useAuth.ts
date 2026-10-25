@@ -8,8 +8,8 @@ import { DateTime } from "luxon";
 import { computed, ref } from "vue";
 import emitter from "../core/emitter";
 import { accxuiConfig } from "../core/configRegistry";
-import { clearSessionScopedState } from "../core/sessionScope";
-import { getCanonicalPath } from "../utils/appVersionUtil";
+import { clearSessionScopedState, onSessionCleared } from "../core/sessionScope";
+import { getCanonicalPath, getVersionedPathInfo } from "../utils/appVersionUtil";
 
 interface LoginOption {
   loginAuthType?: string,
@@ -43,6 +43,13 @@ const clearBackendMode = () => {
 const token = ref(cookieHelper().get("token") || "")
 const expirationTime = ref(cookieHelper().get("expirationTime") || "")
 let explicitlyLoggedOut = false;
+// Revalidate persisted deployment settings once per document/session, before enforcing their URL.
+let appVersionLookup: { context: string; complete: boolean; resolved?: boolean; promise?: Promise<void> } | undefined;
+const appVersionContext = () => JSON.stringify([
+  commonUtil.getMaargURL(), commonUtil.getToken(), accxuiConfig.value.oms,
+  import.meta.env.VITE_APP_VERSION_CONFIG
+]);
+onSessionCleared(() => { appVersionLookup = undefined; });
 
 export function useAuth() {
   const getDuration = (expirationTime?: any) => {
@@ -73,6 +80,7 @@ export function useAuth() {
   }
 
   const clearAuth = () => {
+    appVersionLookup = undefined;
     clearBackendMode();
     cookieHelper().remove("token");
     cookieHelper().remove("expirationTime");
@@ -335,6 +343,13 @@ export function useAuth() {
   // (not resolved yet — acting would risk a premature/looping redirect) or already canonical. Shared by
   // the router guard (every navigation) and fetchAppVersion (right after it resolves the version).
   const checkAppVersionRedirect = () => {
+    if(appVersionLookup?.context !== appVersionContext() || !appVersionLookup.complete) {
+      if(isAuthenticated.value) { void fetchAppVersion(); }
+      // Do not redirect using a stale persisted pin while its replacement is being fetched.
+
+      return false;
+    }
+    if(!appVersionLookup.resolved) { return false; }
     const configuredVersion = accxuiConfig.value.appVersion;
     if(configuredVersion === undefined) return false;
 
@@ -345,33 +360,46 @@ export function useAuth() {
     return true;
   };
 
-  const fetchAppVersion = async () => {
-    try {
-      // appId (endpoint path) and environmentTypeId come from the single multi-version config object
-      // (VITE_APP_VERSION_CONFIG), so they match this deployment's app rather than being hardcoded.
-      const { appId, environmentTypeId } = JSON.parse(import.meta.env.VITE_APP_VERSION_CONFIG);
-      const resp = await api({
-        url: `admin/apps/${appId}/appVersions`,
-        method: "GET",
-        params: {
-          appId,
-          environmentTypeId
-        }
-      });
-
-      const appVersions = Array.isArray(resp.data) ? resp.data : resp.data?.docs;
-      const configuredVersion = appVersions?.[0]?.currentVersion;
-
-      // Persist the OMS's answer, then move the Login page onto that version's canonical URL.
-      accxuiConfig.value.appVersion = configuredVersion || "";
-      checkAppVersionRedirect();
-    } catch (error) {
-      // The call failed outright (endpoint unreachable/absent, or the config JSON was unparseable).
-      // Resolve to "" so the app runs unversioned at root instead of staying unresolved.
-      accxuiConfig.value.appVersion = "";
-      checkAppVersionRedirect();
-      logger.error(error);
+  const fetchAppVersion = () => {
+    const context = appVersionContext();
+    if(appVersionLookup?.context === context && !appVersionLookup.complete) {
+      return appVersionLookup.promise!;
     }
+    const lookup: NonNullable<typeof appVersionLookup> = { context, complete: false };
+    appVersionLookup = lookup;
+    lookup.promise = (async () => {
+      try {
+        const { appId, environmentTypeId } = JSON.parse(import.meta.env.VITE_APP_VERSION_CONFIG);
+        const resp = await api({
+          url: `admin/apps/${appId}/appVersions`, method: "GET", timeout: 5000,
+          params: { appId, environmentTypeId }
+        });
+        // A logout or instance/session change must invalidate a late response.
+        if(appVersionLookup !== lookup || appVersionContext() !== context) { return; }
+        const rows = Array.isArray(resp.data) ? resp.data : resp.data?.docs;
+        if(commonUtil.hasError(resp) || !Array.isArray(rows) || rows.length > 1 ||
+          rows.some(row => !row || typeof row !== "object" || Array.isArray(row) || (row.appId && row.appId !== appId) ||
+            (row.environmentTypeId && row.environmentTypeId !== environmentTypeId))) {
+          throw new Error("Invalid app version response");
+        }
+        const configuredVersion = rows[0]?.currentVersion ?? "";
+        if(typeof configuredVersion !== "string" || (configuredVersion &&
+          getVersionedPathInfo(`/${configuredVersion}`).version !== configuredVersion)) {
+          throw new Error("Invalid configured app version");
+        }
+        accxuiConfig.value.appVersion = configuredVersion;
+        lookup.complete = true;
+        lookup.resolved = true;
+        checkAppVersionRedirect();
+      } catch (error) {
+        // Failed lookup is not Default. Preserve the last choice and the current page.
+        logger.error(error);
+      } finally {
+        lookup.complete = true;
+      }
+    })();
+
+    return lookup.promise;
   };
 
   return {
