@@ -189,6 +189,7 @@ set_config() {
     if (!/^VITE_APP_VERSION_CONFIG=/m.test(s)) { console.error("VITE_APP_VERSION_CONFIG missing from .env"); process.exit(1); }
     s = s.replace(/^VITE_APP_VERSION_CONFIG=(.*)$/m, (_, j) => {
       const o = JSON.parse(j); o.buildVersion = bv; o.environmentTypeId = et;
+      process.stdout.write(JSON.stringify(o));
       return "VITE_APP_VERSION_CONFIG=" + JSON.stringify(o);
     });
     fs.writeFileSync(".env", s);
@@ -200,8 +201,10 @@ build_at() {   # $1 = git ref, $2 = buildVersion ("" for the root bootstrap)
   git checkout -q -f "$1"
   cp .env.example .env      # fresh per tag (this version's own .env.example)
   apply_overrides           # env-config/.env.<env> -> firebase config etc.
-  set_config "$2"           # buildVersion + environmentTypeId
-  ( cd "$ROOT_DIR" && pnpm --filter "$PKG" build )
+  local version_config
+  version_config="$(set_config "$2")"
+  # Process env wins over .env.local / .env.production and an inherited shell value.
+  ( cd "$ROOT_DIR" && VITE_APP_VERSION_CONFIG="$version_config" pnpm --filter "$PKG" build )
 }
 
 rm -rf dist
@@ -230,6 +233,7 @@ jq --argjson versions "$vs_json" '
 ' firebase.json > firebase.json.tmp && mv firebase.json.tmp firebase.json
 # Always preserve update endpoints for previously installed apps, including old version scopes.
 node "$ROOT_DIR/scripts/hosting/prepare.mjs" "$APP_DIR"
+node "$ROOT_DIR/scripts/hosting/verify-environment.mjs" "$APP_DIR/dist" "$ENV_TYPE"
 echo ">> firebase.json rewrites:"; jq -c '.hosting[].rewrites' firebase.json
 
 # ----------------------------------------------------------------------------- pre-deploy gate
@@ -246,7 +250,7 @@ if ! printf '%s' "${deploy_go:-}" | grep -qiE '^y'; then
   echo
   echo "Aborted before deploy — nothing pushed. The full build is left in apps/$APP/dist/."
   echo "Deploy it manually with:"
-  echo "    cd apps/$APP && firebase use $ENV && firebase deploy --only hosting:$ENV"
+  echo "    cd apps/$APP && node ../../scripts/hosting/verify-environment.mjs dist $ENV_TYPE && firebase use $ENV && firebase deploy --only hosting:$ENV"
   echo "When you're done, restore the working tree:"
   echo "    cd apps/$APP && git checkout $ORIG_REF && git checkout -- firebase.json"
   [ -f .env.deploybak ] && echo "    mv .env.deploybak .env   # your original .env (kept as backup)"
@@ -254,6 +258,8 @@ if ! printf '%s' "${deploy_go:-}" | grep -qiE '^y'; then
 fi
 
 # ----------------------------------------------------------------------------- deploy
+# Recheck after the review pause in case the build was replaced while inspecting it.
+node "$ROOT_DIR/scripts/hosting/verify-environment.mjs" "$APP_DIR/dist" "$ENV_TYPE"
 firebase use "$ENV" || die "'firebase use $ENV' failed — ensure $APP/.firebaserc has a '$ENV' project alias."
 firebase deploy --only "hosting:$ENV" -m "deploy $APP $ENV (root + ${#VERSIONS[@]} version(s))"
 

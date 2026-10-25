@@ -61,3 +61,17 @@ complete tree and the usual hosted-version manifest and rewrites.
 The helper uses the pinned Firebase CLI's authentication and Hosting API client.
 For a read-only local trial, use `FIREBASE_ACCOUNT` with an existing CLI login;
 `FIREBASE_TOOLS_LIB` can point to that installation's `firebase-tools/lib` directory.
+
+## Release environment check
+
+`scripts/deploy.sh` passes the selected environment and build version directly to
+the build process, overriding shell and mode/local env-file values. It checks the
+compiled config in the root and every version directory before review and again
+before upload. A missing config or mismatched environment stops the release.
+
+For a manually assembled production build, run
+`node scripts/hosting/verify-environment.mjs apps/<app>/dist AppEnvProd` before upload.
+UAT and development builds use `AppEnvUAT` and `AppEnvDev` respectively; a UAT build
+cannot be promoted unchanged to production. These checks do not change a deployed
+app or any tenant's version assignment. Check that production assignments refer to
+version directories included in the release before an authorized deployment.
