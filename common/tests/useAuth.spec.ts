@@ -189,7 +189,7 @@ describe("app version refresh", () => {
   ])("adopts a successful response %j and preserves the route", async (data, version, path) => {
     api.mockResolvedValue({ data });
     await useAuth().fetchAppVersion();
-    expect(api).toHaveBeenCalledWith({ url: "admin/apps/CYCLE_COUNT/appVersions", method: "GET", params: { appId: "CYCLE_COUNT", environmentTypeId: "AppEnvUAT" } });
+    expect(api).toHaveBeenCalledWith({ url: "admin/apps/CYCLE_COUNT/appVersions", method: "GET", timeout: 5000, params: { appId: "CYCLE_COUNT", environmentTypeId: "AppEnvUAT" } });
     expect(accxuiConfig.value.appVersion).toBe(version);
     expect(replace).toHaveBeenCalledWith(path);
   });

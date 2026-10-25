@@ -328,6 +328,7 @@ export function useAuth() {
       const resp = await api({
         url: `admin/apps/${appId}/appVersions`,
         method: "GET",
+        timeout: 5000,
         params: {
           appId,
           environmentTypeId

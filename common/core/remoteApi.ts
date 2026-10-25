@@ -116,6 +116,7 @@ const api = async (customConfig: any) => {
     method: customConfig.method,
     data: customConfig.data,
     params: customConfig.params,
+    timeout: customConfig.timeout,
     paramsSerializer
   }
 
