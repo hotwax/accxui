@@ -61,3 +61,35 @@ complete tree and the usual hosted-version manifest and rewrites.
 The helper uses the pinned Firebase CLI's authentication and Hosting API client.
 For a read-only local trial, use `FIREBASE_ACCOUNT` with an existing CLI login;
 `FIREBASE_TOOLS_LIB` can point to that installation's `firebase-tools/lib` directory.
+
+## Publish versions while preserving the default
+
+`pnpm deploy:app --publish-only --app products --environment uat --versions v1.0.0 --channel live`
+prints and saves a read-only plan. Add `--execute` to build and publish. Production execution also
+requires `--confirm-production <exact-site-id>`. A plan does not build or write to Firebase.
+
+This opt-in path does not run the normal root-building deployment. It snapshots the channel,
+skips already-hosted version directories, builds each additional published stable release against
+its recorded AccxUI pin in isolated worktrees, clones the existing Hosting version, and uploads
+only new version-prefixed files. It preserves every existing file hash and the complete root
+configuration. Only the new prefixes gain rewrites and cache headers. No instance setting is
+read or written by the publisher. Authentication uses the installed Firebase CLI session, or the
+existing CI Firebase secret; credentials are never saved in the plan.
+
+Before final release it verifies all old hashes, the new files and the planned configuration,
+and checks that the channel has not advanced. A repeat publication skips existing versions;
+it cannot overwrite them or prune old releases. Files and plans remain under `apps/_worktrees/`
+for inspection. Existing service workers and root discovery manifests are left byte-for-byte
+unchanged; Company's URL checks discover newly published GitHub release versions independently.
+
+Preflight the actual customer instance settings before publishing: a pin to a previously absent
+version could become active once its URL is added. Also check the environment compiled into the
+current default; retaining an AppEnvDev default does not migrate it to AppEnvProd. Serialize all
+releases to the site: Firebase release creation has no compare-and-swap precondition, so the
+last-read check cannot protect against an independent deployment racing in that final instant.
+The Products manual UAT test uses the same GitHub release concurrency group as normal releases.
+
+Testing: `node --test scripts/hosting/*.test.mjs`. `prepare-publish-test.mjs` makes a one-day Products
+UAT preview, omitting one already-hosted release only in the preview. Publish that release into the
+preview, verify its deep links and all preserved hashes, and verify the live release is unchanged.
+This is a hosted UAT test; it does not change the main UAT default or any production deployment.

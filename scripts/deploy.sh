@@ -22,6 +22,12 @@
 
 set -euo pipefail
 
+# Explicit additive mode; the established default deployment flow below is unchanged.
+if [ "${1:-}" = "--publish-only" ]; then
+  shift
+  exec node "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/hosting/publish-versions.mjs" "$@"
+fi
+
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd -- "$SCRIPT_DIR/.." && pwd)"
 APPS_DIR="$ROOT_DIR/apps"
