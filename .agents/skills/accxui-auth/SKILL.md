@@ -128,7 +128,10 @@ selection without login re-entry. Ordinary SPA navigation reuses the result; the
 or automatic reload of an idle form. Login can still explicitly fetch before authentication.
 
 The request is bounded to five seconds. Only a valid successful response can change the pin
-(an empty result means Default). A failed or malformed response retains the pin and current URL
+(Default is either an empty list or a row matching both requested IDs with a missing, null, or
+empty `currentVersion`). Company clears the pin using PUT null to preserve audit history; Moqui's
+GET omits the cleared field. A row missing its app/environment identity is malformed, not Default.
+A failed or malformed response retains the pin and current URL
 for this document, including later SPA navigation. A subsequent reload or explicit fetch retries.
 Session clearing resets the lookup; late responses from a different instance or login are ignored.
 The canonical redirect preserves the current route, query, and hash.

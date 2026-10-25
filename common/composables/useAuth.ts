@@ -378,10 +378,12 @@ export function useAuth() {
         if(appVersionLookup !== lookup || appVersionContext() !== context) { return; }
         const rows = Array.isArray(resp.data) ? resp.data : resp.data?.docs;
         if(commonUtil.hasError(resp) || !Array.isArray(rows) || rows.length > 1 ||
-          rows.some(row => !row || typeof row !== "object" || Array.isArray(row) || (row.appId && row.appId !== appId) ||
-            (row.environmentTypeId && row.environmentTypeId !== environmentTypeId))) {
+          rows.some(row => !row || typeof row !== "object" || Array.isArray(row) || row.appId !== appId ||
+            row.environmentTypeId !== environmentTypeId)) {
           throw new Error("Invalid app version response");
         }
+        // Default may be no deployment row, or a retained audit row with its pin cleared.
+        // Moqui omits the nullable currentVersion field after Company saves null/empty.
         const configuredVersion = rows[0]?.currentVersion ?? "";
         if(typeof configuredVersion !== "string" || (configuredVersion &&
           getVersionedPathInfo(`/${configuredVersion}`).version !== configuredVersion)) {

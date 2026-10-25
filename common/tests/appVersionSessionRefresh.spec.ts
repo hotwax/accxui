@@ -19,6 +19,7 @@ vi.mock("../utils/commonUtil", () => ({ commonUtil: {
 import { useAuth } from "../composables/useAuth";
 import { accxuiConfig } from "../core/configRegistry";
 const replace = vi.fn();
+const deployment = (fields: Record<string, unknown> = {}) => ({ appId: "COMPANY", environmentTypeId: "AppEnvUAT", ...fields });
 function pending() {
   let resolve!: (r: any) => void;
   const promise = new Promise(r => { resolve = r; });
@@ -46,14 +47,14 @@ describe("authenticated app version startup refresh", () => {
       params: { appId: "COMPANY", environmentTypeId: "AppEnvUAT" } });
     expect(replace).not.toHaveBeenCalled();
     const completion = useAuth().fetchAppVersion();
-    request.resolve({ data: { docs: [{ currentVersion: "v2.0.0" }] } });
+    request.resolve({ data: { docs: [deployment({ currentVersion: "v2.0.0" })] } });
     await completion;
     expect(accxuiConfig.value.appVersion).toBe("v2.0.0");
     expect(replace).toHaveBeenCalledWith("/v2.0.0/orders?status=open#details");
   });
   it("does not request again for navigation after the current document has resolved its pin", async () => {
     window.location.pathname = "/v2.0.0/orders";
-    api.mockResolvedValue({ data: [{ currentVersion: "v2.0.0" }] });
+    api.mockResolvedValue({ data: [deployment({ currentVersion: "v2.0.0" })] });
     await useAuth().fetchAppVersion();
     expect(useAuth().checkAppVersionRedirect()).toBe(false);
     expect(api).toHaveBeenCalledTimes(1); expect(replace).not.toHaveBeenCalled();
@@ -61,6 +62,14 @@ describe("authenticated app version startup refresh", () => {
   it("honors an empty successful result as Default and preserves the route", async () => {
     window.location.pathname = "/v1.0.0/orders";
     api.mockResolvedValue({ data: [] });
+    await useAuth().fetchAppVersion();
+    expect(accxuiConfig.value.appVersion).toBe("");
+    expect(replace).toHaveBeenCalledWith("/orders?status=open#details");
+  });
+  it.each([{}, { currentVersion: null }, { currentVersion: "" }])("honors a correctly identified deployment with a cleared pin as Default: %j", async fields => {
+    window.location.pathname = "/v1.0.0/orders";
+    // Live test-maarg GET omits currentVersion after PUT null or empty string.
+    api.mockResolvedValue({ data: [deployment(fields)] });
     await useAuth().fetchAppVersion();
     expect(accxuiConfig.value.appVersion).toBe("");
     expect(replace).toHaveBeenCalledWith("/orders?status=open#details");
@@ -73,8 +82,11 @@ describe("authenticated app version startup refresh", () => {
     expect(api).toHaveBeenCalledTimes(1); expect(replace).not.toHaveBeenCalled();
   });
   it.each([{}, { docs: null }, { errors: "denied", docs: [] }, { docs: [null] }, { docs: ["invalid"] },
-    { docs: [{ currentVersion: "../../login" }] }, { docs: [{ currentVersion: 4 }] },
-    { docs: [{ environmentTypeId: "AppEnvProd", currentVersion: "v2.0.0" }] }])("rejects invalid results without treating them as Default: %j", async data => {
+    { docs: [deployment({ currentVersion: "../../login" })] }, { docs: [deployment({ currentVersion: 4 })] },
+    { docs: [deployment({ environmentTypeId: "AppEnvProd", currentVersion: "v2.0.0" })] },
+    { docs: [{}] }, { docs: [{ currentVersion: "v2.0.0" }] },
+    { docs: [{ appId: "COMPANY" }] }, { docs: [{ environmentTypeId: "AppEnvUAT" }] },
+    { docs: [deployment({ appId: "OTHER" })] }])("rejects invalid results without treating them as Default: %j", async data => {
     api.mockResolvedValue({ data }); await useAuth().fetchAppVersion();
     expect(accxuiConfig.value.appVersion).toBe("v1.0.0"); expect(replace).not.toHaveBeenCalled();
   });
@@ -85,7 +97,7 @@ describe("authenticated app version startup refresh", () => {
   it("ignores a response that arrives after logout", async () => {
     const request = pending(); api.mockReturnValue(request.promise);
     const completion = useAuth().fetchAppVersion(); useAuth().clearAuth();
-    request.resolve({ data: [{ currentVersion: "v2.0.0" }] }); await completion;
+    request.resolve({ data: [deployment({ currentVersion: "v2.0.0" })] }); await completion;
     expect(accxuiConfig.value.appVersion).toBe("v1.0.0"); expect(replace).not.toHaveBeenCalled();
   });
   it("does not let the old instance overwrite a newer instance's selection", async () => {
@@ -93,9 +105,9 @@ describe("authenticated app version startup refresh", () => {
     const oldCompletion = useAuth().fetchAppVersion();
     state.base = "https://other.example/rest/s1/"; state.cookies.oms = "other";
     accxuiConfig.value.oms = "other"; useAuth().updateToken("session-b", String(Date.now()+60000));
-    api.mockResolvedValue({ data: [{ currentVersion: "v3.0.0" }] });
+    api.mockResolvedValue({ data: [deployment({ currentVersion: "v3.0.0" })] });
     await useAuth().fetchAppVersion();
-    request.resolve({ data: [{ currentVersion: "v2.0.0" }] }); await oldCompletion;
+    request.resolve({ data: [deployment({ currentVersion: "v2.0.0" })] }); await oldCompletion;
     expect(accxuiConfig.value.appVersion).toBe("v3.0.0");
     expect(replace).toHaveBeenCalledTimes(1);
     expect(replace).toHaveBeenCalledWith("/v3.0.0/orders?status=open#details");
