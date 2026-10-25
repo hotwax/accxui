@@ -63,6 +63,10 @@ are getters/setters onto the app's user store: the framework reads and writes th
 | `clearAuth()` | in the user store's `postLogout`, and when a login must be undone (the app-access check) |
 | `checkAppVersionRedirect()` | the router's global `beforeEach`: `if (useAuth().checkAppVersionRedirect()) return false` |
 
+`fetchAppVersion()` refreshes the configured choice and canonical URL. A successful empty answer
+means Default; a failed lookup preserves the last choice and does not redirect. Apps that refresh
+on authenticated startup should await it before enforcing the cached URL, without polling during work.
+
 Logging in is the framework's `Login` page (`/login` route, from `@common`); app code doesn't call
 `login()` or set the token itself.
 

@@ -160,3 +160,37 @@ describe("login displays and logs extracted server error", () => {
     expect(logger.error).toHaveBeenCalledWith("Failed to login", "");
   });
 });
+
+
+describe("app version refresh", () => {
+  const replace = vi.fn();
+  beforeEach(() => {
+    api.mockReset();
+    replace.mockReset();
+    vi.stubEnv("VITE_APP_VERSION_CONFIG", JSON.stringify({ appId: "CYCLE_COUNT", environmentTypeId: "AppEnvUAT" }));
+    vi.stubGlobal("window", { location: { pathname: "/v5.3.0/settings", search: "?view=all", hash: "#version", replace } });
+    accxuiConfig.value.appVersion = "v5.3.0";
+  });
+  afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
+
+  it.each(["v5.3.0", "", undefined])("retains the last resolved choice %s if the lookup fails", async (version) => {
+    accxuiConfig.value.appVersion = version;
+    api.mockRejectedValue(new Error("offline"));
+    await useAuth().fetchAppVersion();
+    expect(accxuiConfig.value.appVersion).toBe(version);
+    expect(replace).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [[{ currentVersion: "v5.2.1" }], "v5.2.1", "/v5.2.1/settings?view=all#version"],
+    [{ docs: [{ currentVersion: "v5.2.1" }] }, "v5.2.1", "/v5.2.1/settings?view=all#version"],
+    [[], "", "/settings?view=all#version"],
+    [[{ currentVersion: null }], "", "/settings?view=all#version"]
+  ])("adopts a successful response %j and preserves the route", async (data, version, path) => {
+    api.mockResolvedValue({ data });
+    await useAuth().fetchAppVersion();
+    expect(api).toHaveBeenCalledWith({ url: "admin/apps/CYCLE_COUNT/appVersions", method: "GET", params: { appId: "CYCLE_COUNT", environmentTypeId: "AppEnvUAT" } });
+    expect(accxuiConfig.value.appVersion).toBe(version);
+    expect(replace).toHaveBeenCalledWith(path);
+  });
+});

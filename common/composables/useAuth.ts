@@ -341,10 +341,7 @@ export function useAuth() {
       accxuiConfig.value.appVersion = configuredVersion || "";
       checkAppVersionRedirect();
     } catch (error) {
-      // The call failed outright (endpoint unreachable/absent, or the config JSON was unparseable).
-      // Resolve to "" so the app runs unversioned at root instead of staying unresolved.
-      accxuiConfig.value.appVersion = "";
-      checkAppVersionRedirect();
+      // A failed lookup is not a request to use Default. Keep the last resolved choice.
       logger.error(error);
     }
   };
