@@ -66,8 +66,8 @@ For a read-only local trial, use `FIREBASE_ACCOUNT` with an existing CLI login;
 
 `scripts/deploy.sh` passes the selected environment and build version directly to
 the build process, overriding shell and mode/local env-file values. It checks the
-compiled config in the root and every version directory before review and again
-before upload. A missing config or mismatched environment stops the release.
+compiled config in the root and every version directory immediately before upload.
+A missing config or mismatched environment stops the release.
 
 For a manually assembled production build, run
 `node scripts/hosting/verify-environment.mjs apps/<app>/dist AppEnvProd` before upload.

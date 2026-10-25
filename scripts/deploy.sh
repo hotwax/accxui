@@ -233,7 +233,6 @@ jq --argjson versions "$vs_json" '
 ' firebase.json > firebase.json.tmp && mv firebase.json.tmp firebase.json
 # Always preserve update endpoints for previously installed apps, including old version scopes.
 node "$ROOT_DIR/scripts/hosting/prepare.mjs" "$APP_DIR"
-node "$ROOT_DIR/scripts/hosting/verify-environment.mjs" "$APP_DIR/dist" "$ENV_TYPE"
 echo ">> firebase.json rewrites:"; jq -c '.hosting[].rewrites' firebase.json
 
 # ----------------------------------------------------------------------------- pre-deploy gate
@@ -258,7 +257,7 @@ if ! printf '%s' "${deploy_go:-}" | grep -qiE '^y'; then
 fi
 
 # ----------------------------------------------------------------------------- deploy
-# Recheck after the review pause in case the build was replaced while inspecting it.
+# Check the final build after the review pause, immediately before upload.
 node "$ROOT_DIR/scripts/hosting/verify-environment.mjs" "$APP_DIR/dist" "$ENV_TYPE"
 firebase use "$ENV" || die "'firebase use $ENV' failed — ensure $APP/.firebaserc has a '$ENV' project alias."
 firebase deploy --only "hosting:$ENV" -m "deploy $APP $ENV (root + ${#VERSIONS[@]} version(s))"
