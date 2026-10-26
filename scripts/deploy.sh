@@ -12,7 +12,8 @@
 #   Version set = latest patch of each major.minor, then the last N of those (tags are vX.Y.Z).
 #   Root is built first (buildVersion="" -> dist/index.html); each version -> dist/vX.Y.Z/.
 #   environmentTypeId is baked to match the chosen env (dev->AppEnvDev, uat->AppEnvUAT, prod->AppEnvProd).
-#   firebase.json rewrites are regenerated to match exactly the versions built, then restored.
+#   Each release uses its recorded accxuiVersion in isolated worktrees. Caller checkouts stay untouched.
+#   --build-only assembles the deployable artifact without authenticating to or invoking Firebase.
 #
 # Requires: pnpm, firebase CLI (logged in), jq, node, git. Written for bash 3.2 (macOS default).
 #
@@ -27,6 +28,13 @@ ROOT_DIR="$(cd -- "$SCRIPT_DIR/.." && pwd)"
 APPS_DIR="$ROOT_DIR/apps"
 DEFAULT_VERSION_COUNT=2
 MAIN_BRANCH="main"
+BUILD_ONLY=0
+case "${1:-}" in
+  --build-only) BUILD_ONLY=1 ;;
+  "") ;;
+  *) echo "Usage: $0 [--build-only]" >&2; exit 1 ;;
+esac
+[ "$#" -le 1 ] || { echo "Unexpected arguments" >&2; exit 1; }
 
 die() { echo "ERROR: $*" >&2; exit 1; }
 
@@ -40,14 +48,11 @@ env_type() {
 
 # ----------------------------------------------------------------------------- preflight
 command -v pnpm     >/dev/null 2>&1 || die "pnpm not found"
-command -v firebase >/dev/null 2>&1 || die "firebase CLI not found (npm i -g firebase-tools)"
+if [ "$BUILD_ONLY" = 0 ]; then
+  command -v firebase >/dev/null 2>&1 || die "firebase CLI not found"
+fi
 command -v jq       >/dev/null 2>&1 || die "jq not found"
 command -v node     >/dev/null 2>&1 || die "node not found"
-
-if ! firebase login:list 2>/dev/null | grep -q "@"; then
-  echo "Not logged in to Firebase — launching 'firebase login'..."
-  firebase login
-fi
 
 # ----------------------------------------------------------------------------- pick app
 APPS=()
@@ -94,25 +99,15 @@ git rev-parse --is-inside-work-tree >/dev/null 2>&1 || die "$APP is not a git re
 [ -z "$(git status --porcelain --untracked-files=no)" ] \
   || die "$APP has uncommitted changes to tracked files — commit or stash before deploying."
 
-ORIG_REF="$(git rev-parse --abbrev-ref HEAD)"
-[ "$ORIG_REF" = "HEAD" ] && ORIG_REF="$(git rev-parse HEAD)"
-
-# Local env overrides for this environment (firebase config etc.) — replaces GitHub secrets locally.
+SOURCE_APP_DIR="$APP_DIR"
+DEFAULT_FRAMEWORK="$(git -C "$ROOT_DIR" rev-parse HEAD)"
 ENV_CONFIG_FILE="$SCRIPT_DIR/env-config/.env.$ENV"
 [ -f "$ENV_CONFIG_FILE" ] \
-  || echo "warn: $ENV_CONFIG_FILE not found — app .env keys (e.g. VITE_FIREBASE_CONFIG) won't be overridden."
+  || echo "warn: no environment override file for $ENV; using release .env.example."
 
-# Restore the repo to how we found it — on success, error, or Ctrl-C.
-cleanup() {
-  cd "$APP_DIR" 2>/dev/null || return
-  git checkout -q -f "$ORIG_REF" 2>/dev/null || true
-  git checkout -q -- firebase.json 2>/dev/null || true
-  if [ -f .env.deploybak ]; then mv -f .env.deploybak .env; else rm -f .env; fi
-}
-trap cleanup EXIT INT TERM
-[ -f .env ] && cp .env .env.deploybak   # back up a pre-existing local .env (restored in cleanup)
-
-git fetch --tags --force --quiet 2>/dev/null || echo "warn: 'git fetch --tags' failed; using local tags"
+git fetch origin --tags --quiet
+# Never overwrite a published tag or use stale refs after a failed fetch.
+git -C "$ROOT_DIR" fetch origin --tags --quiet
 
 # ----------------------------------------------------------------------------- select versions
 VERSIONS=()
@@ -128,8 +123,8 @@ fi
 
 # ----------------------------------------------------------------------------- root ref
 if [ "$ENV" = "dev" ]; then
-  if   git rev-parse --verify -q "$MAIN_BRANCH"        >/dev/null; then ROOT_REF="$MAIN_BRANCH"
-  elif git rev-parse --verify -q "origin/$MAIN_BRANCH" >/dev/null; then ROOT_REF="origin/$MAIN_BRANCH"
+  if   git rev-parse --verify -q "origin/$MAIN_BRANCH" >/dev/null; then ROOT_REF="origin/$MAIN_BRANCH"
+  elif git rev-parse --verify -q "$MAIN_BRANCH"        >/dev/null; then ROOT_REF="$MAIN_BRANCH"
   else die "no '$MAIN_BRANCH' branch found for $APP"
   fi
 else
@@ -148,18 +143,22 @@ if [ "${#VERSIONS[@]}" -gt 0 ]; then
 else
   echo "  Versions     : (none — root only)"
 fi
-echo "  Deploy       : firebase use $ENV  &&  firebase deploy --only hosting:$ENV"
+echo "  Mode         : $([ "$BUILD_ONLY" = 1 ] && echo build-only || echo build-and-confirm-deploy)"
 echo
 read -r -p "Proceed? [y/N] " go
 printf '%s' "${go:-}" | grep -qiE '^y' || die "aborted"
-if [ "$ENV" = "prod" ]; then
-  read -r -p "This is a PRODUCTION deploy. Type 'deploy' to confirm: " confirm
-  [ "$confirm" = "deploy" ] || die "aborted"
-fi
-
-# ----------------------------------------------------------------------------- install + build
-echo ">> pnpm install"
-( cd "$ROOT_DIR" && pnpm install )
+# Keep this script and hosting tools in the caller checkout while dependency versions change.
+# Worktrees live under the configured apps worktree directory and are retained for inspection.
+mkdir -p "$ROOT_DIR/apps/_worktrees"
+BUILD_ROOT=$(mktemp -d "$ROOT_DIR/apps/_worktrees/deploy-$APP-$ENV.XXXXXX")
+git -C "$ROOT_DIR" worktree add --detach "$BUILD_ROOT" "$DEFAULT_FRAMEWORK"
+APP_DIR="$BUILD_ROOT/apps/$APP"
+git -C "$SOURCE_APP_DIR" worktree add --detach "$APP_DIR" "$ROOT_REF"
+cd "$APP_DIR"
+echo "  Isolated build: $BUILD_ROOT"
+# On any failure, preserve the new worktrees for diagnosis; caller files were never changed.
+trap 'echo "Build workspace retained at $BUILD_ROOT"' EXIT
+LAST_INSTALL=""
 
 # Replace matching keys in the app's .env from env-config/.env.<env> (only keys already present in .env
 # are overridden; values are applied literally, so JSON/quotes/= are safe). No-op if the file is absent.
@@ -195,27 +194,50 @@ set_config() {
   ' "$1" "$ENV_TYPE"
 }
 
-build_at() {   # $1 = git ref, $2 = buildVersion ("" for the root bootstrap)
-  echo ">> building ${2:-<root bootstrap>} from $1"
-  git checkout -q -f "$1"
-  cp .env.example .env      # fresh per tag (this version's own .env.example)
-  apply_overrides           # env-config/.env.<env> -> firebase config etc.
-  set_config "$2"           # buildVersion + environmentTypeId
-  ( cd "$ROOT_DIR" && pnpm --filter "$PKG" build )
+build_at() {   # $1 = app ref, $2 = buildVersion (empty for root)
+  local framework_ref framework_commit install_key config
+  framework_ref=$(git -C "$SOURCE_APP_DIR" show "$1:.github/workflows/firebase-hosting-release.yml" 2>/dev/null |
+    awk '/^[ ]*accxuiVersion[ ]*:/ {print $2; exit}' | tr -d "\"'") || true
+  framework_ref="${framework_ref:-$DEFAULT_FRAMEWORK}"
+  framework_commit=$(git -C "$ROOT_DIR" rev-parse --verify "${framework_ref}^{commit}") \
+    || die "$1 declares unavailable AccxUI ref $framework_ref"
+  git checkout --quiet --detach "$1"
+  git -C "$BUILD_ROOT" checkout --quiet --detach "$framework_commit"
+  echo ">> building ${2:-root} from $1 against AccxUI $framework_ref ($framework_commit)"
+  install_key="$(git rev-parse HEAD):$framework_commit"
+  if [ "$install_key" != "$LAST_INSTALL" ]; then
+    ( cd "$BUILD_ROOT" && CI=true pnpm install --frozen-lockfile )
+    LAST_INSTALL="$install_key"
+  fi
+  cp .env.example .env
+  apply_overrides
+  set_config "$2"
+  config=$(sed -n 's/^VITE_APP_VERSION_CONFIG=//p' .env)
+  ( cd "$BUILD_ROOT"
+    # Target environment wins over inherited shell settings and every .env file.
+    export VITE_APP_VERSION_CONFIG="$config"
+    pnpm --filter "$PKG" build
+  )
+  [ -f "dist/${2:+$2/}index.html" ] || die "$1 built to the wrong path"
+  printf '%s\t%s\t%s\t%s\n' "${2:-root}" "$(git rev-parse HEAD)" "$framework_ref" "$framework_commit" >> "$BUILD_ROOT/build-versions.tsv"
 }
 
-rm -rf dist
-build_at "$ROOT_REF" ""                       # root FIRST (its build empties dist/)
-if [ "${#VERSIONS[@]}" -gt 0 ]; then
-  for v in "${VERSIONS[@]}"; do build_at "$v" "$v"; done
-fi
+build_at "$ROOT_REF" ""
+# Build the newest version beside root before switching framework dependencies.
+for v in "${VERSIONS[@]:-}"; do
+  if [ -n "$v" ] && [ "$v" = "$ROOT_REF" ]; then build_at "$v" "$v"; fi
+done
+for v in "${VERSIONS[@]:-}"; do
+  if [ -n "$v" ] && [ "$v" != "$ROOT_REF" ]; then build_at "$v" "$v"; fi
+done
 
 echo ">> dist/ now contains:"; ls -1 dist
 
 # ----------------------------------------------------------------------------- firebase.json rewrites
 # Base off the root ref's firebase.json (keeps its headers/targets), then set rewrites to exactly
 # the versions built, catch-all last -> the root bootstrap.
-git checkout -q "$ROOT_REF" -- firebase.json
+git show "$ROOT_REF:firebase.json" > firebase.json
+git show "$ROOT_REF:.firebaserc" > .firebaserc
 if [ "${#VERSIONS[@]}" -gt 0 ]; then
   vs_json="$(printf '%s\n' "${VERSIONS[@]}" | jq -R . | jq -s .)"
 else
@@ -230,32 +252,30 @@ jq --argjson versions "$vs_json" '
 ' firebase.json > firebase.json.tmp && mv firebase.json.tmp firebase.json
 # Always preserve update endpoints for previously installed apps, including old version scopes.
 node "$ROOT_DIR/scripts/hosting/prepare.mjs" "$APP_DIR"
+app_id=$(git show "$ROOT_REF:.env.example" | sed -n 's/^VITE_APP_VERSION_CONFIG=//p' | jq -r .appId)
+jq -n --arg appId "$app_id" --arg env "$ENV_TYPE" --arg root "$ROOT_REF" --argjson versions "$vs_json" \
+  '{schemaVersion:1,appId:$appId,environmentTypeId:$env,rootVersion:$root,versions:[$versions[]|{version:.,environmentTypeId:$env}]}' > dist/hosted-versions.json
+PROJECT_ID=$(jq -r --arg env "$ENV" '.projects[$env] // empty' .firebaserc)
+[ -n "$PROJECT_ID" ] || die "Release has no Firebase project for $ENV"
+jq -e --arg project "$PROJECT_ID" --arg env "$ENV" '.targets[$project].hosting[$env] | length > 0' .firebaserc >/dev/null \
+  || die "Release has no Hosting target $ENV in $PROJECT_ID"
 echo ">> firebase.json rewrites:"; jq -c '.hosting[].rewrites' firebase.json
 
 # ----------------------------------------------------------------------------- pre-deploy gate
-# Build is done and nothing has been pushed yet. Pause so you can inspect dist/ and the rewrites above
-# (e.g. `open apps/$APP/dist`) before anything goes live — especially for uat/prod.
 echo
-echo "Build complete. Nothing has been deployed yet."
-echo "  Reviewing: apps/$APP/dist  ->  firebase deploy --only hosting:$ENV"
+echo "Build complete. Nothing has been deployed."
+echo "  Artifact: $APP_DIR/dist"
+echo "  Target: $PROJECT_ID / hosting:$ENV"
+if [ "$BUILD_ONLY" = 1 ]; then exit 0; fi
 read -r -p "Deploy $APP to $ENV now? [y/N] " deploy_go
-if ! printf '%s' "${deploy_go:-}" | grep -qiE '^y'; then
-  # Abort WITHOUT cleanup: leave the built tree intact (dist/, generated firebase.json, .env) so the
-  # build can be deployed by hand. Dropping the trap is what preserves everything.
-  trap - EXIT INT TERM
-  echo
-  echo "Aborted before deploy — nothing pushed. The full build is left in apps/$APP/dist/."
-  echo "Deploy it manually with:"
-  echo "    cd apps/$APP && firebase use $ENV && firebase deploy --only hosting:$ENV"
-  echo "When you're done, restore the working tree:"
-  echo "    cd apps/$APP && git checkout $ORIG_REF && git checkout -- firebase.json"
-  [ -f .env.deploybak ] && echo "    mv .env.deploybak .env   # your original .env (kept as backup)"
-  exit 0
+if ! printf '%s' "${deploy_go:-}" | grep -qiE '^y'; then exit 0; fi
+if [ "$ENV" = prod ]; then
+  read -r -p "This is a PRODUCTION deploy. Type 'deploy' to confirm: " confirm
+  [ "$confirm" = deploy ] || die "aborted"
 fi
-
-# ----------------------------------------------------------------------------- deploy
-firebase use "$ENV" || die "'firebase use $ENV' failed — ensure $APP/.firebaserc has a '$ENV' project alias."
-firebase deploy --only "hosting:$ENV" -m "deploy $APP $ENV (root + ${#VERSIONS[@]} version(s))"
-
-echo
+if ! firebase login:list 2>/dev/null | grep -q "@"; then
+  die "No Firebase login. Authenticate explicitly before deploying."
+fi
+firebase deploy --project "$PROJECT_ID" --config "$APP_DIR/firebase.json" --only "hosting:$ENV" \
+  -m "deploy $APP $ENV (root $ROOT_REF + ${#VERSIONS[@]} version(s))"
 echo "Done: $APP -> $ENV (root=$ROOT_REF, versions=[${VERSIONS[*]:-}])."

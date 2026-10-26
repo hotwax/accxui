@@ -61,3 +61,30 @@ complete tree and the usual hosted-version manifest and rewrites.
 The helper uses the pinned Firebase CLI's authentication and Hosting API client.
 For a read-only local trial, use `FIREBASE_ACCOUNT` with an existing CLI login;
 `FIREBASE_TOOLS_LIB` can point to that installation's `firebase-tools/lib` directory.
+
+## Local release build preflight
+
+Run `pnpm deploy:app --build-only` from the framework root to prepare an app for
+Dev, UAT or Prod without calling Firebase (including login). The same interactive
+app, environment and retained-version choices apply. Each app tag's
+`firebase-hosting-release.yml` supplies its `accxuiVersion`; releases without that
+input use the caller's framework commit. Missing refs and frozen-lockfile install
+failures stop the build.
+
+The script creates isolated framework and nested app worktrees beneath
+`apps/_worktrees/deploy-<app>-<environment>.*`. It does not switch or edit the
+caller checkouts. These worktrees remain available after success or failure for
+inspection; `build-versions.tsv` records the exact app and framework revisions.
+The nested app contains `dist/`, generated Firebase configuration and a hosted
+version manifest with the selected environment. Keep the generated environment
+file private. Remove the worktrees through Git after the artifact is no longer
+needed, following the repository's cleanup rules.
+
+Normal `pnpm deploy:app` uses the same preparation, then asks whether to deploy.
+Production additionally requires typing `deploy` after the build. Firebase gets
+an explicit project, config path and environment Hosting target. The original
+production artifact should be recorded separately before a rollout: rebuilding
+an older app tag is not a substitute for keeping the existing Hosting version
+available for an exact rollback.
+
+Regression checks: `node --test scripts/deploy.test.mjs scripts/hosting/*.test.mjs`.
