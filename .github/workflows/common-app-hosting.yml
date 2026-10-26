@@ -1,0 +1,123 @@
+name: Manage app hosting
+on:
+  workflow_call:
+    inputs:
+      operation:
+        required: true
+        type: string
+      environment:
+        required: true
+        type: string
+      request_id:
+        required: true
+        type: string
+      action:
+        type: string
+        default: ""
+      version:
+        type: string
+        default: ""
+      plan_sha:
+        type: string
+        default: ""
+      confirmation:
+        type: string
+        default: ""
+      tools_ref:
+        required: true
+        type: string
+    secrets:
+      envPAT:
+        required: true
+      HOTWAX_PUBLIC_SECRET:
+        required: false
+      FIREBASE_SERVICE_ACCOUNT:
+        required: false
+      VITE_FIREBASE_CONFIG:
+        required: false
+      VITE_FIREBASE_VAPID_KEY:
+        required: false
+jobs:
+  hosting:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    # This group intentionally matches the normal release job IN THE CALLING APP REPO.
+    concurrency:
+      group: release-${{ github.repository }}
+      cancel-in-progress: false
+    environment: ${{ inputs.environment == 'prod' && 'production' || 'development' }}
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - name: Validate caller and operation
+        env:
+          RM_ENVIRONMENT: ${{ inputs.environment }}
+          RM_OPERATION: ${{ inputs.operation }}
+          RM_TOOLS_REF: ${{ inputs.tools_ref }}
+          RM_PRODUCTION_ENABLED: ${{ vars.APP_HOSTING_PROD_ENABLED }}
+          RM_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          node -e '
+            const e=process.env;
+            if(!/^hotwax\/[a-z0-9-]+$/.test(e.GITHUB_REPOSITORY)||!/^refs\/heads\//.test(e.GITHUB_REF)||e.GITHUB_REF!==`refs/heads/${e.RM_DEFAULT_BRANCH}`)throw Error("Use the app default branch");
+            if(!["uat","prod"].includes(e.RM_ENVIRONMENT)||!["inventory","plan","execute"].includes(e.RM_OPERATION))throw Error("Invalid operation");
+            if(!/^[a-f0-9]{40}$/.test(e.RM_TOOLS_REF))throw Error("Pin hosting tools to a full commit SHA");
+            if(e.RM_ENVIRONMENT==="prod"&&e.RM_PRODUCTION_ENABLED!=="true")throw Error("Production management is disabled");
+          '
+      - uses: actions/checkout@v4
+        with:
+          repository: hotwax/accxui
+          ref: ${{ inputs.tools_ref }}
+          token: ${{ secrets.envPAT }}
+          persist-credentials: false
+          sparse-checkout: scripts/hosting
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+          run_install: false
+      - name: Install existing Firebase CLI version
+        run: npm install -g firebase-tools@15.34.1
+      - name: Configure GitHub checkout authentication
+        env:
+          GH_TOKEN: ${{ secrets.envPAT }}
+        run: gh auth setup-git
+      - name: Configure Firebase authentication
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          RM_ENVIRONMENT: ${{ inputs.environment }}
+          LEGACY_UAT_TOKEN: ${{ secrets.HOTWAX_PUBLIC_SECRET }}
+        run: |
+          node --input-type=module -e '
+            import fs from "node:fs";
+            import path from "node:path";
+            const e=process.env;
+            if(e.FIREBASE_SERVICE_ACCOUNT) {
+              const account=JSON.parse(e.FIREBASE_SERVICE_ACCOUNT);
+              if(account.type!=="service_account")throw Error("Expected a Firebase service account");
+              const file=path.join(e.RUNNER_TEMP,"firebase-service-account.json");
+              fs.writeFileSync(file,JSON.stringify(account),{mode:0o600});
+              fs.appendFileSync(e.GITHUB_ENV,`GOOGLE_APPLICATION_CREDENTIALS=${file}\n`);
+            } else if(e.RM_ENVIRONMENT!=="uat"||!e.LEGACY_UAT_TOKEN)throw Error("Configure environment Firebase credentials first");
+          '
+      - name: Run reviewed hosting operation
+        env:
+          GH_TOKEN: ${{ secrets.envPAT }}
+          STATE_TOKEN: ${{ github.token }}
+          HOTWAX_PUBLIC_SECRET: ${{ secrets.FIREBASE_SERVICE_ACCOUNT == '' && inputs.environment == 'uat' && secrets.HOTWAX_PUBLIC_SECRET || '' }}
+          VITE_FIREBASE_CONFIG: ${{ secrets.VITE_FIREBASE_CONFIG }}
+          VITE_FIREBASE_VAPID_KEY: ${{ secrets.VITE_FIREBASE_VAPID_KEY }}
+          RM_OPERATION: ${{ inputs.operation }}
+          RM_ENVIRONMENT: ${{ inputs.environment }}
+          RM_REQUEST_ID: ${{ inputs.request_id }}
+          RM_ACTION: ${{ inputs.action }}
+          RM_VERSION: ${{ inputs.version }}
+          RM_PLAN_SHA: ${{ inputs.plan_sha }}
+          RM_CONFIRMATION: ${{ inputs.confirmation }}
+          RM_TOOLS_SHA: ${{ inputs.tools_ref }}
+          RM_PRODUCTION_ENABLED: ${{ vars.APP_HOSTING_PROD_ENABLED }}
+          RM_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: node scripts/hosting/manager/run.mjs
