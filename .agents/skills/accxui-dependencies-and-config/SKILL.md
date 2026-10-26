@@ -60,9 +60,9 @@ Checks: `npx vitest run common/tests` at the root; `pnpm test:unit` and `pnpm bu
 ## Versions and releases
 
 - **Multi-version hosting:** an app can be served at `/` and at `/vX.Y.Z/` side by side.
-  `VITE_APP_VERSION_CONFIG.buildVersion` picks the build's `base` and `dist/` folder; at login
-  `fetchAppVersion` asks the OMS which version this tenant is pinned to and the router redirects there
-  (`docs/MULTI_VERSION_APP_HOSTING_DESIGN.md`). Never hardcode a version in code.
+  `VITE_APP_VERSION_CONFIG.buildVersion` picks the build's `base` and `dist/` folder; at login and
+  on each signed-in reload `fetchAppVersion` asks the OMS which version this tenant is pinned to and the
+  router redirects there (`docs/MULTI_VERSION_APP_HOSTING_DESIGN.md`, **accxui-auth**). Never hardcode a version in code.
 - **Cut a release:** `pnpm release <app>` (or `pnpm release accxui`) from the accxui root. It asks for
   the version, for an app also the `accxuiVersion`, bumps `package.json` (and the app's
   `firebase-hosting-release.yml` `accxuiVersion:`), opens a `release` → `main` PR, merges it after checks,

@@ -61,7 +61,7 @@ are getters/setters onto the app's user store: the framework reads and writes th
 | `logout()` | the Logout button (Settings). The sequence is below |
 | `updateUserId(userId)` | in the user store, right after loading the profile |
 | `clearAuth()` | in the user store's `postLogout`, and when a login must be undone (the app-access check) |
-| `checkAppVersionRedirect()` | the router's global `beforeEach`: `if (useAuth().checkAppVersionRedirect()) return false` |
+| `checkAppVersionRedirect()` | the router's global `beforeEach`: `if (useAuth().checkAppVersionRedirect()) return false`. It also re-reads the pinned version once per signed-in page load (below) |
 
 Logging in is the framework's `Login` page (`/login` route, from `@common`); app code doesn't call
 `login()` or set the token itself.
@@ -118,6 +118,20 @@ watch(canSync, (ready) => { if (ready) void startAppDbSync() }, { immediate: tru
 stored only once `VITE_APP_PERMISSION_ID` passes), and to `"pending"` at the top of `postLogin`, so a
 persisted `"success"` from a stale session can't open the gate early. The store is persisted, so a
 reload keeps it. Company and Order Manager use `fetchStatus.permissions` for the same flag.
+
+## App version pin
+
+`fetchAppVersion()` asks the OMS which version this app is pinned to, stores it in `appVersion` and
+redirects onto `/vX.Y.Z/<same path>` (query and hash kept). It runs on the Login page, and once per
+signed-in page load from `checkAppVersionRedirect()`: a module-level flag, reset by every reload, keeps
+it to one call, and a Login-page fetch counts. So an admin's change applies on the user's next
+refresh, without logging in again; plain SPA navigation never re-fetches. The check doesn't block
+rendering: when the pin changed, the old version shows until the answer lands.
+
+A failed call (thrown, or an error body) keeps the stored version; only a never-resolved one
+(`undefined`) falls back to `""` (root). An empty list or a missing `currentVersion` is a real "no
+version": root. Each hosted build needs this framework code for the refresh to work from it; an older
+`/vX.Y.Z/` build only re-resolves on the Login page.
 
 ## Session-scoped state
 
