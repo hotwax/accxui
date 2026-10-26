@@ -160,3 +160,78 @@ describe("login displays and logs extracted server error", () => {
     expect(logger.error).toHaveBeenCalledWith("Failed to login", "");
   });
 });
+
+describe("fetchAppVersion re-resolves the pinned version", () => {
+  const replace = vi.fn();
+  const location = { pathname: "/v5.0.0/tabs/orders", search: "?q=1", hash: "#top", replace };
+
+  beforeEach(() => {
+    api.mockReset();
+    replace.mockReset();
+    location.pathname = "/v5.0.0/tabs/orders";
+    vi.stubEnv("VITE_APP_VERSION_CONFIG", JSON.stringify({ appId: "COMPANY", environmentTypeId: "AppEnvUAT", buildVersion: "" }));
+    vi.stubGlobal("location", location);
+    accxuiConfig.value = { ...accxuiConfig.value, appVersion: "v5.0.0" };
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+
+  it("moves a session onto a version changed in the OMS, keeping path, query and hash", async () => {
+    api.mockResolvedValue({ data: [{ currentVersion: "v5.1.0" }] });
+
+    await useAuth().fetchAppVersion();
+
+    expect(api).toHaveBeenCalledWith(expect.objectContaining({ url: "admin/apps/COMPANY/appVersions" }));
+    expect(accxuiConfig.value.appVersion).toBe("v5.1.0");
+    expect(replace).toHaveBeenCalledWith("/v5.1.0/tabs/orders?q=1#top");
+  });
+
+  it("stays put when the OMS still pins the same version", async () => {
+    api.mockResolvedValue({ data: [{ currentVersion: "v5.0.0" }] });
+
+    await useAuth().fetchAppVersion();
+
+    expect(accxuiConfig.value.appVersion).toBe("v5.0.0");
+    expect(replace).not.toHaveBeenCalled();
+  });
+
+  it("keeps an already resolved version when the call fails", async () => {
+    api.mockRejectedValue(new Error("Network Error"));
+
+    await useAuth().fetchAppVersion();
+
+    expect(accxuiConfig.value.appVersion).toBe("v5.0.0");
+    expect(replace).not.toHaveBeenCalled();
+  });
+
+  it("treats an error body as a failure, not as no version configured", async () => {
+    api.mockResolvedValue({ data: { _ERROR_MESSAGE_: "Service unavailable" } });
+
+    await useAuth().fetchAppVersion();
+
+    expect(accxuiConfig.value.appVersion).toBe("v5.0.0");
+    expect(replace).not.toHaveBeenCalled();
+  });
+
+  it("strips the version when the OMS no longer pins one", async () => {
+    api.mockResolvedValue({ data: [] });
+
+    await useAuth().fetchAppVersion();
+
+    expect(accxuiConfig.value.appVersion).toBe("");
+    expect(replace).toHaveBeenCalledWith("/tabs/orders?q=1#top");
+  });
+
+  it("falls back to root when the call fails before any version was resolved", async () => {
+    accxuiConfig.value.appVersion = undefined;
+    api.mockRejectedValue(new Error("Network Error"));
+
+    await useAuth().fetchAppVersion();
+
+    expect(accxuiConfig.value.appVersion).toBe("");
+    expect(replace).toHaveBeenCalledWith("/tabs/orders?q=1#top");
+  });
+});

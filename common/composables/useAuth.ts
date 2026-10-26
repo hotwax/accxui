@@ -43,6 +43,9 @@ const clearBackendMode = () => {
 const token = ref(cookieHelper().get("token") || "")
 const expirationTime = ref(cookieHelper().get("expirationTime") || "")
 let explicitlyLoggedOut = false;
+// Module state, so false again on every page load: a signed-in reload re-reads the version pinned in
+// the OMS once (checkAppVersionRedirect), picking up a pin an admin changed mid-session.
+let appVersionFetched = false;
 
 export function useAuth() {
   const getDuration = (expirationTime?: any) => {
@@ -335,6 +338,9 @@ export function useAuth() {
   // (not resolved yet — acting would risk a premature/looping redirect) or already canonical. Shared by
   // the router guard (every navigation) and fetchAppVersion (right after it resolves the version).
   const checkAppVersionRedirect = () => {
+    // First check of a signed-in page load: re-read the pin; fetchAppVersion redirects when it lands.
+    if(!appVersionFetched && isAuthenticated.value) void fetchAppVersion();
+
     const configuredVersion = accxuiConfig.value.appVersion;
     if(configuredVersion === undefined) return false;
 
@@ -346,6 +352,8 @@ export function useAuth() {
   };
 
   const fetchAppVersion = async () => {
+    // Any fetch (the Login page's included) counts for this page load, so the guard doesn't repeat it.
+    appVersionFetched = true;
     try {
       // appId (endpoint path) and environmentTypeId come from the single multi-version config object
       // (VITE_APP_VERSION_CONFIG), so they match this deployment's app rather than being hardcoded.
@@ -358,6 +366,8 @@ export function useAuth() {
           environmentTypeId
         }
       });
+      // An error body is a failure, not "no version configured": let the catch keep the resolved one.
+      if(commonUtil.hasError(resp)) throw resp.data;
 
       const appVersions = Array.isArray(resp.data) ? resp.data : resp.data?.docs;
       const configuredVersion = appVersions?.[0]?.currentVersion;
@@ -367,8 +377,9 @@ export function useAuth() {
       checkAppVersionRedirect();
     } catch (error) {
       // The call failed outright (endpoint unreachable/absent, or the config JSON was unparseable).
-      // Resolve to "" so the app runs unversioned at root instead of staying unresolved.
-      accxuiConfig.value.appVersion = "";
+      // Keep a version resolved earlier (a refresh while signed in must not drop a pinned user to root
+      // on a network blip); only a never-resolved one falls back to "" so the app runs at root.
+      if(accxuiConfig.value.appVersion === undefined) accxuiConfig.value.appVersion = "";
       checkAppVersionRedirect();
       logger.error(error);
     }
