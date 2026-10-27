@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-// A backend fault (a 5xx, a dropped connection, a 401 Maarg sends when it cannot reach its
-// database) must not sign the user out: retry it and say the service is unavailable.
+// A backend fault (a 5xx or a dropped connection) must not sign the user out: retry it and say the
+// service is unavailable. Only a 401, an invalid or expired session, logs out.
 
 vi.mock("comlink", () => ({ expose: () => {} }));
 const logout = vi.hoisted(() => vi.fn(async () => {}));
@@ -37,18 +37,6 @@ function adapterFor(replies: Reply[]) {
   });
 
   return adapter;
-}
-
-/** Stub the bare instance the 401 check uses, answering with `status`. */
-function profileCheckAnswers(status: Reply) {
-  const request = vi.fn(async () => {
-    if (status === 200) return { status: 200, data: {} };
-    if (status === "network") throw Object.assign(new Error("Network Error"), { config: {}, request: {} });
-    throw Object.assign(new Error("x"), { config: {}, response: { status } });
-  });
-  vi.spyOn(axios, "create").mockReturnValue({ request } as any);
-
-  return request;
 }
 
 const call = async (adapter: any, method = "get", url = "oms/orders") => {
@@ -129,52 +117,21 @@ describe("remoteApi on a 401", () => {
   afterEach(async () => {
     await vi.runAllTimersAsync();
     vi.useRealTimers();
-    vi.restoreAllMocks();
     logout.mockClear();
     markServiceAvailable();
   });
 
-  it("logs out when the session check confirms the token is invalid", async () => {
-    profileCheckAnswers(401);
-
-    expect(await call(adapterFor([401]))).toBe(401);
-    expect(logout).toHaveBeenCalledWith({ isUserUnauthorised: true });
-  });
-
-  it("keeps the session and retries once when the check says the token is fine", async () => {
-    profileCheckAnswers(200);
+  it("logs out at once and does not retry", async () => {
     const adapter = adapterFor([401, 200]);
 
-    expect(await call(adapter)).toBe(200);
-    expect(adapter).toHaveBeenCalledTimes(2);
-    expect(logout).not.toHaveBeenCalled();
-  });
-
-  it("keeps the session when the check itself cannot reach the server", async () => {
-    profileCheckAnswers(503);
-
-    await call(adapterFor([401]));
-    expect(logout).not.toHaveBeenCalled();
-  });
-
-  it("checks the session once for a burst of 401s", async () => {
-    const check = profileCheckAnswers(200);
-    const adapter = adapterFor([401]);
-    const results = Promise.all([1, 2, 3].map(() =>
-      axios({ url: "oms/orders", method: "post", baseURL: "https://x.test/rest/s1/", adapter } as any).catch(() => {})));
-    await vi.runAllTimersAsync();
-    await results;
-
-    expect(check).toHaveBeenCalledTimes(1);
-    expect(logout).not.toHaveBeenCalled();
-  });
-
-  it("logs out straight away on a 401 from login (bad credentials)", async () => {
-    const check = profileCheckAnswers(200);
-
-    await call(adapterFor([401]), "post", "admin/login");
-    expect(check).not.toHaveBeenCalled();
+    expect(await call(adapter)).toBe(401);
+    expect(adapter).toHaveBeenCalledTimes(1);
     expect(logout).toHaveBeenCalledWith({ isUserUnauthorised: true });
+  });
+
+  it("does not log out on a 503, the status a server that cannot check the token returns", async () => {
+    await call(adapterFor([503, 200]));
+    expect(logout).not.toHaveBeenCalled();
   });
 });
 

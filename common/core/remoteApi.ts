@@ -19,9 +19,6 @@ const BASE_RETRY_DELAY_MS = 1000;
 const MAX_RETRY_DELAY_MS = 30000;
 /** Only these are retried by default: repeating a write could apply it twice. `retry: true` opts a safe one in. */
 const IDEMPOTENT_METHODS = ["get", "head", "options"];
-/** Before a 401 logs out, the session is confirmed once; every 401 in the burst shares that check. */
-const SESSION_CHECK_DELAY_MS = 500;
-const SESSION_CHECK_REUSE_MS = 2000;
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -74,43 +71,10 @@ const retryRequest = async (error: any) => {
   config.__retryCount = attempt + 1;
   if (claimRetryNotice()) commonUtil.showToast(translate("Service temporarily unavailable. Retrying..."));
   await wait(retryDelayMs(attempt + 1, parseRetryAfter(error.response?.headers?.["retry-after"])));
-  // The user may have signed out meanwhile; retrying would then fail the session check and log out again.
+  // The user may have signed out meanwhile; retrying would then fail the request check and log out again.
   if (!useAuth().isAuthenticated.value && !isAnonymousEndpoint(config.url)) return Promise.reject(error);
 
   return axios(config);
-}
-
-let sessionCheck: Promise<"valid" | "invalid" | "unavailable"> | null = null;
-
-/**
- * Whether the current token is really invalid. A backend that cannot reach its database may answer
- * 401 for a valid token (Maarg's "Error finding UserAccount"), so one 401 is not proof the session
- * ended: ask once more with a lightweight profile call, and log out only if that is a 401 too.
- */
-const confirmSession = (token: string) => {
-  if (!sessionCheck) {
-    sessionCheck = (async () => {
-      await wait(SESSION_CHECK_DELAY_MS);
-      try {
-        // A bare instance: this check must not pass through these interceptors itself.
-        await axios.create().request({
-          url: "admin/user/profile",
-          method: "get",
-          baseURL: commonUtil.getMaargURL(),
-          headers: { Authorization: "Bearer " + token }
-        });
-        return "valid" as const;
-      } catch (err: any) {
-        return isServiceUnavailableError(err) ? "unavailable" as const : "invalid" as const;
-      }
-    })();
-    const check = sessionCheck;
-    check.finally(() => setTimeout(() => {
-      if (sessionCheck === check) sessionCheck = null;
-    }, SESSION_CHECK_REUSE_MS));
-  }
-
-  return sessionCheck;
 }
 
 const responseErrorInterceptor = async (error: any) => {
@@ -124,22 +88,10 @@ const responseErrorInterceptor = async (error: any) => {
   }
   if (error.response) markServiceAvailable();
 
+  // A 401 is an invalid or expired session. A server that cannot check the token answers 503
+  // (hotwax/hotwax-maarg-util#362), which is retried above instead.
   if (error.response?.status == StatusCodes.UNAUTHORIZED) {
-    const token = commonUtil.getToken();
-    // Login and the other anonymous endpoints answer 401 for bad credentials: no session to confirm.
-    const outcome = isAnonymousEndpoint(error.config.url) || !token || !commonUtil.getMaargURL()
-      ? "invalid"
-      : await confirmSession(token);
-    if (outcome === "invalid") {
-      useAuth().logout({ isUserUnauthorised: true });
-    } else if (outcome === "unavailable") {
-      markServiceUnavailable();
-      return retryRequest(error);
-    } else if (!error.config.__retriedAfterSessionCheck) {
-      // The session is fine, so the 401 was the server's fault: try the request once more.
-      error.config.__retriedAfterSessionCheck = true;
-      return retryRequest(error);
-    }
+    useAuth().logout({ isUserUnauthorised: true });
   }
   // Any status codes that falls outside the range of 2xx cause this function to trigger
   return Promise.reject(error);
