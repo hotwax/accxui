@@ -56,7 +56,7 @@ A missing version, changed content, unsafe path, occupied directory, or concurre
 release aborts before deployment. It never writes to Firebase. Run it after compatibility
 preparation so even the retained workers stay unchanged; the root and new version
 still receive current recovery endpoints. The final Firebase deployment includes the
-complete tree and the usual hosted-version manifest and rewrites.
+complete tree and the usual rewrites.
 
 The helper uses the pinned Firebase CLI's authentication and Hosting API client.
 For a read-only local trial, use `FIREBASE_ACCOUNT` with an existing CLI login;
@@ -79,7 +79,7 @@ existing CI Firebase secret; credentials are never saved in the plan.
 Before final release it verifies all old hashes, the new files and the planned configuration,
 and checks that the channel has not advanced. A repeat publication skips existing versions;
 it cannot overwrite them or prune old releases. Files and plans remain under `apps/_worktrees/`
-for inspection. Existing service workers and root discovery manifests are left byte-for-byte
+for inspection. Existing service workers are left byte-for-byte
 unchanged; Company's URL checks discover newly published GitHub release versions independently.
 
 Preflight the actual customer instance settings before publishing: a pin to a previously absent

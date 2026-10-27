@@ -75,7 +75,8 @@ test('build-only selects each framework, freezes installs, overrides inherited U
   assert.ok(builds.every(c=>c.config.environmentTypeId==='AppEnvProd'&&c.config.appId==='TEST'));
   const worktree=path.join(root,'apps/_worktrees',fs.readdirSync(path.join(root,'apps/_worktrees'))[0]);
   const builtApp=path.join(worktree,'apps/test-app');
-  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(builtApp,'dist/hosted-versions.json'))).versions.map(v=>v.version),['v3.4.2','v3.5.0']);
+  assert.deepEqual(fs.readdirSync(path.join(builtApp,'dist')).filter(name=>/^v\d/.test(name)).sort(),['v3.4.2','v3.5.0']);
+  assert.equal(fs.existsSync(path.join(builtApp,'dist/hosted-versions.json')),false);
   const config=JSON.parse(fs.readFileSync(path.join(builtApp,'firebase.json')));
   assert.ok(config.hosting[0].rewrites.some(r=>r.source==='/v3.4.2/**'));
   assert.ok(fs.existsSync(path.join(builtApp,'dist/service-worker.js')));

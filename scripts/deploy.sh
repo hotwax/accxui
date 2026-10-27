@@ -258,9 +258,6 @@ jq --argjson versions "$vs_json" '
 ' firebase.json > firebase.json.tmp && mv firebase.json.tmp firebase.json
 # Always preserve update endpoints for previously installed apps, including old version scopes.
 node "$ROOT_DIR/scripts/hosting/prepare.mjs" "$APP_DIR"
-app_id=$(git show "$ROOT_REF:.env.example" | sed -n 's/^VITE_APP_VERSION_CONFIG=//p' | jq -r .appId)
-jq -n --arg appId "$app_id" --arg env "$ENV_TYPE" --arg root "$ROOT_REF" --argjson versions "$vs_json" \
-  '{schemaVersion:1,appId:$appId,environmentTypeId:$env,rootVersion:$root,versions:[$versions[]|{version:.,environmentTypeId:$env}]}' > dist/hosted-versions.json
 PROJECT_ID=$(jq -r --arg env "$ENV" '.projects[$env] // empty' .firebaserc)
 [ -n "$PROJECT_ID" ] || die "Release has no Firebase project for $ENV"
 jq -e --arg project "$PROJECT_ID" --arg env "$ENV" '.targets[$project].hosting[$env] | length > 0' .firebaserc >/dev/null \
