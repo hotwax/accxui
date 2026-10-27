@@ -67,6 +67,15 @@ digit and a symbol), `generateInternalId(name)` (`"My Store"` → `"MY_STORE"`).
 - It redacts tokens and passwords before printing, so logging an axios error is safe.
 - Installed once in `main.ts`: `.use(logger, { level: import.meta.env.VITE_DEFAULT_LOG_LEVEL })`; it
   also catches uncaught Vue errors.
+- **On-device logs:** add `persistLogs: true` (or `{ dbName, maxEntries }`, default `app-logs` / 2000)
+  to that `.use(logger, …)` and every logged line is also kept in IndexedDB, already redacted, newest
+  2000 only. Show them with the framework modal, never an app copy:
+  `modalController.create({ component: DxpLogsModal, componentProps: { reportTitle: "BOPIS logs" } })`.
+  The framework `Login` page also shows a "View logs" button whenever `persistLogs` is on, so a user who
+  cannot sign in can still see why. `logStore.readLogs(limit)` / `logStore.clearLogs()` /
+  `logStore.isEnabled` are there for anything else. The strings (`View logs`, `Logs`, `All`, `Errors`,
+  `Clear logs`, `Clear`, `Copy these logs`, `Logs copied to the clipboard.`, `No logs recorded yet.`,
+  `This removes every stored log entry on this device.`) go in the app's `en.json`.
 
 ## i18n: `translate`
 

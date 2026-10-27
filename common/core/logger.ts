@@ -1,9 +1,12 @@
 import { createLogger, StringifyObjectsHook } from 'vue-logger-plugin'
 import { RedactSensitiveDataHook } from './logRedaction'
+import { logStore } from './logStore'
 
 // Apps ship logs to a backend by passing `afterHooks` through `app.use(logger, ...)`.
 // afterHooks run after the beforeHooks below, so anything they receive is already
 // redacted — see the RedactSensitiveDataHook note further down.
+// `persistLogs: true` (or `{ dbName, maxEntries }`) also keeps every line in IndexedDB on
+// the device, for DxpLogsModal to show — see logStore.ts.
 // https://github.com/dev-tavern/vue-logger-plugin#sample-custom-hook---leveraging-axios-to-send-logs-to-server
 
 // https://github.com/dev-tavern/vue-logger-plugin#levels
@@ -51,9 +54,15 @@ export default {
     }
     const level = options.level ? options.level : "error"
 
+    const afterHooks = [...(options.afterHooks || [])]
+    if (options.persistLogs) {
+      logStore.configure(typeof options.persistLogs === "object" ? options.persistLogs : {})
+      afterHooks.push(logStore.logStoreHook)
+    }
+
     logger.apply({
       level,
-      ...(options.afterHooks ? { afterHooks: options.afterHooks } : {}),
+      ...(afterHooks.length ? { afterHooks } : {}),
       ...(options.callerInfo !== undefined ? { callerInfo: options.callerInfo } : {})
     })
 

@@ -113,6 +113,14 @@
               </ion-note>
             </div>
           </section>
+
+          <!-- Settings is out of reach until login succeeds, so the on-device logs are offered here too -->
+          <div v-if="logStore.isEnabled" class="ion-text-center">
+            <ion-button fill="clear" size="small" @click="openLogs()" @keyup.enter.stop>
+              <ion-icon slot="start" :icon="documentTextOutline" />
+              {{ translate("View logs") }}
+            </ion-button>
+          </div>
         </form>
       </div>
     </ion-content>
@@ -135,17 +143,21 @@ import {
   IonPage,
   IonSpinner,
   loadingController,
+  modalController,
   onIonViewWillEnter
 } from "@ionic/vue";
 import { computed, ref } from "vue";
 import Logo from "./Logo.vue";
-import { arrowBackOutline, arrowForwardOutline, warningOutline } from 'ionicons/icons'
+import { arrowBackOutline, arrowForwardOutline, documentTextOutline, warningOutline } from 'ionicons/icons'
 import { cookieHelper } from "../helpers/cookieHelper";
 import { translate } from "../core/i18n"
 import { commonUtil } from "../utils/commonUtil";
 import { useAuth } from "../composables/useAuth";
 import { accxuiConfig } from "../core/configRegistry";
 import { discoverLocalApiServers, type LocalApiServer, type LocalApiServerSignal } from "../core/localApiServerDiscovery";
+import logger from "../core/logger";
+import { logStore } from "../core/logStore";
+import DxpLogsModal from "./DxpLogsModal.vue";
 
 let route = null as any;
 
@@ -297,7 +309,7 @@ const discoverLocalApiServerOptions = async () => {
   try {
     localApiServers.value = await discoverLocalApiServers();
   } catch (error) {
-    console.error("Failed to discover local API servers:", error);
+    logger.error("Failed to discover local API servers:", error);
   } finally {
     isDiscoveringLocalApiServers.value = false;
   }
@@ -324,7 +336,7 @@ const login = async (params?: any) => {
     }
   } catch (error: any) {
     errorMessage.value = error
-    console.error(error);
+    logger.error("Login failed", error);
   }
   isLoggingIn.value = false;
 };
@@ -531,12 +543,20 @@ const initialise = async () => {
       }
     }
   } catch (error) {
-    console.error(error);
+    logger.error("Login page failed to initialise", error);
   } finally {
     dismissLoader();
     isInitializing.value = false;
     initInProgress = false;
   }
+};
+
+const openLogs = async () => {
+  const logsModal = await modalController.create({
+    component: DxpLogsModal
+  });
+
+  return logsModal.present();
 };
 
 const handleSubmit = () => {

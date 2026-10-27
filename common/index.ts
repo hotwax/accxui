@@ -9,6 +9,7 @@ import Login from "./components/Login.vue"
 import ShopifyLogin from "./components/ShopifyLogin.vue"
 import ShopifyAppInstall from "./components/ShopifyAppInstall.vue"
 import FastTravel from "./components/FastTravel.vue"
+import DxpLogsModal from "./components/DxpLogsModal.vue"
 import { useFastTravel } from './composables/useFastTravel'
 import { getFastTravelApps, getFastTravelApp, buildAppUrl } from './utils/fastTravelRegistry'
 import emitter from './core/emitter'
@@ -17,6 +18,7 @@ import { useSolrSearch } from './composables/useSolrSearch'
 import { useProducts } from './composables/useProducts'
 import { useShopify } from './composables/useShopify'
 import logger from './core/logger'
+import { logStore } from './core/logStore'
 import { cookieHelper } from './helpers/cookieHelper'
 import { moduleFederationUtil } from './utils/moduleFederationUtil'
 
@@ -38,6 +40,7 @@ export {
   commonUtil,
   cookieHelper,
   createDxpI18n,
+  DxpLogsModal,
   DxpOmsInstanceFooter,
   DxpShopifyImg,
   emitter,
@@ -49,6 +52,7 @@ export {
   onSessionCleared,
   clearSessionScopedState,
   logger,
+  logStore,
   Login,
   RadioFacetGroup,
   Sparkline,
@@ -71,3 +75,4 @@ export {
 }
 
 export * from './db';
+export type { LogRecord, LogStoreOptions } from './core/logStore';
