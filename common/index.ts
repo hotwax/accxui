@@ -1,3 +1,4 @@
+import { defineAsyncComponent } from "vue"
 import imagePreview from './directives/imagePreview'
 import segmentHeight from './directives/segmentHeight'
 import DxpShopifyImg from "./components/DxpShopifyImg.vue"
@@ -17,6 +18,7 @@ import { useSolrSearch } from './composables/useSolrSearch'
 import { useProducts } from './composables/useProducts'
 import { useShopify } from './composables/useShopify'
 import logger from './core/logger'
+import { logStore } from './core/logStore'
 import { cookieHelper } from './helpers/cookieHelper'
 import { moduleFederationUtil } from './utils/moduleFederationUtil'
 
@@ -31,6 +33,8 @@ import { initialiseConfig } from './core/configRegistry'
 import { onSessionCleared, clearSessionScopedState } from './core/sessionScope'
 import { useAuth, isMoquiOmsRef } from './composables/useAuth'
 
+const DxpLogsModal = defineAsyncComponent(() => import("./components/DxpLogsModal.vue"))
+
 // ✅ These are pure types (erased during build)
 export { api, client, axios }
 
@@ -38,6 +42,7 @@ export {
   commonUtil,
   cookieHelper,
   createDxpI18n,
+  DxpLogsModal,
   DxpOmsInstanceFooter,
   DxpShopifyImg,
   emitter,
@@ -49,6 +54,7 @@ export {
   onSessionCleared,
   clearSessionScopedState,
   logger,
+  logStore,
   Login,
   RadioFacetGroup,
   Sparkline,
@@ -72,7 +78,7 @@ export {
 }
 
 export * from './db';
-
+export type { LogRecord, LogStoreOptions } from './core/logStore';
 export { useIosKeyboardScroll } from './composables/useIosKeyboardScroll';
 export type { IosKeyboardScrollOptions } from './composables/useIosKeyboardScroll';
 export { supportsIosKeyboardScroll } from './utils/keyboardScroll';

@@ -110,6 +110,23 @@ digit and a symbol), `generateInternalId(name)` (`"My Store"` → `"MY_STORE"`).
 - It redacts tokens and passwords before printing, so logging an axios error is safe.
 - Installed once in `main.ts`: `.use(logger, { level: import.meta.env.VITE_DEFAULT_LOG_LEVEL })`; it
   also catches uncaught Vue errors.
+- **On-device logs:** always on, nothing to configure. The logger keeps every logged line in IndexedDB
+  (`app-logs`), already redacted, newest 2000 only, each cut at 10,000 characters. Only levels at or above
+  `level` are kept. Unhandled promise rejections and window errors are logged (and so kept) as `error` too. Show them with the framework
+  modal, never an app copy (it loads on first open, so it costs nothing at startup):
+  `modalController.create({ component: DxpLogsModal })`. It takes its title and environment from
+  `VITE_APP_VERSION_CONFIG` (`appId` → "BOPIS logs", `environmentTypeId` on its own header line), so there is
+  nothing to pass.
+  The framework `Login` page always shows a "View logs" button in its top-right corner, so a user who
+  cannot sign in can still see why. Each line also keeps the OMS and username as
+  the `oms` / `userId` cookies hold them when it is written (`userId` only exists while logged in), which the
+  modal shows as a medium and a primary badge beside the level. Copy takes the rows on screen; the
+  download button saves every stored entry, oldest first, as a `.txt` named from the `appId` (browser
+  download via `file-saver`, so PWA and web only, not a Capacitor shell). `logStore.readLogs(limit)` /
+  `logStore.readAllLogs()` / `logStore.clearLogs()` are there for anything else. The strings (`View logs`,
+  `Logs`, `All`, `Errors`, `Clear logs`, `Clear`, `Copy these logs`, `Logs copied to the clipboard.`,
+  `Download logs`, `Logs could not be downloaded.`, `No logs recorded yet.`,
+  `This removes every stored log entry on this device.`) go in the app's `en.json`.
 
 ## i18n: `translate`
 
