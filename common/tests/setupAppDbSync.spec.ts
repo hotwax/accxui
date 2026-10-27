@@ -28,10 +28,10 @@ vi.mock("../db/sync/channels", () => ({
   createTokenPublisher: () => ({ publish: vi.fn(), close: vi.fn() }),
 }));
 
-import { setupAppDbSync } from "../db/sync/setupAppDbSync";
+import { getAppDbSync, setupAppDbSync } from "../db/sync/setupAppDbSync";
 import { cacheScopeKey } from "../db/sync/reconciliation";
 import { createSyncService, __resetErrorState, serviceState } from "../db/sync/syncService";
-import type { AppDb } from "../db/schema/defineAppDb";
+import type { AppDb } from "../db/model/defineAppDb";
 import { dbClient } from "../db/storage/dbClient";
 
 /** An `AppDb` over a fake handle; `client()` is a real dbClient over it, as `defineAppDb` builds. */
@@ -64,6 +64,14 @@ const post = (data: Record<string, any>) => workerStub.onmessage?.({ data } as M
  * `setupAppDbSync` see every status message. Pinned before consolidating the two copies of the
  * domain/scope bookkeeping onto `syncService`, which owns it.
  */
+describe("getAppDbSync", () => {
+  it("returns the sync setupAppDbSync set up, for framework composables to reach", () => {
+    const sync = setupAppDbSync({ db: fakeAppDb(), createSyncService });
+
+    expect(getAppDbSync()).toBe(sync);
+  });
+});
+
 describe("app db sync error surfacing", () => {
   beforeEach(async () => {
     __resetErrorState();

@@ -49,10 +49,15 @@ const DATA_ACCESS_IMPORTS = ["error", {
       allowTypeImports: true,
       message: "Do not use Dexie in app code. Read with useLiveEntity(appDb.tables.x) in a composable or .vue file; only worker sync domains write." + DATA_ACCESS_GUIDE,
     },
-    ...["@common/db/storage/dbClient", "@common/db/storage/baseDb", "@common/db/schema/appDbRegistry"].map((name) => ({
+    ...["@common/db/storage/dbClient", "@common/db/storage/baseDb", "@common/db/model/appDbRegistry"].map((name) => ({
       name,
       allowTypeImports: true,
       message: "This is the framework layer beneath the app database. Import its types only; read with useLiveEntity(appDb.tables.x)." + DATA_ACCESS_GUIDE,
+    })),
+    ...["@common/db/schema/schemaRegistry", "@common/db/domain/domainRegistry"].map((name) => ({
+      name,
+      allowTypeImports: true,
+      message: "Framework-internal registry. Pick from the module you use (commonSchema) and register that module's domains (commonDomains)." + DATA_ACCESS_GUIDE,
     })),
     ...["@common", "@common/db"].map((name) => ({
       name,

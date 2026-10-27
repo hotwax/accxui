@@ -16,7 +16,7 @@ const fixture = vi.hoisted(() => ({
   closed: [] as string[],
 }));
 
-vi.mock("../db/schema/appDbRegistry", () => {
+vi.mock("../db/model/appDbRegistry", () => {
   const tx = {
     entity: (table: string) => ({
       all: async () => fixture.tables[table] || [],

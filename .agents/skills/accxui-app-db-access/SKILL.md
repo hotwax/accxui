@@ -63,8 +63,17 @@ const { records, first, hydrated } = useLiveEntity<any>(
 );
 ```
 
-- Returns `{ records, first, count, hydrated, error }` refs. `hydrated` tells "not loaded yet" from
-  "really empty": use it for loading and empty states.
+- Returns `{ records, first, count, hydrated, synced, error }` refs. `hydrated`: the first read
+  landed (and the worker isn't still starting). Use it for loading states.
+- **"Not synced yet" vs "really empty" for one domain's table:** pass `syncDomain: "<domain name>"`
+  in the options. The rows are then read in the same transaction as that domain's login marker, and
+  `synced` is true only once the domain has written this login. Show the skeleton while `!synced`,
+  the empty state when `synced && !records.length`. (Seed getters have `.withSync` for the same
+  thing: **accxui-seed-data**; a polled class A list uses the first-pass check: **accxui-page-sync**.)
+
+  ```ts
+  const { records: audits, synced } = useLiveEntity<any>(appDb.tables.audits, { syncDomain: "audit" });
+  ```
 - While an id is unknown, return `{ filter: () => false }`, not `{}` (which reads the whole table).
 - `QueryOptions`: `scope` / `equals` (equalities; a dotted path reaches a nested field, and a list
   matches when any value does), `dateField` + `since` / `until` / `order` (newest first by default),
@@ -133,7 +142,7 @@ watch(hydrated, (ready) => {
 import { refreshAfterMutation, resyncDomain } from "@/db/appDbSync";
 
 const response = await api({ url: `oms/serviceJobs/${jobName}`, method: "put", data });
-if (commonUtil.hasError(response)) throw new Error(getResponseErrorMessage(response, "Failed to save the job."));
+if (commonUtil.hasError(response)) throw new Error("Failed to save the job.");   // the caller toasts translate(...)
 await refreshAfterMutation("serviceJob", { jobName });   // re-reads that one record through the domain
 // or, when the write touches more than one record:
 await resyncDomain("facilityGroup");                     // re-snapshots the whole domain
@@ -190,7 +199,7 @@ AGENTS.md (App layout)": API calls, composables, stores in utils) are in **accxu
 | `useSeedData` in `App.vue` | call it in the page or component that shows the labels |
 | `appDb.entity(...)` or `loadSeedData()` outside `src/workers/**` and `src/db/**` | `useLiveEntity` / `useSeedData` in a composable or `.vue`; elsewhere take the rows as arguments |
 | an app db module (`@/db/companyDb`, …) imported in a store | a page or domain composable joins store data with `useLiveEntity` rows (a store may import `@/db/appDbSync`) |
-| `import Dexie / liveQuery from "dexie"`; `dbClient`, `getAppDb`, `ensureDbReady`, `hasSyncedThisLogin` …, or value imports from `@common/db/storage/dbClient` / `baseDb` / `schema/appDbRegistry` | `useLiveEntity` (type-only imports are fine) |
+| `import Dexie / liveQuery from "dexie"`; `dbClient`, `getAppDb`, `ensureDbReady`, `hasSyncedThisLogin` …, or value imports from `@common/db/storage/dbClient` / `baseDb` / `model/appDbRegistry` | `useLiveEntity` (type-only imports are fine) |
 | `appDb.raw()` | doesn't exist: `useLiveEntity` |
 | `appDb.get(oms)` | worker entry (`src/workers/*.worker.ts`) and `src/db/**` only |
 | `appDb.client()` | worker sync domains, and as the `useDbStatus(...)` argument only |
@@ -201,8 +210,7 @@ AGENTS.md (App layout)": API calls, composables, stores in utils) are in **accxu
 | `upsertMany` / `snapshotReplace` anywhere, or `put` / `bulkPut` / `remove` / `bulkRemove` / `clear` on `appDb.entity(...)`, outside `src/workers/**` | `refreshAfterMutation` for a missing record; `refreshAfterMutation` / `resyncDomain` after a server write |
 
 Exempt: an app-local Dexie store outside the app database, switched off in that app's own
-`eslint.config.js` (Company `src/db/shopifySyncDb.ts`; Order Manager `src/db/productDb.ts` and the
-`productCache` store that mirrors it).
+`eslint.config.js`. No app has one today: Order Manager's products moved into its app db.
 
 ## Before you finish
 

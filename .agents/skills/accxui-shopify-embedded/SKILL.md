@@ -1,14 +1,14 @@
 ---
 name: accxui-shopify-embedded
-description: Use when an AccxUI app (apps/bopis or a new one) runs embedded inside Shopify Admin or Shopify POS, or shows Shopify product images. Triggers include ShopifyLogin, ShopifyAppInstall, /shopify-login, /shopify-app-install, useShopify().openPosScanner, useEmbeddedAppStore().getPosLocationId, commonUtil.isAppEmbedded, @shopify/app-bridge, VITE_SHOPIFY_SHOP_CONFIG, VITE_SHOPIFY_SCOPES, VITE_SHOPIFY_REDIRECT_URI, a POS barcode scanner, hiding Logout when embedded, "Session expired. Refreshing...", and DxpShopifyImg.
+description: Use when an AccxUI app (apps/bopis, apps/fulfillment or a new one) runs embedded inside Shopify Admin or Shopify POS, or shows Shopify product images. Triggers include ShopifyLogin, ShopifyAppInstall, /shopify-login, /shopify-app-install, useShopify().openPosScanner, useEmbeddedAppStore().getPosLocationId, commonUtil.isAppEmbedded, @shopify/app-bridge, VITE_SHOPIFY_SHOP_CONFIG, VITE_SHOPIFY_SCOPES, VITE_SHOPIFY_REDIRECT_URI, a POS barcode scanner, hiding Logout when embedded, "Session expired. Refreshing...", and DxpShopifyImg.
 ---
 
 # Shopify embedded apps
 
 An app can run inside Shopify Admin / POS: Shopify loads it in an iframe, the framework exchanges a
 Shopify session token for an OMS token, and the app then behaves as if logged in. Everything is in
-`@common`; BOPIS is the only app running embedded (`apps/bopis`). Follow BOPIS and the code below.
-Follow BOPIS's wiring below; the older snippets in `docs/SHOPIFY_EMBEDDED_APPS.md` are out of date.
+`@common`; BOPIS and Fulfillment run embedded (`apps/bopis`, `apps/fulfillment`: same routes, guard and
+`preLogout`). Follow BOPIS's wiring below; the older snippets in `docs/SHOPIFY_EMBEDDED_APPS.md` are out of date.
 
 ## Wiring an app
 
@@ -101,7 +101,7 @@ async function scan() {
 
 `<DxpShopifyImg :src="product.mainImageUrl" size="small" />`. For Shopify CDN URLs it requests that
 size (`_small` …); other URLs are used as is; a failed or missing image shows the default image.
-It is the general product image component today (BOPIS, Company and Order Manager all use it).
+It is the general product image component today (every app uses it).
 
 ## Common mistakes
 

@@ -10,8 +10,8 @@ This skill builds it: tables, the database, sync domains, the worker and the log
 and writing the data afterwards is the **accxui-app-db-access** skill.
 
 `appDb` / `appSchema` stand for the app's names (`companyDb`, `companySchema`). Working references:
-`apps/company` (own and seed tables, class A, B and C domains) and `apps/order-manager` (seed tables
-only). Full reference: `docs/APP_DB_DEVELOPER_GUIDE.md`.
+`apps/company` (own and seed tables, class A, B and C domains) and `apps/order-manager` (every seed
+table, including the `products` master, and no own tables). Full reference: `docs/APP_DB_DEVELOPER_GUIDE.md`.
 
 **Changing Company's or Order Manager's database? Read [existing-apps.md](existing-apps.md) first.**
 It maps every file in their `src/db` and `src/workers`, and says which existing file a new table,
@@ -21,7 +21,7 @@ domain or seed pick goes in (for example: a Company class B table from one list 
 ## Rules
 
 1. **Worker code uses deep imports only.** `src/db/**` and `src/workers/**` run in the sync worker:
-   import `@common/db/schema/*`, `@common/db/seed/*`, `@common/db/sync/*`, `@common/db/types`,
+   import `@common/db/model/*`, `@common/db/schema/*`, `@common/db/domain/*`, `@common/db/sync/*`, `@common/db/types`,
    `@common/core/workerRemoteApi`. Never `@common`, `@common/db`, `commonUtil`, `api()`, stores or
    composables. *Why:* the barrel pulls in Vue and the worker chunk breaks or bloats.
 2. **Only sync domains write the app db.** A screen missing a record calls `refreshAfterMutation`; a
@@ -34,8 +34,11 @@ domain or seed pick goes in (for example: a Company class B table from one list 
 5. **Every schema change bumps `version`.** *Why:* the database is rebuilt only on a version change;
    nothing detects a forgotten bump, and old-shaped rows stay.
 6. **Domain HTTP goes through `@common/core/workerRemoteApi`** (`pageAll`, `pageNewestFirst`,
-   `workerGet`, `workerPost`). Never `api()` or `fetch` in a domain.
-7. **Wire the lifecycle exactly:** `App.vue` starts the sync when `isAuthenticated` turns true;
+   `workerGet`, `workerPost`). Never `api()` or `fetch` in a domain. **Before writing a fetch in a
+   hand-written domain, read [worker-remote-api.md](worker-remote-api.md)**: every option, how
+   arrays, empty bodies and errors behave, and when a snapshot needs `requireComplete`.
+7. **Wire the lifecycle exactly:** `App.vue` starts the sync when `isAuthenticated` is true and the
+   app-permission check has passed (**accxui-auth**);
    `postLogin` stops it, then starts it; `postLogout` stops it (which clears the tables).
    `checkSyncLifecycle` catches a mistake.
 8. **Class B is never activated from a page; class A always is,** and the page deactivates it with
@@ -53,6 +56,38 @@ domain or seed pick goes in (for example: a Company class B table from one list 
 | Reference data needing several calls or assembly | **B** | `defineSyncDomain` with `sync` + `refetchOne` | `workers/domains/organizationDomain.ts` |
 | Live, append-mostly; polled only while a screen is open | **A** | `defineSyncDomain` with a cursor read, or `defineCursorDomain` | `dataManagerLogDomain.ts`, `systemMessageDomain.ts` |
 | One record at a time, when a screen asks; never polled | **C** | `defineSyncDomain`: `sync` returns `0`, `refetchOne` fetches | `systemMessageErrorDomain.ts`, `shopifyBulkOperationDomain.ts` |
+
+The class says **when** a domain runs, the builder **how** it fetches:
+
+- **When:** class B domains are the base set `startAppDbSync` runs at login; one without `intervalMs`
+  stays due until a pass completes (`syncedThisLogin`, or forced). Class A runs only while a page
+  activates it, and `intervalMs` (activation's, else domain's) is what repeats a pass.
+  `refreshAfterMutation` calls `refetchOne` in any class.
+- **`syncClass` doesn't gate polling:** any activated domain with an interval is polled. An activated
+  domain with **no** interval that never marks `syncedThisLogin` (a cursor or hand-written domain)
+  retries every 30 s (`RETRY_WITHOUT_INTERVAL_MS`): give every class A domain an explicit
+  `intervalMs`.
+- **Class C** is never activated or in the base set, and its `sync` returns `0`, so ticks,
+  `resyncDomain` and the Settings Refresh fetch nothing. Rows come only from `refreshAfterMutation`
+  → `refetchOne`, and a stored row is **not refreshed on its own**: it stays until that pk is asked
+  for again or logout clears the table (`retainOnLogout` tables survive). A `refetchOne` that must
+  stay fresh checks its own age (`dataManagerErrorRecordDomain.ts`: two hours).
+- **Builder × class:** `defineSyncDomain` works as A, B or C. `defineSnapshotDomain` works only as
+  **B**: its type accepts `"A" | "C"`, but it has no `intervalMs` and skips after its first pass
+  each login, so it would never poll. `defineCursorDomain` is always A, and no app uses it yet.
+- **Class A fetch patterns** (pick by what the endpoint does; all hand-written in Company):
+
+| Pattern | One pass | Use when | Example |
+|---|---|---|---|
+| Cursor | rows newer than the newest stored stamp, upsert | a stamp the endpoint filters on (`_from`) or sorts by; rows don't change once written | `productUpdateHistoryDomain.ts` |
+| Cursor + re-check | cursor, then a bounded re-fetch of unfinished rows | events whose status settles later | `systemMessageDomain.ts`, `dataManagerLogDomain.ts`, `serviceJobRunDomain.ts` |
+| Window re-read | the newest page(s), upsert | no usable cursor (stamp doesn't move on change, or filters ignored) | `syncRunDomain.ts` |
+| Snapshot window | the current set, `snapshotReplace` | a small list whose dropped rows must disappear | `shopifyPendingFulfillmentDomain.ts` |
+| Status row | one computed record per scope, overwrite | a health / summary value | `shopifyFulfillmentHealthDomain.ts` |
+
+Only a snapshot (or an explicit delete) removes rows; cursor, re-check and status passes never do. A
+cursor on a creation stamp (`createdDate`, `initDate`) misses edits; use `lastUpdatedStamp` or add a
+re-check pass.
 
 ## Files, in build order
 
@@ -76,8 +111,8 @@ domain or seed pick goes in (for example: a Company class B table from one list 
 
 ```ts
 // src/db/appSchema.ts
-import { defineEntity } from "@common/db/schema/defineEntity";
-import { defineSchema } from "@common/db/schema/defineSchema";
+import { defineEntity } from "@common/db/model/defineEntity";
+import { defineSchema } from "@common/db/model/defineSchema";
 
 export const appSchema = defineSchema({
   cycleCounts: defineEntity({
@@ -96,9 +131,9 @@ export const appSchema = defineSchema({
 
 ```ts
 // src/db/appDb.ts
-import { defineAppDb } from "@common/db/schema/defineAppDb";
-import { mergeSchemas } from "@common/db/schema/defineSchema";
-import { commonSchema } from "@common/db/seed/seedSchema";
+import { defineAppDb } from "@common/db/model/defineAppDb";
+import { mergeSchemas } from "@common/db/model/defineSchema";
+import { commonSchema } from "@common/db/schema/commonSchema";
 import { appSchema } from "./appSchema";
 
 const APP_SEED_TABLES = ["statuses", "facilities"] as const;   // only the seed tables you read
@@ -115,15 +150,23 @@ appDb.setOmsInstanceResolver(() => "default");        // test fallback; main.ts 
   `{ … }` and lists `[{ … }]` / `["text"]` are declared in place and coerced like the top level.
   Index a nested field by its dotted path (`"carrier.partyId"`), a field inside a list with `*`
   (`"*items.productId"`), and query the dotted path (`equals: { "items.productId": pid }`).
+- Logout empties every table. `retainOnLogout: true` on `defineEntity` keeps one (default `false`):
+  only for data that is the same for every user of the instance, such as a product catalog, never for
+  anything user-scoped. A `version` bump still drops it, and nothing refreshes it by itself: the
+  reader decides when a row is stale (its `syncedAt`) and asks with `refreshAfterMutation`
+  (the framework's `products` seed table).
 - `defineSchema`, `pick`, `extendEntities` and `mergeSchemas` each return a new schema and never
   mutate their input. `mergeSchemas` throws when two schemas claim the same table: take a table from
   exactly one of them.
 
 ### Framework (seed) entities: pick, extend, override
 
-Seed tables are declared in `common/db/seed/seedSchema.ts` and filled by the class B domains in
-`common/db/seed/seedDomains.ts`. Check the seed domain's `listUrl` / `collectionKey` against your API
-before relying on one.
+Framework tables live in modules, each a file in `common/db/schema/` (`commonSchema.ts`) and one
+in `common/db/domain/` (`commonDomains.ts`);
+an app picks from each module schema it uses and registers that module's domains, filtered to its
+picked tables (`schemaRegistry` / `domainRegistry` are framework-internal; lint rejects them). The
+reference tables are filled by class B snapshot domains. Check the seed domain's `listUrl` /
+`collectionKey` against your API before relying on one.
 
 | Seed table | Seed domain name | Refetch after a write |
 |---|---|---|
@@ -132,6 +175,7 @@ before relying on one.
 | `enums` | `enum` | `refetchScope` (`enumId`) |
 | `groupFacilities` | `groupFacility` | `refetchScope` |
 | `productStoreFacilities`, `productStoreFacilityGroups`, `productStoreShipmentMethods` | `productStoreFacility`, `productStoreFacilityGroup`, `productStoreShipmentMethod` | `fanOut` (re-reads every row for the `productStoreId`) |
+| `products` | `product` (class C, fetched when shown; kept across logout) | `refetchOne` by `{ productIds }`: fetches the missing or stale ones (**accxui-product-search**) |
 | `statuses`, `enumTypes`, `facilityTypes`, `facilityGroups`, `geos`, `geoAssocs`, `carriers`, `carrierShipmentMethods`, `shipmentMethodTypes`, `paymentMethodTypes`, `returnReasons`, `returnTypes`, `returnItemTypes`, `roleTypes`, `orderAdjustmentTypes`, `contactMechPurposeTypes`, `communicationEventTypes`, `partyRelationshipTypes`, `statusFlowTransitions`, `productStoreEmailSettings`, `shopifyShops`, `shopifyShopLocations` | the table name in the singular: `status`, `enumType`, `facilityType`, `geo`, `carrier`, `shopifyShop`, … | **none**: `refreshAfterMutation` resolves `0`; use `resyncDomain(name)` |
 
 Pick the smallest change that does the job:
@@ -239,7 +283,7 @@ export const facilityDomain = defineSnapshotDomain({
 });
 
 // src/workers/appSyncDomains.ts — no OVERRIDDEN_SEED_TABLES entry: the seed `facility` domain is
-// already filtered out, because `facilities` is not in appDb.seedTables any more
+// already filtered out, because `facilities` is not in appDb.frameworkTables any more
 export const appSyncDomains: SyncDomain[] = [...appSeedDomains, facilityDomain, /* own domains */];
 ```
 
@@ -258,12 +302,14 @@ export const cycleCountDomain = defineSnapshotDomain({
   syncClass: "B",
   table: "cycleCounts",
   listUrl: "oms/cycleCounts",
-  collectionKey: null,                // null = bare array; "cycleCountList" = resp.cycleCountList
+  collectionKey: null,                // null = a bare array (or the first array in the answer); "cycleCountList" = resp.cycleCountList
   byPk: (pk) => ({ url: `oms/cycleCounts/${encodeURIComponent(String(pk.cycleCountId))}` }),
 });
 ```
 
-It fetches the whole set and **prunes** rows it didn't get back, so get `collectionKey` right. It
+It fetches the whole set and **prunes** rows it didn't get back, so get `collectionKey` right
+(`null` also accepts the first array of an envelope; set `strictCollection: true` when the shape is
+known, so an unexpected answer throws instead of unwrapping to `[]`). It
 runs once per login (skipped while `syncedThisLogin`), refuses to wipe a filled table on an empty
 answer during an automatic sync, and stores rows through the app's composed entity. That holds for
 every factory and for `appDb.entity(...)` in a hand-written domain: `projection` defaults to
@@ -331,11 +377,20 @@ export const returnDomain = defineCursorDomain({   // syncClass is always "A"
 ```
 
 Its `refetchOne` re-lists by the **first** primary-key field (`{ [pk0]: id }`, one row) and upserts;
-it never removes a row. `narrowOf(args)` adds a filter that applies both server-side and to the local
+it never removes a row. It sends **none** of `paramsOf(args)`, so it is right only if the endpoint
+filters by that field (probe it); otherwise reconcile writes with `syncNow()` (**accxui-page-sync**).
+Its `sync` runs unscoped when called with no args (the Settings Refresh does that when no screen holds
+the domain): wrap it to return `0` without the scope arg:
+
+```ts
+const cursor = defineCursorDomain({ /* …as above… */ });
+export const returnDomain: SyncDomain = { ...cursor, sync: (ctx, args: any) => (args?.facilityId ? cursor.sync(ctx, args) : Promise.resolve(0)) };
+``` `narrowOf(args)` adds a filter that applies both server-side and to the local
 count and cursor; `orderByField` defaults to `-cursorField`.
 
-Hand-write it when you need client-side scoping or a refresh of in-flight rows, as every Company
-class A domain does:
+Hand-write it when the endpoint is not a plain feed: client-side scoping, a re-check of in-flight
+rows, enrichment from other tables, a window re-read, or an endpoint that may 404. Every Company
+class A domain is hand-written (the patterns are under "Which sync class"):
 
 ```ts
 // src/workers/domains/cycleCountItemDomain.ts
@@ -432,6 +487,14 @@ watch(hydrated, (ready) => {
 });
 ```
 
+**Freshness:** "fetch when empty" never refreshes rows already held, and `upsertMany` never drops
+rows the server deleted. For data that changes, refetch every time the screen opens (cached rows show
+at once, the live read updates when the fetch lands), and store the parent's slice with
+`snapshotReplace(rows, { field: "cycleCountId", value: cycleCountId })` so removed rows go too
+(Company's `dataManagerErrorRecordDomain.ts` does this per log, and skips the download while its
+rows are under two hours old). Fetch
+these with `pageAll({ …, requireComplete: true })` ([worker-remote-api.md](worker-remote-api.md)).
+
 ### A record built from several calls
 
 - Write **one** fetch-and-assemble function and call it from both `sync` and `refetchOne`.
@@ -453,7 +516,9 @@ watch(hydrated, (ready) => {
   (`appDb.entity(appDb.tables.productStores).all()`); never `.live()` in a worker.
 - `appDb.client()`: `syncedThisLogin(name)` / `markSyncedThisLogin(name)` for class B.
 - HTTP: `pageAll` (every page), `pageNewestFirst` (newest first, up to `total`), `workerGet`,
-  `workerPost` from `@common/core/workerRemoteApi`. All take `ctx` first.
+  `workerPost` from `@common/core/workerRemoteApi`. All take `ctx` first. A `pageAll` result you
+  `snapshotReplace` needs `requireComplete: true`; options and edge cases in
+  [worker-remote-api.md](worker-remote-api.md).
 - `sync(ctx, args, options)` and `refetchOne(ctx, pk, args)` both take the context **first**; `args`
   are the activation's. Return the number of rows written.
 - A `refetchOne` that throws makes `refreshAfterMutation` reject with `CacheReconciliationError`; one
@@ -465,14 +530,14 @@ watch(hydrated, (ready) => {
 ```ts
 // src/workers/appSyncDomains.ts
 import type { SyncDomain } from "@common/db/types";
-import { commonDomains } from "@common/db/seed/seedDomains";
+import { commonDomains } from "@common/db/domain/commonDomains";
 import { appDb } from "@/db/appDb";
 import { cycleCountDomain } from "./domains/cycleCountDomain";
 import { cycleCountItemDomain } from "./domains/cycleCountItemDomain";
 
 const OVERRIDDEN_SEED_TABLES = new Set<string>([]);   // seed tables filled by your own domain instead
 const appSeedDomains = Object.values(commonDomains).filter((d) =>
-  d.table && appDb.seedTables.has(d.table) && !OVERRIDDEN_SEED_TABLES.has(d.table));
+  d.table && appDb.frameworkTables.has(d.table) && !OVERRIDDEN_SEED_TABLES.has(d.table));
 export const appSyncDomains: SyncDomain[] = [...appSeedDomains, cycleCountDomain, cycleCountItemDomain];
 ```
 
@@ -522,12 +587,14 @@ in `src/utils/`.
 
 ```ts
 // src/App.vue — a reload restores the session without postLogin, so the watch starts the sync too.
-watch(useAuth().isAuthenticated, (authenticated) => {
-  if (authenticated) void startAppDbSync();
-}, { immediate: true });
+// Gated on the app permission: isAuthenticated alone turns true before fetchPermissions() can reject.
+const userStore = useUserStore();
+const canSync = computed(() => useAuth().isAuthenticated.value && userStore.permissionsStatus === "success");
+watch(canSync, (ready) => { if (ready) void startAppDbSync() }, { immediate: true });
 
 // src/store/user.ts
 async postLogin() {
+  this.permissionsStatus = "pending";   // close the gate: a stale session may have persisted "success"
   await stopAppDbSync().catch((error) => logger.error("Failed to clear the local database on login", error));
   // … profile, permissions …
   void startAppDbSync();
@@ -599,6 +666,12 @@ A class B domain that checks `syncedThisLogin` also needs `client: () => ({ sync
 markSyncedThisLogin, count })` on the mocked `appDb`. A composable that calls `refreshAfterMutation` mocks
 `@/db/appDbSync`.
 
+**A factory domain** (`defineSnapshotDomain`, `defineCursorDomain`) doesn't write through
+`appDb.entity(...)`: it resolves the database through the registry, so the mock above never sees its
+writes. Follow Company's `tests/workers/carrierReferenceDomains.spec.ts`: mock `@/db/<app>Db` with a
+Dexie-shaped stub as `get` / `raw`, then per test `vi.resetModules()`, import the app db,
+`setAppDb(appDb)` from `@common/db/model/appDbRegistry`, and import the domain module after it.
+
 ## Common mistakes
 
 | Mistake | Result | Fix |
@@ -619,6 +692,7 @@ markSyncedThisLogin, count })` on the mocked `appDb`. A composable that calls `r
 | Copying a seed entity into `appSchema` to add a field | `mergeSchemas` throws (two schemas claim it), or the table loses its seed domain | `pick(...).extendEntities(...)` |
 | Activating a class B domain from a page | needless re-fetch, worker churn | class B runs at login |
 | Sync started only in `postLogin` | nothing syncs after a reload | the `isAuthenticated` watch in `App.vue`; `checkSyncLifecycle` reports it |
+| `App.vue` starts the sync on `isAuthenticated` alone | a login rejected for the app permission leaves the worker syncing | also require the permissions status `"success"`, reset in `postLogin` |
 | A second `defineAppDb` or Dexie instance for app data | bypasses sync; lint fails | one `appDb`, more tables in `appSchema` |
 
 ## Before you finish

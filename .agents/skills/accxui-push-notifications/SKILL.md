@@ -1,6 +1,6 @@
 ---
 name: accxui-push-notifications
-description: Use when an AccxUI app (apps/bopis or a new one) sends or receives Firebase Cloud Messaging push notifications, or works on notification preferences / topics. Triggers include firebaseMessaging, initialiseFirebaseApp, generateTopicName, generateDeviceId, isFcmConfigured, useNotificationStore, subscribeTopic / unsubscribeTopic, storeClientRegistrationToken / removeClientRegistrationToken, fetchNotificationPreferences / fetchAllNotificationPrefs, firebase-messaging-sw.js, FB_BG_MESSAGES, VITE_FIREBASE_CONFIG, VITE_FIREBASE_VAPID_KEY, VITE_NOTIF_APP_ID, VITE_NOTIF_ENUM_TYPE_ID, a device that stops receiving pushes (iOS / Safari), a duplicate banner, or a notification preferences screen.
+description: Use when an AccxUI app (apps/bopis, apps/fulfillment or a new one) sends or receives Firebase Cloud Messaging push notifications, or works on notification preferences / topics. Triggers include firebaseMessaging, initialiseFirebaseApp, generateTopicName, generateDeviceId, isFcmConfigured, useNotificationStore, subscribeTopic / unsubscribeTopic, storeClientRegistrationToken / removeClientRegistrationToken, fetchNotificationPreferences / fetchAllNotificationPrefs, firebase-messaging-sw.js, FB_BG_MESSAGES, VITE_FIREBASE_CONFIG, VITE_FIREBASE_VAPID_KEY, VITE_NOTIF_APP_ID, VITE_NOTIF_ENUM_TYPE_ID, a device that stops receiving pushes (iOS / Safari), a duplicate banner, or a notification preferences screen.
 ---
 
 # Firebase push notifications
@@ -8,7 +8,8 @@ description: Use when an AccxUI app (apps/bopis or a new one) sends or receives 
 The framework (`@common`) gives two pieces: `firebaseMessaging` (Firebase setup and naming helpers)
 and `useNotificationStore` (device token, topic subscriptions, received notifications; persisted).
 The app supplies the env config, the service worker, and the wiring into login, logout and its
-preference screen. BOPIS is the working reference (`apps/bopis`). Push needs no app database.
+preference screen. BOPIS is the working reference (`apps/bopis`); Fulfillment wires the same pieces through
+`src/utils/firebaseUtil.ts` (a util that reads a store: don't copy that part). Push needs no app database.
 
 ## How it fits together
 
@@ -133,7 +134,7 @@ export const firebaseUtil = { initialiseFirebaseMessaging };
 ```
 
 An app whose build runs the shared `dbConfig` lint (Company, Order Manager) rejects a store call in
-`src/utils`; there, put the same function in a user-store action instead. BOPIS's build doesn't lint.
+`src/utils`; there, put the same function in a user-store action instead. BOPIS's and Fulfillment's builds don't lint.
 
 ### Login, reload, logout
 

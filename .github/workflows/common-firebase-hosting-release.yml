@@ -21,6 +21,10 @@ on:
         description: 'How many releases to keep live (latest patch of each MAJOR.MINOR, newest first)'
         default: 2
         type: number
+      reuseHostedVersions:
+        description: 'Preserve deployed older versions instead of rebuilding their tags'
+        default: false
+        type: boolean
     secrets:
       envPAT:
         required: true
@@ -34,6 +38,9 @@ jobs:
   build_and_deploy:
     runs-on: ubuntu-latest
     environment: development
+    concurrency:
+      group: release-${{ inputs.app }}
+      cancel-in-progress: false
 
     steps:
       - name: Checkout accxui
@@ -53,6 +60,16 @@ jobs:
           fetch-depth: 0 # full history + tags: every release is built from its own tag
           fetch-tags: true
 
+      # Deployment compatibility must also work when app tags pin an older framework.
+      # Keep these tools outside the framework files changed by use_accxui below.
+      - name: Checkout current hosting compatibility tools
+        uses: actions/checkout@v4
+        with:
+          repository: hotwax/accxui
+          ref: main
+          path: .hosting-tools
+          sparse-checkout: scripts/hosting
+
       - name: Install pnpm
         uses: pnpm/action-setup@v4
         with:
@@ -69,6 +86,7 @@ jobs:
         working-directory: apps/${{ inputs.appDir }}
         env:
           MAX_VERSIONS: ${{ inputs.maxVersions }}
+          REUSE_HOSTED_VERSIONS: ${{ inputs.reuseHostedVersions }}
           VITE_FIREBASE_CONFIG: ${{ secrets.VITE_FIREBASE_CONFIG }}
           VITE_FIREBASE_VAPID_KEY: ${{ secrets.VITE_FIREBASE_VAPID_KEY }}
         run: |
@@ -140,7 +158,7 @@ jobs:
           versions=()
           while read -r tag; do
             latest="$tag"
-            if git show "$tag:.env.example" 2>/dev/null | grep -q '^VITE_APP_VERSION_CONFIG='; then
+            if git show "$tag:.env.example" 2>/dev/null | grep '^VITE_APP_VERSION_CONFIG=' >/dev/null; then
               versions+=("$tag")
             else
               echo "::warning::$tag predates multi-version support; skipping /$tag/"
@@ -161,11 +179,17 @@ jobs:
           # Still checked out, so build its versioned bundle now and skip a second checkout + install.
           if printf '%s\n' "${versions[@]:-}" | grep -qx "$latest"; then build "$latest"; fi
 
+          retained_versions=()
           for v in "${versions[@]:-}"; do
             if [ -z "$v" ] || [ "$v" = "$latest" ]; then continue; fi
+            if [ "$REUSE_HOSTED_VERSIONS" = "true" ]; then
+              retained_versions+=("$v")
+              continue
+            fi
             checkout "$v"
             build "$v"
           done
+          echo "RETAINED_VERSIONS=${retained_versions[*]:-}" >> "$GITHUB_ENV"
           [ -f dist/index.html ] || { echo "::error::root bootstrap was overwritten"; exit 1; }
 
           # Hosting config comes from the release serving root; the loop left us on the oldest one.
@@ -174,10 +198,30 @@ jobs:
           git checkout --quiet "$latest" -- firebase.json .firebaserc
           rewrites=$(printf '%s\n' "${versions[@]:-}" | { grep -v '^$' || true; } | jq -R . | jq -s \
             'map({source:("/"+.+"/**"), destination:("/"+.+"/index.html")}) + [{source:"**",destination:"/index.html"}]')
-          jq --argjson r "$rewrites" '.hosting |= map(.rewrites = $r)' firebase.json > fb.tmp && mv fb.tmp firebase.json
+          jq --argjson r "$rewrites" '.hosting |= map(.rewrites = $r | .headers = ((.headers // []) + [
+            {source:"**",headers:[{key:"Cache-Control",value:"no-cache"}]},
+            {source:"**/assets/**",headers:[{key:"Cache-Control",value:"public,max-age=31536000,immutable"}]}
+          ]))' firebase.json > fb.tmp && mv fb.tmp firebase.json
           jq -c '.hosting[] | {target, rewrites}' firebase.json
           find dist -mindepth 1 -maxdepth 1 -type d | sort
           echo "DEPLOY_MSG=Root $latest + versions ${versions[*]:-none}" >> "$GITHUB_ENV"
+
+      - name: Prepare legacy service-worker recovery
+        run: node .hosting-tools/scripts/hosting/prepare.mjs "apps/${{ inputs.appDir }}"
+
+      - name: Install Firebase CLI
+        run: npm install -g firebase-tools@15.34.1
+
+      # Restore after compatibility preparation so retained files remain byte-for-byte unchanged.
+      - name: Retain deployed versions
+        if: inputs.reuseHostedVersions
+        env:
+          HOTWAX_PUBLIC_SECRET: ${{ secrets.HOTWAX_PUBLIC_SECRET }}
+          FIREBASE_PROJECT: ${{ inputs.firebaseProject }}
+          APP_DIRECTORY: apps/${{ inputs.appDir }}
+        run: |
+          read -r -a versions <<< "$RETAINED_VERSIONS"
+          node .hosting-tools/scripts/hosting/retain-versions.mjs "$APP_DIRECTORY" "$FIREBASE_PROJECT" "${versions[@]}"
 
       - name: Deploy to Firebase
         working-directory: apps/${{ inputs.appDir }}
@@ -185,7 +229,6 @@ jobs:
           HOTWAX_PUBLIC_SECRET: ${{ secrets.HOTWAX_PUBLIC_SECRET }}
         run: |
           set -euo pipefail
-          npm install -g firebase-tools
           firebase use ${{ inputs.firebaseProject }} --token "$HOTWAX_PUBLIC_SECRET"
           firebase deploy --token "$HOTWAX_PUBLIC_SECRET" -m "$DEPLOY_MSG" --only hosting:uat
 
@@ -199,6 +242,6 @@ jobs:
           echo "LABEL=$(git describe --tags `git rev-list --tags --max-count=1`)" >> $GITHUB_ENV
 
       - name: "Create label"
-        run: gh label create "release-${{ env.LABEL }}" --color FF7F7E
+        run: gh label create "release-${{ env.LABEL }}" --color FF7F7E --force
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

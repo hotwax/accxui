@@ -28,6 +28,7 @@
     "productStoreFacilityGroups": "[productStoreId+facilityGroupId], productStoreId, facilityGroupId",
     "productStoreShipmentMethods": "productStoreShipMethId, productStoreId, shipmentMethodTypeId, partyId",
     "productStoreEmailSettings": "[productStoreId+emailTypeEnumId], productStoreId, emailTypeEnumId",
-    "shopifyShopLocations": "[shopId+shopifyLocationId], shopId, facilityId, shopifyLocationId"
+    "shopifyShopLocations": "[shopId+shopifyLocationId], shopId, facilityId, shopifyLocationId",
+    "products": "productId"
   }
 }

@@ -1,6 +1,6 @@
 ---
 name: accxui-app-layers
-description: "Use when writing or moving code in any AccxUI app (apps/company, apps/order-manager, apps/bopis or a new one) and deciding where it belongs: a .vue page or component, a composable (src/composables), a Pinia store (src/store), a util (src/utils), the router, src/db or a worker. Triggers include adding an API call (api() / client()), writing a composable, store action, util or router guard, 'where should this request / logic live', a util that needs store data, a store that needs a composable, src/services, naming a composable or store, and lint errors ending 'See AGENTS.md (App layout)', 'Composable function names must start with 'use'', 'Store names must start with 'use' and end with 'Store'', or 'Calling 'api' directly in vue files is not allowed'."
+description: "Use when writing or moving code in any AccxUI app (apps/company, apps/order-manager, apps/bopis, apps/fulfillment or a new one) and deciding where it belongs: a .vue page or component, a composable (src/composables), a Pinia store (src/store), a util (src/utils), the router, src/db or a worker. Triggers include adding an API call (api() / client()), writing a composable, store action, util or router guard, 'where should this request / logic live', a util that needs store data, a store that needs a composable, src/services, naming a composable or store, and lint errors ending 'See AGENTS.md (App layout)', 'Composable function names must start with 'use'', 'Store names must start with 'use' and end with 'Store'', or 'Calling 'api' directly in vue files is not allowed'."
 ---
 
 # AccxUI app layers: where each kind of code lives
@@ -31,7 +31,7 @@ what.
 7. **There is no `src/services/`.** API code goes in composables and stores, pure logic in `src/utils/`.
 8. **Names:** a composable is `useThing` (file in `src/composables/`), a store is `useThingStore`.
 9. **Worker code** (`src/db/**`, `src/workers/**`, apps with an app db) imports framework code by deep
-   path only (`@common/db/schema/*`, `@common/core/workerRemoteApi`, …), never `@common`, `commonUtil`,
+   path only (`@common/db/model/*`, `@common/core/workerRemoteApi`, …), never `@common`, `commonUtil`,
    `api()`, stores or composables (**accxui-app-db-setup**).
 
 ## Where code goes
@@ -87,11 +87,71 @@ const transferStore = useTransferStore();
 const createTransfer = (facilityId: string) => transferStore.createTransfer(facilityId, currentFacilityTypeId.value);
 ```
 
+## Making the call: `api()` and `client()`
+
+`api(config)` (`common/core/remoteApi.ts`) is axios with the session attached. It copies **only**
+`url`, `method`, `data`, `params`, `headers`, `responseType`, `baseURL` and `cache`; anything else
+(`timeout`, `withCredentials`, …) is silently dropped.
+
+| Need | Call |
+|---|---|
+| A Maarg / Moqui REST endpoint (`oms/…`, `admin/…`, `poorti/…`) | `api({ url: "oms/orders", method: "get", params })`: **the default `baseURL` is Maarg** (`commonUtil.getMaargURL()`, `…/rest/s1/`). Don't pass it |
+| An OMS endpoint (OFBiz service names such as `findJobs`, `sendResetPasswordMail`) | `api({ baseURL: commonUtil.getOmsURL(), url: "findJobs", … })`. On Moqui-only instances `getOmsURL()` returns the REST base, so branch the url on `commonUtil.isMoqui()` when the two differ |
+| A file / PDF from the Maarg host itself | `baseURL: commonUtil.getMaargBaseURL()`, `responseType: "blob"` |
+| Response caching | `cache: true` (max age `VITE_CACHE_MAX_AGE`, default 0) |
+| A call that must **not** carry the session (another instance, a token exchange) | `client({ baseURL, url, … })`: a fresh axios with no token, no auth check, no 401 logout, every option passed through |
+
+- Every request except the login / profile / permission endpoints first checks `isAuthenticated`:
+  when false it logs out and rejects `Error("INVALID_APP_CONTEXT")` (don't toast it). A `401` logs
+  out (**accxui-auth**).
+- `params` objects are JSON-stringified, arrays sent as repeated keys.
+- **After every call:** `if (commonUtil.hasError(resp)) throw …` (an error body can arrive with HTTP
+  200). The caller toasts a fixed `translate("Failed to …")` and `logger.error`s the error; there is
+  no framework helper for extracting the server's message (**accxui-common-helpers**).
+- **Paging:** Maarg lists take `pageSize` / `pageIndex` (0-based), older endpoints `viewSize` /
+  `viewIndex`; Solr goes through `useSolrSearch` (**accxui-solr-search**). Loop until a page comes
+  back short, with an upper bound.
+
+```ts
+// store action (Order Manager store/stock.ts): every page of a Maarg list. The total is in
+// X-Total-Count, which the browser can't read, so a short page is the only end signal.
+async fetchAllRows(url: string, params: Record<string, unknown>, pageSize = 250): Promise<any[]> {
+  const rows: any[] = [];
+  for(let pageIndex = 0; pageIndex < 20; pageIndex++) {
+    const resp: any = await api({ url, method: "get", params: { ...params, pageIndex, pageSize } });
+    if(commonUtil.hasError(resp)) {
+      throw resp.data;
+    }
+    const page = Array.isArray(resp.data) ? resp.data : [];   // check the endpoint's shape: some wrap the list
+    rows.push(...page);
+    if(page.length < pageSize) {
+      break;
+    }
+  }
+
+  return rows;
+}
+```
+
+In an app with an app db, a list that screens show is a sync domain, not a store loop
+(**accxui-app-db-setup**).
+
+## Code style
+
+**Match the file you're in.** The root `eslint.config.js` style rules (double quotes, `if(` with no
+space, a blank line before `return`, sorted imports) have drifted from the code: `pnpm lint` at the
+root reports thousands of existing style problems, and most files use the opposite style. Style
+errors are therefore not a regression signal, and a whole-file reformat is never part of a change.
+The lint findings that matter are the layer, data-access, naming and translation-key rules (messages
+ending "See AGENTS.md (App layout)" or "See docs/APP_DB_DEVELOPER_GUIDE.md §7", and "Translation key
+… is missing in en.json"). In a new app, pick one style and keep it.
+
 ## Lint
 
 Apps whose build runs the shared `dbConfig` (Company, Order Manager: `eslint src && …` before
 `vite build`) fail the build on these; layer messages end with "See AGENTS.md (App layout)". An app
-whose build doesn't lint (BOPIS) still follows the rules.
+whose build doesn't lint (BOPIS, Fulfillment) still follows the rules for new code; their existing
+violations and store-held caches are listed in **accxui-apps-without-app-db**.
 
 | Rejected | Do instead |
 |---|---|

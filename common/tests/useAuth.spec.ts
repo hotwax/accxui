@@ -7,17 +7,22 @@ vi.mock("../core/remoteApi", () => ({ default: (...args: any[]) => api(...args) 
 vi.mock("../core/logger", () => ({ default: logger }));
 vi.mock("../core/i18n", () => ({ translate: (key: string) => key }));
 vi.mock("../helpers/cookieHelper", () => ({ cookieHelper: () => ({ get: () => "", set: vi.fn(), remove: vi.fn() }) }));
-vi.mock("../utils/commonUtil", () => ({
-  commonUtil: {
-    isMoqui: () => true,
-    getMaargURL: () => "https://maarg.test/rest/s1/",
-    getOmsURL: () => "https://oms.test/api/",
-    getTokenExpiration: () => undefined,
-    isAppEmbedded: () => false,
-    getToken: vi.fn(() => ""),
-    showToast: vi.fn()
-  }
-}));
+vi.mock("../utils/commonUtil", async (importOriginal) => {
+  const actual: any = await importOriginal();
+
+  return {
+    commonUtil: {
+      ...actual.commonUtil,
+      isMoqui: () => true,
+      getMaargURL: () => "https://maarg.test/rest/s1/",
+      getOmsURL: () => "https://oms.test/api/",
+      getTokenExpiration: () => undefined,
+      isAppEmbedded: () => false,
+      getToken: vi.fn(() => ""),
+      showToast: vi.fn()
+    }
+  };
+});
 
 const { useAuth } = await import("../composables/useAuth");
 const { accxuiConfig } = await import("../core/configRegistry");
@@ -101,5 +106,132 @@ describe("logout reads the server's logout response", () => {
     expect(logger.error).not.toHaveBeenCalled();
     // Redirected to the identity provider instead.
     expect(replace).not.toHaveBeenCalled();
+  });
+});
+
+describe("login displays and logs extracted server error", () => {
+  beforeEach(() => {
+    api.mockReset();
+    logger.error.mockReset();
+    vi.mocked(commonUtil.showToast).mockClear();
+    useAuth().clearAuth();
+  });
+
+  it("extracts OFBiz error message, displays toast, and logs error", async () => {
+    api.mockResolvedValue({
+      status: 200,
+      data: { _ERROR_MESSAGE_: "User does not exist" }
+    });
+
+    await expect(useAuth().login("user", "pass")).rejects.toThrow("User does not exist");
+    expect(commonUtil.showToast).toHaveBeenCalledWith("Failed to login. User does not exist");
+    expect(logger.error).toHaveBeenCalledWith("Failed to login", "User does not exist");
+  });
+
+  it("extracts Moqui rejected error message, displays toast, and logs error", async () => {
+    api.mockRejectedValue({
+      response: {
+        data: { errors: "Invalid password" }
+      }
+    });
+
+    await expect(useAuth().login("user", "pass")).rejects.toThrow("Invalid password");
+    expect(commonUtil.showToast).toHaveBeenCalledWith("Failed to login. Invalid password");
+    expect(logger.error).toHaveBeenCalledWith("Failed to login", "Invalid password");
+  });
+
+  it("uses error.message on a network error", async () => {
+    api.mockRejectedValue(new Error("Network Error"));
+
+    await expect(useAuth().login("user", "pass")).rejects.toThrow("Network Error");
+    expect(commonUtil.showToast).toHaveBeenCalledWith("Failed to login. Network Error");
+    expect(logger.error).toHaveBeenCalledWith("Failed to login", "Network Error");
+  });
+
+  it("shows only the static prefix when the server returns no extractable error", async () => {
+    api.mockRejectedValue({
+      response: {
+        data: {}
+      }
+    });
+
+    await expect(useAuth().login("user", "pass")).rejects.toBeInstanceOf(Error);
+    expect(commonUtil.showToast).toHaveBeenCalledWith(expect.stringContaining("Failed to login."));
+    expect(logger.error).toHaveBeenCalledWith("Failed to login", "");
+  });
+});
+
+describe("fetchAppVersion re-resolves the pinned version", () => {
+  const replace = vi.fn();
+  const location = { pathname: "/v5.0.0/tabs/orders", search: "?q=1", hash: "#top", replace };
+
+  beforeEach(() => {
+    api.mockReset();
+    replace.mockReset();
+    location.pathname = "/v5.0.0/tabs/orders";
+    vi.stubEnv("VITE_APP_VERSION_CONFIG", JSON.stringify({ appId: "COMPANY", environmentTypeId: "AppEnvUAT", buildVersion: "" }));
+    vi.stubGlobal("location", location);
+    accxuiConfig.value = { ...accxuiConfig.value, appVersion: "v5.0.0" };
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+
+  it("moves a session onto a version changed in the OMS, keeping path, query and hash", async () => {
+    api.mockResolvedValue({ data: [{ currentVersion: "v5.1.0" }] });
+
+    await useAuth().fetchAppVersion();
+
+    expect(api).toHaveBeenCalledWith(expect.objectContaining({ url: "admin/apps/COMPANY/appVersions" }));
+    expect(accxuiConfig.value.appVersion).toBe("v5.1.0");
+    expect(replace).toHaveBeenCalledWith("/v5.1.0/tabs/orders?q=1#top");
+  });
+
+  it("stays put when the OMS still pins the same version", async () => {
+    api.mockResolvedValue({ data: [{ currentVersion: "v5.0.0" }] });
+
+    await useAuth().fetchAppVersion();
+
+    expect(accxuiConfig.value.appVersion).toBe("v5.0.0");
+    expect(replace).not.toHaveBeenCalled();
+  });
+
+  it("keeps an already resolved version when the call fails", async () => {
+    api.mockRejectedValue(new Error("Network Error"));
+
+    await useAuth().fetchAppVersion();
+
+    expect(accxuiConfig.value.appVersion).toBe("v5.0.0");
+    expect(replace).not.toHaveBeenCalled();
+  });
+
+  it("treats an error body as a failure, not as no version configured", async () => {
+    api.mockResolvedValue({ data: { _ERROR_MESSAGE_: "Service unavailable" } });
+
+    await useAuth().fetchAppVersion();
+
+    expect(accxuiConfig.value.appVersion).toBe("v5.0.0");
+    expect(replace).not.toHaveBeenCalled();
+  });
+
+  it("strips the version when the OMS no longer pins one", async () => {
+    api.mockResolvedValue({ data: [] });
+
+    await useAuth().fetchAppVersion();
+
+    expect(accxuiConfig.value.appVersion).toBe("");
+    expect(replace).toHaveBeenCalledWith("/tabs/orders?q=1#top");
+  });
+
+  it("falls back to root when the call fails before any version was resolved", async () => {
+    accxuiConfig.value.appVersion = undefined;
+    api.mockRejectedValue(new Error("Network Error"));
+
+    await useAuth().fetchAppVersion();
+
+    expect(accxuiConfig.value.appVersion).toBe("");
+    expect(replace).toHaveBeenCalledWith("/tabs/orders?q=1#top");
   });
 });

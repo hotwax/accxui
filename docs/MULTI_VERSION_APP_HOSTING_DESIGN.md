@@ -94,6 +94,9 @@ deployed at `dist/index.html` and served by Firebase's catch-all rewrite for any
    rest of the session.
 4. On every subsequent navigation the router guard re-runs `checkAppVersionRedirect()` using the
    persisted value (no network), so a manually removed/altered/invalid version prefix is corrected.
+5. On a signed-in page load, the guard's first `checkAppVersionRedirect()` also starts one background
+   `fetchAppVersion()` (a module-level flag, reset by every reload, keeps it to once per load), so a
+   version an admin re-pinned in the OMS mid-session is picked up on the next refresh.
 
 ```mermaid
 flowchart TD
@@ -159,8 +162,8 @@ store/router/`window` dependency, unit-testable:
 | `v5.0.0` (pinned) | `/v5.0.1/tabs/orders` (mismatch) or `/v9.9.9/tabs/orders` (invalid) | **switch** → redirect to `/v5.0.0/tabs/orders` |
 
 Every redirect preserves the rest of the path, the query string, and the hash. See §8 for the one case
-this can't catch: an unresolved (`undefined`) session on a manually-entered versioned URL, since
-`fetchAppVersion` runs only on the Login page.
+this can't catch: an unresolved (`undefined`) session on a manually-entered versioned URL that never
+reaches the Login page or a signed-in reload.
 
 **Stateful wrapper** ([`useAuth.ts#checkAppVersionRedirect`](../common/composables/useAuth.ts)) — reads
 `accxuiConfig.value.appVersion`, returns `false` while `undefined`, else calls `getCanonicalPath` and, if
@@ -276,12 +279,10 @@ only after confirming by hand that no tenant is still pinned to it (§8).
    → everything runs at root, identical to today.
 
 ## 8. Risks & Known Gaps
-- **Resolution only on the Login page.** `appVersion` is resolved by `fetchAppVersion`, which runs only
-  in `Login.vue`. An already-authenticated deep link (or any load that never mounts Login) never
-  re-resolves, so the guard enforces on whatever is persisted — and **no-ops while `undefined`**. Result:
-  a not-yet-resolved session on a bogus/uncanonical versioned URL is not corrected until it next hits the
-  Login page. Closing this needs resolution for authenticated sessions too (authGuard/app-boot), which
-  is not implemented.
+- **Resolution on the Login page and signed-in reloads.** `fetchAppVersion` runs in `Login.vue` and,
+  once per signed-in page load, from the router guard. A signed-out load that never mounts Login still
+  enforces on whatever is persisted, and **no-ops while `undefined`**. The reload check doesn't block
+  rendering: when the pin changed, the old version shows until the answer lands and redirects.
 - **No catch-all 404 route.** An unmatched path (a bogus version that slips through while `undefined`, or
   any typo) renders blank — there is no wildcard route redirecting to `/`.
 - **No automated, additive deploy pipeline yet** (§4.5). The full `dist/` tree (root bootstrap + every
@@ -293,16 +294,16 @@ only after confirming by hand that no tenant is still pinned to it (§8).
 - **A tenant pinned to a pruned version** → the OMS keeps returning it, its rewrite is gone, the catch-all
   serves the bootstrap, and canonicalization redirects based on the OMS answer — a loop. Not solved in
   code; confirm no tenant is pinned before dropping a version from `dist/` and `firebase.json`.
-- **Mid-session re-pin** isn't seen until the next Login-page `fetchAppVersion` (eventually consistent).
+- **Mid-session re-pin** isn't seen until the next reload or Login-page `fetchAppVersion` (no polling).
 - **Version strings aren't format-validated on the client** beyond the `vX.Y.Z` regex in
   `getVersionedPathInfo`; a malformed OMS value that isn't `vX.Y.Z`-shaped looks unversioned to the guard.
 - **Config is a JSON string in one env var** (`VITE_APP_VERSION_CONFIG`), assumed to always be a valid
   object and `JSON.parse`d inline with no fallback. A malformed or missing value therefore **throws** — at
   build time (`vite.config`) it fails the build; at runtime (`fetchAppVersion`) it's caught by the
-  surrounding `try/catch`, which resolves `appVersion` to `""` (run at root) and logs the error. There's
+  surrounding `try/catch` and handled like any failed call (below) and logged. There's
   no schema check.
-- **`fetchAppVersion` fails safe to root.** If the `appVersions` call errors — the endpoint isn't
-  available on this OMS (`hasError` response), the request throws, or the config JSON is unparseable —
-  `appVersion` is set to `""` (resolved: no version) so the app runs unversioned at root instead of
-  staying `undefined`/unresolved. A consequence: a *transient* OMS error also falls back to root for that
-  session rather than honoring a previously pinned version.
+- **`fetchAppVersion` keeps a resolved version on failure.** If the `appVersions` call errors — the
+  request throws, the response carries an error body (`hasError`), or the config JSON is unparseable —
+  a version resolved earlier is kept, so a transient OMS error on a signed-in reload doesn't drop a
+  pinned user to root. Only a never-resolved (`undefined`) one falls back to `""` (run at root).
+  A consequence: logging into a different OMS whose call fails keeps the previous OMS's pin.

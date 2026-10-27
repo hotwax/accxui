@@ -27,8 +27,8 @@
  */
 
 import { getCurrentInstance, getCurrentScope, inject, provide, type EffectScope, type InjectionKey } from "vue";
-import { getAppDb } from "../schema/appDbRegistry";
-import { commonDomainsByTable } from "../seed/seedDomains";
+import { getAppDb } from "../model/appDbRegistry";
+import { domainsByTable } from "../domain/domainRegistry";
 import { loginMarkerKey } from "../storage/baseDb";
 import { type DbListResult, useLiveEntity } from "./useLiveEntity";
 
@@ -99,7 +99,7 @@ function liveSource(scope: EffectScope): SeedSource {
     if (!entry) {
       if (!hasTable(table)) return undefined;
       // Undefined once the scope has stopped (a getter called after unmount): nothing to open.
-      entry = scope.run(() => useLiveEntity<Row>(table, { syncDomain: commonDomainsByTable[table]?.name }));
+      entry = scope.run(() => useLiveEntity<Row>(table, { syncDomain: domainsByTable[table]?.name }));
       if (!entry) return undefined;
       opened.set(table, entry);
     }
@@ -142,7 +142,7 @@ export async function loadSeedData(tables: readonly SeedTable[] = SEED_TABLES): 
   const read = new Map<string, { rows: Row[]; synced: boolean }>();
   if (client && present.length) {
     const entries = await client.read([...present, "syncMeta"], (tx) => Promise.all(present.map((table) => {
-      const domain = commonDomainsByTable[table]?.name;
+      const domain = domainsByTable[table]?.name;
       return Promise.all([
         tx.entity<Row>(table).all(),
         // A table no seed domain fills has nothing to wait for.

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { defineEntity, normalizePrimaryKey } from "../db/schema/defineEntity";
+import { defineEntity, normalizePrimaryKey } from "../db/model/defineEntity";
 
 describe("normalizePrimaryKey", () => {
   it("returns a bare string for a single field", () => {
@@ -128,5 +128,15 @@ describe("defineEntity validation", () => {
       fields: { logId: "text", configId: "text" },
       indexes: ["[configId+createdDate]"],
     })).toThrow(/compound index "\[configId\+createdDate\]" names "createdDate"/);
+  });
+});
+
+describe("defineEntity retainOnLogout", () => {
+  it("is absent unless the definition asks for it", () => {
+    const plain = defineEntity({ primaryKey: "orderId", fields: { orderId: "text" } });
+    const retained = defineEntity({ primaryKey: "productId", fields: { productId: "text" }, retainOnLogout: true });
+
+    expect("retainOnLogout" in plain).toBe(false);
+    expect(retained.retainOnLogout).toBe(true);
   });
 });

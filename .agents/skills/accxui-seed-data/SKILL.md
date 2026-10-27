@@ -183,8 +183,12 @@ const { domains, loaded, catalogLoaded, refreshing, totalRows, oldestSyncedAt, l
 | `refreshAll()` | `resyncReferenceData()`: clears every sync marker and re-runs every active domain |
 
 **Refresh buttons:** classes A and B get one; class C doesn't (it has no full pass, it fetches one
-record when a screen asks), so show "fetched when opened" instead. Disable all buttons while
-`refreshing` is set. The template to copy is Company's `src/views/Settings.vue`.
+record when a screen asks), so show "fetched when shown" instead. Disable all buttons while
+`refreshing` is set. A class A domain's Refresh runs it with **no args** when no screen holds it, so
+that domain must return `0` without its scope (**accxui-page-sync**, rule 7). Map exactly the three
+`status` values above (`success` / `empty` / `none`) to icon, color and label; Company's
+`src/views/Settings.vue` is the layout to copy, but its status mapping also lists values
+`useDbStatus` never returns.
 
 `useDbStatus` closes its live read on unmount. Like the others, it is for `.vue` files and
 composables, not stores (lint).
@@ -196,11 +200,12 @@ composables, not stores (lint).
 | `useSeedData()` inside a handler, `watch` callback or after an `await` | throws "only works during setup" | call it once in setup, use that `seed` |
 | `useSeedData()` in `App.vue` or a layout | every seed table open for the session (lint rejects `App.vue`) | call it in the page |
 | Each card calls `useSeedData()` with no call in the page | one set of reads per card | call it in the page too |
+| Relying on the page's instance inside a modal or popover opened with `modalController` / `popoverController` | the overlay is mounted outside the page's tree: no instance to inject, so it opens its own | call `useSeedData()` in the overlay component; its reads close when it is dismissed |
 | "No states" / "No facilities" while the table is still syncing | wrong empty state after login | `.withSync(...)` and wait for `synced` |
 | Reading `seed.getFacilities()` in a `computed` | never updates, a Promise in the template | reactive `seed.facilities()` |
 | `useSeedData` / `loadSeedData` / app db reads in a store or util | lint error | the composable passes the rows as an argument |
 | `useSeedData` for the app's own table | always empty | `useLiveEntity(appDb.tables.x)` |
 | A label showing the raw id | the table isn't picked, the row isn't synced yet, or the row has no label field | pick the table; it fills after the login sync |
-| `useDbStatus(appDb.client())` with no catalog | lists every framework seed domain, most with 0 rows | `catalogFrom(appSyncDomains)` or `appDb.statusCatalog` |
+| `useDbStatus(appDb.client())` with no catalog | lists every framework domain, most with 0 rows | `catalogFrom(appSyncDomains)` or `appDb.statusCatalog` |
 | No actions argument | Refresh buttons do nothing | `{ resyncDomain, resyncAll: resyncReferenceData }` |
 | A Refresh button on class C rows | it re-runs nothing | "fetched when opened", no button |

@@ -152,7 +152,7 @@ import { arrowBackOutline, arrowForwardOutline, documentTextOutline, warningOutl
 import { cookieHelper } from "../helpers/cookieHelper";
 import { translate } from "../core/i18n"
 import { commonUtil } from "../utils/commonUtil";
-import { useAuth } from "../composables/useAuth";
+import { omsRef, useAuth } from "../composables/useAuth";
 import { accxuiConfig } from "../core/configRegistry";
 import { discoverLocalApiServers, type LocalApiServer, type LocalApiServerSignal } from "../core/localApiServerDiscovery";
 import logger from "../core/logger";
@@ -239,7 +239,9 @@ const configuredDevUsername = computed(() => getDevCredentials().devUsername || 
 
 const canDevAutoLoginForCurrentOms = computed(() => {
   if (!canDevAutoLogin()) return false;
-  const currentOms = (cookieHelper().get("oms") || instanceUrl.value || accxuiConfig.value?.oms || "").toString().trim().toLowerCase();
+  // omsRef first: cookies are not reactive, so reading only the cookie kept this answer from the
+  // previous OMS and offered the dev credentials for whatever instance was entered next.
+  const currentOms = (omsRef.value || cookieHelper().get("oms") || instanceUrl.value || accxuiConfig.value?.oms || "").toString().trim().toLowerCase();
   if (!currentOms) return false;
 
   const normalizedCurrentOms = normalizeOmsUrl(currentOms);
@@ -344,17 +346,29 @@ const login = async (params?: any) => {
 const setOms = async () => {
   if (!instanceUrl.value) {
     commonUtil.showToast(translate("Please fill in the OMS"));
-    return;
+    return false;
+  }
+
+  const instanceURL = instanceUrl.value.trim().toLowerCase();
+  // An instance name or URL never contains whitespace, so reject it before it reaches a cookie.
+  if (/\s/.test(instanceURL)) {
+    commonUtil.showToast(translate("Enter a valid OMS name or URL."));
+    return false;
   }
 
   isCheckingOms.value = true;
 
-  const instanceURL = instanceUrl.value.trim().toLowerCase();
   updateOMS(alias[instanceURL] ? alias[instanceURL] : instanceURL)
   accxuiConfig.value.oms = alias[instanceURL] ? alias[instanceURL] : instanceURL
 
   // run SAML login flow if login options are configured for the OMS
-  await fetchLoginOptions();
+  const isOmsReachable = await fetchLoginOptions();
+  if (!isOmsReachable) {
+    // Keep the user on the OMS step: signing in now would have no verified instance to go to.
+    commonUtil.showToast(translate("Unable to reach the OMS. Check the OMS name and try again."));
+    isCheckingOms.value = false;
+    return false;
+  }
   await fetchAppVersion();
 
   // checking loginOption.length to know if fetchLoginOptions API returned data
@@ -366,6 +380,7 @@ const setOms = async () => {
     toggleOmsInput();
   }
   isCheckingOms.value = false;
+  return true;
 };
 
 export interface DevServer {
@@ -448,7 +463,7 @@ const selectDevServer = async (server: DevServer) => {
   if (isCheckingOms.value) return;
 
   instanceUrl.value = server.oms;
-  await setOms();
+  if (!(await setOms())) return;
 
   // Toggling the oms again so to login into the app instead of moving to the login view where users sees
   // login process in action

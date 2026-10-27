@@ -1,16 +1,18 @@
 /**
- * The 29 HotWax OMS seed reference tables, each declared exactly once.
+ * The common module: the HotWax OMS seed reference tables, and the `products` master, each
+ * declared exactly once. Apps pick from it; `./schemaRegistry.ts` merges it with the other modules
+ * for the framework's own checks.
  *
- * Keyed by IndexedDB store name, so `commonSchema.stores` is what Dexie's `version().stores()`
- * wants with no name/table mapping in between. Standard domains live in the sibling
- * `commonDomains.ts`, keyed by the same table names.
+ * Keyed by IndexedDB store name, so `.stores` is what Dexie's `version().stores()` wants with no
+ * name/table mapping in between. Its domains live in the sibling `commonDomains.ts`, keyed by the
+ * same table names.
  *
  * Imports only `defineEntity`/`defineSchema`, both of which import only `./types` — app db modules
  * reach this file and the sync workers import those, so nothing here may pull in `vue`.
  */
 
-import { defineEntity } from "../schema/defineEntity";
-import { defineSchema } from "../schema/defineSchema";
+import { defineEntity } from "../model/defineEntity";
+import { defineSchema } from "../model/defineSchema";
 import type { FieldKind } from "../types";
 
 /** A description-carrying lookup table: `<id>` plus `description`, plus whatever else is passed. */
@@ -334,4 +336,29 @@ export const commonSchema = defineSchema({
     },
     indexes: ["shopId", "facilityId", "shopifyLocationId"],
   }),
-}, { seed: true });
+
+  /**
+   * Product master from Solr, fetched when a screen shows a product (the `product` domain, class C;
+   * read with `useProductMaster`). The catalog is the same for every user of the instance, so it
+   * survives logout; a row older than PRODUCT_STALE_MS is refetched the next time it is shown.
+   */
+  products: defineEntity({
+    primaryKey: "productId",
+    fields: {
+      productId: "text",
+      productName: "text",
+      sku: "text",
+      parentProductName: "text",
+      internalName: "text",
+      mainImageUrl: "text",
+      productFeatures: ["text"],
+      // The remaining static identifiers a product-identifier setting offers.
+      groupId: "text",
+      groupName: "text",
+      primaryProductCategoryName: "text",
+      title: "text",
+      goodIdentifications: [{ type: "text", value: "text" }],
+    },
+    retainOnLogout: true,
+  }),
+}, { framework: true });

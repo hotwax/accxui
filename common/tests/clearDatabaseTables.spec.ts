@@ -44,4 +44,33 @@ describe("clearDatabaseTables", () => {
     expect([...rows.syncMeta.keys()]).toEqual(["schemaVersion"]);
     expect(deleted).toEqual([]);
   });
+
+  it("keeps a retained table's rows and empties the rest, login markers included", async () => {
+    // A product catalog is the same for every user of the instance, so the next login reuses it.
+    const rows: Record<string, Map<string, any>> = {
+      orders: new Map([["10001", { orderId: "10001" }]]),
+      products: new Map([["P1", { productId: "P1" }]]),
+      syncMeta: new Map<string, any>([
+        ["schemaVersion", { key: "schemaVersion", version: 2 }],
+        ["loginSync:product", { key: "loginSync:product", synced: true }],
+      ]),
+    };
+    const db = {
+      name: "demo-TestDB",
+      retainedTables: new Set(["products"]),
+      getTableNames: () => Object.keys(rows),
+      transaction: async (_mode: string, _tables: string[], fn: () => Promise<void>) => fn(),
+      table: (name: string) => ({ clear: async () => rows[name].clear() }),
+      syncMeta: {
+        toCollection: () => ({ primaryKeys: async () => [...rows.syncMeta.keys()] }),
+        bulkDelete: async (keys: string[]) => { keys.forEach((key) => rows.syncMeta.delete(key)); },
+      },
+    } as unknown as BaseDB;
+
+    await clearDatabaseTables(db);
+
+    expect(rows.orders.size).toBe(0);
+    expect([...rows.products.keys()]).toEqual(["P1"]);
+    expect([...rows.syncMeta.keys()]).toEqual(["schemaVersion"]);
+  });
 });
