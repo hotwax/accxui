@@ -49,6 +49,7 @@
     "vue-logger-plugin": "catalog:",
     "vue-markdown-render": "catalog:",
     "vue-router": "catalog:",
+    "vue-virtual-scroller": "catalog:",
     "workbox-window": "7.4.0",
     "yup": "catalog:"
   },

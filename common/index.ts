@@ -1,3 +1,4 @@
+import { defineAsyncComponent } from "vue"
 import imagePreview from './directives/imagePreview'
 import segmentHeight from './directives/segmentHeight'
 import DxpShopifyImg from "./components/DxpShopifyImg.vue"
@@ -9,7 +10,6 @@ import Login from "./components/Login.vue"
 import ShopifyLogin from "./components/ShopifyLogin.vue"
 import ShopifyAppInstall from "./components/ShopifyAppInstall.vue"
 import FastTravel from "./components/FastTravel.vue"
-import DxpLogsModal from "./components/DxpLogsModal.vue"
 import { useFastTravel } from './composables/useFastTravel'
 import { getFastTravelApps, getFastTravelApp, buildAppUrl } from './utils/fastTravelRegistry'
 import emitter from './core/emitter'
@@ -32,6 +32,8 @@ import { useEmbeddedAppStore } from './store/embeddedApp'
 import { initialiseConfig } from './core/configRegistry'
 import { onSessionCleared, clearSessionScopedState } from './core/sessionScope'
 import { useAuth, isMoquiOmsRef } from './composables/useAuth'
+
+const DxpLogsModal = defineAsyncComponent(() => import("./components/DxpLogsModal.vue"))
 
 // ✅ These are pure types (erased during build)
 export { api, client, axios }

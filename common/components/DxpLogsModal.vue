@@ -14,7 +14,10 @@
         <ion-button :disabled="isBusy || !records.length" @click="copyLogs()">
           <ion-icon slot="icon-only" :icon="copyOutline" />
         </ion-button>
-        <ion-button :disabled="isBusy || !records.length" @click="confirmClear()">
+        <ion-button :disabled="isBusy || !records.length" :aria-label="translate('Download logs')" :title="translate('Download logs')" @click="downloadLogs()">
+          <ion-icon slot="icon-only" :icon="downloadOutline" />
+        </ion-button>
+        <ion-button color="danger" :disabled="isBusy || !records.length" @click="confirmClear()">
           <ion-icon slot="icon-only" :icon="trashOutline" />
         </ion-button>
       </ion-buttons>
@@ -32,25 +35,43 @@
     </ion-toolbar>
   </ion-header>
 
-  <ion-content>
-    <ion-list v-if="visibleRecords.length">
-      <ion-item v-for="record in visibleRecords" :key="record.id" lines="full">
-        <ion-label class="ion-text-wrap">
-          <p class="meta">
-            <ion-badge :color="colorFor(record.level)">
-              {{ record.level }}
-            </ion-badge>
-            <span class="time">{{ formatTime(record.time) }}</span>
-          </p>
-          <p class="message">
-            {{ record.message }}
-          </p>
-          <p v-if="record.caller" class="caller">
-            {{ record.caller }}
-          </p>
-        </ion-label>
-      </ion-item>
-    </ion-list>
+  <!-- The scroller owns scrolling, so ion-content does not scroll as well -->
+  <ion-content :scroll-y="false">
+    <!-- Only the rows on screen are rendered; each is measured after render since wrapped messages vary in height -->
+    <DynamicScroller
+      v-if="visibleRecords.length"
+      :items="visibleRecords"
+      key-field="id"
+      :min-item-size="64"
+      class="log-list"
+    >
+      <template #default="{ item: record, active }">
+        <DynamicScrollerItem :item="record" :active="active" :size-dependencies="[record.message, record.caller]">
+          <ion-item lines="full">
+            <ion-label class="ion-text-wrap">
+              <p class="meta">
+                <ion-badge :color="colorFor(record.level)">
+                  {{ record.level }}
+                </ion-badge>
+                <ion-badge v-if="record.oms" color="medium">
+                  {{ record.oms }}
+                </ion-badge>
+                <ion-badge v-if="record.username" color="primary">
+                  {{ record.username }}
+                </ion-badge>
+                <span class="time">{{ formatTime(record.time) }}</span>
+              </p>
+              <p class="message">
+                {{ record.message }}
+              </p>
+              <p v-if="record.caller" class="caller">
+                {{ record.caller }}
+              </p>
+            </ion-label>
+          </ion-item>
+        </DynamicScrollerItem>
+      </template>
+    </DynamicScroller>
 
     <div v-else class="ion-text-center ion-padding">
       {{ isBusy ? translate("Loading...") : translate("No logs recorded yet.") }}
@@ -59,46 +80,43 @@
 </template>
 
 <script setup lang="ts">
-// Shows the log lines logStore kept on this device. Logs are only recorded when the app
-// installs the logger with `persistLogs`; otherwise this opens on the empty state.
-import {
-  IonBadge,
-  IonButton,
-  IonButtons,
-  IonContent,
-  IonHeader,
-  IonIcon,
-  IonItem,
-  IonLabel,
-  IonList,
-  IonSegment,
-  IonSegmentButton,
-  IonTitle,
-  IonToolbar,
-  alertController,
-  modalController
-} from "@ionic/vue";
-import { closeOutline, copyOutline, refreshOutline, trashOutline } from "ionicons/icons";
-import { computed, onMounted, ref } from "vue";
+import { IonBadge, IonButton, IonButtons, IonContent, IonHeader, IonIcon, IonItem, IonLabel, IonSegment, IonSegmentButton, IonTitle, IonToolbar, alertController, modalController } from "@ionic/vue";
+import { saveAs } from "file-saver";
+import { closeOutline, copyOutline, downloadOutline, refreshOutline, trashOutline } from "ionicons/icons";
+import { computed, onMounted, ref, shallowRef } from "vue";
+import { DynamicScroller, DynamicScrollerItem } from "vue-virtual-scroller";
+import "vue-virtual-scroller/dist/vue-virtual-scroller.css";
 import { translate } from "../core/i18n";
 import { type LogRecord, logStore } from "../core/logStore";
 import { commonUtil } from "../utils/commonUtil";
 
 const props = defineProps({
-  // First line of the copied report, so a pasted log says which app it came from
-  reportTitle: {
-    type: String,
-    default: "App logs"
-  },
-  // How many of the most recent entries to load
   limit: {
     type: Number,
     default: 500
   }
 });
 
-const records = ref<LogRecord[]>([]);
+// Shallow: rows are read-only once loaded and the list is only ever replaced whole, so Vue
+// tracks the array swap without wrapping every record in a reactive proxy
+const records = shallowRef<LogRecord[]>([]);
 const isBusy = ref(false);
+
+// Which app and environment the logs came from, from VITE_APP_VERSION_CONFIG, which every app sets.
+// A missing or malformed config gives empty values rather than breaking the modal.
+function readVersionConfig() {
+  try {
+    const versionConfig = JSON.parse(import.meta.env.VITE_APP_VERSION_CONFIG || "{}");
+
+    return { appId: String(versionConfig.appId || ""), environmentTypeId: String(versionConfig.environmentTypeId || "") };
+  } catch {
+    return { appId: "", environmentTypeId: "" };
+  }
+}
+
+const { appId, environmentTypeId } = readVersionConfig();
+
+const reportTitle = appId ? `${appId.replace(/_/g, " ")} logs` : "App logs";
 const activeLevel = ref("all");
 
 const visibleRecords = computed(() => activeLevel.value === "error"
@@ -130,18 +148,47 @@ async function refresh() {
   }
 }
 
-function buildReportText() {
+function buildReportText(entries: LogRecord[]) {
   return [
-    props.reportTitle,
-    new Date().toISOString(),
-    `${visibleRecords.value.length} entr${visibleRecords.value.length === 1 ? "y" : "ies"}`,
+    reportTitle,
+    ...(environmentTypeId ? [`Environment: ${environmentTypeId}`] : []),
+    formatTime(Date.now()),
+    `${entries.length} entr${entries.length === 1 ? "y" : "ies"}`,
     ""
-  ].concat(visibleRecords.value.map((record) =>
-    `[${record.level.toUpperCase()}] ${formatTime(record.time)} ${record.message}${record.caller ? ` (${record.caller})` : ""}`)).join("\n");
+  ].concat(entries.map((record) =>
+    `[${record.level.toUpperCase()}] ${formatTime(record.time)}${record.oms ? ` [${record.oms}]` : ""}${record.username ? ` [${record.username}]` : ""} ${record.message}${record.caller ? ` (${record.caller})` : ""}`)).join("\n");
+}
+
+
+function downloadFileName() {
+  const now = new Date();
+  const pad = (value: number) => String(value).padStart(2, "0");
+  const stamp = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+  const name = reportTitle.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "logs";
+
+  return `${name}-${stamp}.txt`;
+}
+
+async function downloadLogs() {
+  isBusy.value = true;
+  try {
+    const entries = await logStore.readAllLogs();
+    if(!entries.length) {
+      commonUtil.showToast(translate("No logs recorded yet."));
+
+      return;
+    }
+
+    saveAs(new Blob([buildReportText(entries)], { type: "text/plain;charset=utf-8" }), downloadFileName());
+  } catch {
+    commonUtil.showToast(translate("Logs could not be downloaded."));
+  } finally {
+    isBusy.value = false;
+  }
 }
 
 async function copyLogs() {
-  const text = buildReportText();
+  const text = buildReportText(visibleRecords.value);
 
   try {
     await navigator.clipboard.writeText(text);
@@ -180,8 +227,13 @@ onMounted(refresh);
 </script>
 
 <style scoped>
+.log-list {
+  height: 100%;
+}
+
 .meta {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
 }

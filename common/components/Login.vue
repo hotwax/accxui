@@ -1,6 +1,12 @@
 <template>
   <ion-page>
     <ion-content>
+      <div slot="fixed" class="logs-action">
+        <ion-button color="dark" fill="clear" size="small" @click="openLogs()">
+          <ion-icon slot="start" :icon="documentTextOutline" />
+          {{ translate("View logs") }}
+        </ion-button>
+      </div>
       <div class="flex" v-if="!isInitializing && !isConfirmingForActiveSession">
         <form class="login-container" @keyup.enter="handleSubmit()" @submit.prevent>
           <Logo />
@@ -113,14 +119,6 @@
               </ion-note>
             </div>
           </section>
-
-          <!-- Settings is out of reach until login succeeds, so the on-device logs are offered here too -->
-          <div v-if="logStore.isEnabled" class="ion-text-center">
-            <ion-button fill="clear" size="small" @click="openLogs()" @keyup.enter.stop>
-              <ion-icon slot="start" :icon="documentTextOutline" />
-              {{ translate("View logs") }}
-            </ion-button>
-          </div>
         </form>
       </div>
     </ion-content>
@@ -156,8 +154,6 @@ import { omsRef, useAuth } from "../composables/useAuth";
 import { accxuiConfig } from "../core/configRegistry";
 import { discoverLocalApiServers, type LocalApiServer, type LocalApiServerSignal } from "../core/localApiServerDiscovery";
 import logger from "../core/logger";
-import { logStore } from "../core/logStore";
-import DxpLogsModal from "./DxpLogsModal.vue";
 
 let route = null as any;
 
@@ -567,6 +563,7 @@ const initialise = async () => {
 };
 
 const openLogs = async () => {
+  const { default: DxpLogsModal } = await import("./DxpLogsModal.vue");
   const logsModal = await modalController.create({
     component: DxpLogsModal
   });
@@ -596,5 +593,10 @@ onIonViewWillEnter(() => {
   justify-content: center;
   align-items: center;
   height: 100%;
+}
+
+.logs-action {
+  top: calc(var(--ion-safe-area-top, 0px) + 8px);
+  right: calc(var(--ion-safe-area-right, 0px) + 8px);
 }
 </style>
