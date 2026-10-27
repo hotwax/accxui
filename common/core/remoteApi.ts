@@ -4,13 +4,37 @@ import { setupCache } from 'axios-cache-adapter'
 import qs from "qs"
 import { commonUtil } from '../utils/commonUtil';
 import { useAuth } from '../composables/useAuth';
+import { translate } from './i18n';
+import { parseRetryAfter } from './workerRemoteApi';
+import { claimRetryNotice, isServiceUnavailableError, markServiceAvailable, markServiceUnavailable } from './serviceAvailability';
+
+// The following are the endpoints needs to bypass the auth check and when this calls are made we will assume
+// that we are always relogin with the new credentials present in cookies.
+const noAuthEndpoints = ["login", "logout", "checkLoginOptions", "user/profile", "user/permissions", "getPermissions", "app-bridge/login", "appVersions"]
+const isAnonymousEndpoint = (url = "") => noAuthEndpoints.some((endpoint: string) => url.includes(endpoint));
+
+/** Retries of a request the server could not answer (a 5xx, 408, 429 or no response). */
+export const MAX_RETRIES = 3;
+const BASE_RETRY_DELAY_MS = 1000;
+const MAX_RETRY_DELAY_MS = 30000;
+/** Only these are retried by default: repeating a write could apply it twice. `retry: true` opts a safe one in. */
+const IDEMPOTENT_METHODS = ["get", "head", "options"];
+/** Before a 401 logs out, the session is confirmed once; every 401 in the burst shares that check. */
+const SESSION_CHECK_DELAY_MS = 500;
+const SESSION_CHECK_REUSE_MS = 2000;
+
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** Exponential backoff with jitter (1 s, 2 s, 4 s …, capped); a longer `Retry-After` wins, up to the cap. */
+export const retryDelayMs = (attempt: number, retryAfterMs?: number, random = Math.random) => {
+  const exponential = Math.min(MAX_RETRY_DELAY_MS, BASE_RETRY_DELAY_MS * 2 ** Math.max(0, attempt - 1));
+  const jittered = exponential / 2 + random() * (exponential / 2);
+
+  return Math.max(jittered, Math.min(retryAfterMs ?? 0, MAX_RETRY_DELAY_MS));
+}
 
 const requestInterceptor = async (config: any) => {
   const token = commonUtil.getToken();
-
-  // The following are the endpoints needs to bypass the auth check and when this calls are made we will assume
-  // that we are always relogin with the new credentials present in cookies.
-  const noAuthEndpoints = ["login", "logout", "checkLoginOptions", "user/profile", "user/permissions", "getPermissions", "app-bridge/login", "appVersions"]
 
   // When the same app is opened in multiple tabs and logout from one tab, then another tab still uses the old
   // session, to handle this scenario we have added check to always validate authentication before api calls
@@ -18,8 +42,7 @@ const requestInterceptor = async (config: any) => {
   // the session automatically.
   // Bypass the check for endpoints that don't require authentication (like login, logout, profile),
   // as these are often called during the authentication flow itself or to refresh local state.
-  const isAnonymousEndpoint = noAuthEndpoints.some((endpoint: string) => config.url.includes(endpoint));
-  if (!useAuth().isAuthenticated.value && !isAnonymousEndpoint) {
+  if (!useAuth().isAuthenticated.value && !isAnonymousEndpoint(config.url)) {
     await useAuth().logout({ isUserUnauthorised: true, invalidAppContext: true })
     useAuth().clearAuth()
     return Promise.reject(new Error("INVALID_APP_CONTEXT"));
@@ -34,19 +57,91 @@ const requestInterceptor = async (config: any) => {
 
 const responseSuccessInterceptor = (response: any) => {
   // Any status code that lie within the range of 2xx cause this function to trigger
+  markServiceAvailable();
   return response;
 }
 
-const responseErrorInterceptor = (error: any) => {
-  // As we have yet added support for logout on unauthorization hence emitting unauth event only in case of ofbiz app
-  if (error?.response) {
-    const { status } = error.response;
-    if (status == StatusCodes.UNAUTHORIZED) {
+/**
+ * Retry a request the server could not answer, with backoff. Only idempotent requests (or ones that
+ * opt in with `retry: true`), at most MAX_RETRIES times; anything else rejects with the original error.
+ */
+const retryRequest = async (error: any) => {
+  const config = error.config;
+  const attempt = config.__retryCount ?? 0;
+  const retryable = config.retry === true || (config.retry !== false && IDEMPOTENT_METHODS.includes(String(config.method || "get").toLowerCase()));
+  if (!retryable || attempt >= MAX_RETRIES) return Promise.reject(error);
+
+  config.__retryCount = attempt + 1;
+  if (claimRetryNotice()) commonUtil.showToast(translate("Service temporarily unavailable. Retrying..."));
+  await wait(retryDelayMs(attempt + 1, parseRetryAfter(error.response?.headers?.["retry-after"])));
+  // The user may have signed out meanwhile; retrying would then fail the session check and log out again.
+  if (!useAuth().isAuthenticated.value && !isAnonymousEndpoint(config.url)) return Promise.reject(error);
+
+  return axios(config);
+}
+
+let sessionCheck: Promise<"valid" | "invalid" | "unavailable"> | null = null;
+
+/**
+ * Whether the current token is really invalid. A backend that cannot reach its database may answer
+ * 401 for a valid token (Maarg's "Error finding UserAccount"), so one 401 is not proof the session
+ * ended: ask once more with a lightweight profile call, and log out only if that is a 401 too.
+ */
+const confirmSession = (token: string) => {
+  if (!sessionCheck) {
+    sessionCheck = (async () => {
+      await wait(SESSION_CHECK_DELAY_MS);
+      try {
+        // A bare instance: this check must not pass through these interceptors itself.
+        await axios.create().request({
+          url: "admin/user/profile",
+          method: "get",
+          baseURL: commonUtil.getMaargURL(),
+          headers: { Authorization: "Bearer " + token }
+        });
+        return "valid" as const;
+      } catch (err: any) {
+        return isServiceUnavailableError(err) ? "unavailable" as const : "invalid" as const;
+      }
+    })();
+    const check = sessionCheck;
+    check.finally(() => setTimeout(() => {
+      if (sessionCheck === check) sessionCheck = null;
+    }, SESSION_CHECK_REUSE_MS));
+  }
+
+  return sessionCheck;
+}
+
+const responseErrorInterceptor = async (error: any) => {
+  // A request the interceptor rejected (INVALID_APP_CONTEXT) or a cancelled one: nothing was sent.
+  if (!error?.config) return Promise.reject(error);
+
+  // A server fault or no response is an outage, never a reason to sign the user out: retry instead.
+  if (isServiceUnavailableError(error)) {
+    markServiceUnavailable();
+    return retryRequest(error);
+  }
+  if (error.response) markServiceAvailable();
+
+  if (error.response?.status == StatusCodes.UNAUTHORIZED) {
+    const token = commonUtil.getToken();
+    // Login and the other anonymous endpoints answer 401 for bad credentials: no session to confirm.
+    const outcome = isAnonymousEndpoint(error.config.url) || !token || !commonUtil.getMaargURL()
+      ? "invalid"
+      : await confirmSession(token);
+    if (outcome === "invalid") {
       useAuth().logout({ isUserUnauthorised: true });
+    } else if (outcome === "unavailable") {
+      markServiceUnavailable();
+      return retryRequest(error);
+    } else if (!error.config.__retriedAfterSessionCheck) {
+      // The session is fine, so the 401 was the server's fault: try the request once more.
+      error.config.__retriedAfterSessionCheck = true;
+      return retryRequest(error);
     }
   }
   // Any status codes that falls outside the range of 2xx cause this function to trigger
-  // Do something with response error
   return Promise.reject(error);
 }
 
@@ -107,6 +202,7 @@ const axiosCache = setupCache({
  * - Node only: Stream, Buffer
  * @param {any} [params] - Optional: `params` are the URL parameters to be sent with the request. Must be a plain object or a URLSearchParams object
  * @param {boolean} [cache] - Optional: Apply caching to it
+ * @param {boolean} [retry] - Optional: retry on a server or network error. Default: GET / HEAD / OPTIONS only
  * @return {Promise} Response from API as returned by Axios
  */
 const api = async (customConfig: any) => {
@@ -128,6 +224,9 @@ const api = async (customConfig: any) => {
   config.baseURL = customConfig.baseURL ? customConfig.baseURL : commonUtil.getMaargURL();
 
   if (customConfig.cache) config.adapter = axiosCache.adapter;
+
+  // `retry: true` lets a write that is safe to repeat be retried on an outage; `retry: false` turns it off for a read.
+  if (customConfig.retry !== undefined) config.retry = customConfig.retry;
 
   return axios(config);
 }
