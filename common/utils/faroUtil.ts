@@ -115,6 +115,7 @@ const start = async (collectorUrl: string, options: FaroOptions) => {
 
   initializeFaro({
     url: collectorUrl,
+    apiKey: import.meta.env.VITE_FARO_API_KEY,
     app: {
       name: options.appName || versionConfig.appId || "accxui",
       version: versionInfo.version,
@@ -126,7 +127,9 @@ const start = async (collectorUrl: string, options: FaroOptions) => {
       // log to the console, so capturing it here would duplicate each line, and it
       // would also pick up raw console.* calls that never went through
       // RedactSensitiveDataHook — which is what keeps bearer tokens out of the payload.
-      ...getWebInstrumentations({ captureConsole: false })
+      // Navigation and resource timing is roughly one event per resource loaded — the
+      // highest-volume signal Faro emits, and not what these logs are for.
+      ...getWebInstrumentations({ captureConsole: false, enablePerformanceInstrumentation: false })
     ]
   });
 
