@@ -34,6 +34,10 @@ on:
         required: false
       VITE_FIREBASE_VAPID_KEY:
         required: false
+      VITE_FARO_COLLECTOR_URL:
+        required: false
+      VITE_FARO_API_KEY:
+        required: false
 jobs:
   build_and_deploy:
     runs-on: ubuntu-latest
@@ -89,6 +93,8 @@ jobs:
           REUSE_HOSTED_VERSIONS: ${{ inputs.reuseHostedVersions }}
           VITE_FIREBASE_CONFIG: ${{ secrets.VITE_FIREBASE_CONFIG }}
           VITE_FIREBASE_VAPID_KEY: ${{ secrets.VITE_FIREBASE_VAPID_KEY }}
+          VITE_FARO_COLLECTOR_URL: ${{ secrets.VITE_FARO_COLLECTOR_URL }}
+          VITE_FARO_API_KEY: ${{ secrets.VITE_FARO_API_KEY }}
         run: |
           set -euo pipefail
 
@@ -101,6 +107,12 @@ jobs:
               if [ -f public/firebase-messaging-sw.js ]; then
                 sed -i "s|const firebaseConfig =.*|const firebaseConfig = $VITE_FIREBASE_CONFIG|g" public/firebase-messaging-sw.js
               fi
+            fi
+            if [ -n "$VITE_FARO_COLLECTOR_URL" ]; then
+              sed -i "s|^VITE_FARO_COLLECTOR_URL=.*|VITE_FARO_COLLECTOR_URL='$VITE_FARO_COLLECTOR_URL'|g" .env
+            fi
+            if [ -n "$VITE_FARO_API_KEY" ]; then
+              sed -i "s|^VITE_FARO_API_KEY=.*|VITE_FARO_API_KEY='$VITE_FARO_API_KEY'|g" .env
             fi
           }
 
@@ -121,7 +133,7 @@ jobs:
             fi
 
             # VITE_FIREBASE_* must NOT leak in the same way — .env holds the quote-stripped values.
-            ( unset VITE_FIREBASE_CONFIG VITE_FIREBASE_VAPID_KEY
+            ( unset VITE_FIREBASE_CONFIG VITE_FIREBASE_VAPID_KEY VITE_FARO_COLLECTOR_URL VITE_FARO_API_KEY
               if [ -n "$cfg" ]; then export VITE_APP_VERSION_CONFIG="$cfg"; fi
               pnpm --filter ${{ inputs.appDir }} build )
 
