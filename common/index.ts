@@ -14,6 +14,7 @@ import { useFastTravel } from './composables/useFastTravel'
 import { getFastTravelApps, getFastTravelApp, buildAppUrl } from './utils/fastTravelRegistry'
 import emitter from './core/emitter'
 import { commonUtil } from './utils/commonUtil'
+import { faroUtil } from './utils/faroUtil'
 import { useSolrSearch } from './composables/useSolrSearch'
 import { useProducts } from './composables/useProducts'
 import { useShopify } from './composables/useShopify'
@@ -46,6 +47,7 @@ export {
   DxpOmsInstanceFooter,
   DxpShopifyImg,
   emitter,
+  faroUtil,
   firebaseMessaging,
   i18n,
   imagePreview,
@@ -79,6 +81,7 @@ export {
 
 export * from './db';
 export type { LogRecord, LogStoreOptions } from './core/logStore';
+export type { FaroOptions } from './utils/faroUtil';
 export { useIosKeyboardScroll } from './composables/useIosKeyboardScroll';
 export type { IosKeyboardScrollOptions } from './composables/useIosKeyboardScroll';
 export { supportsIosKeyboardScroll } from './utils/keyboardScroll';
