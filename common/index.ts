@@ -16,6 +16,7 @@ import { useShopify } from './composables/useShopify'
 import logger from './core/logger'
 import { cookieHelper } from './helpers/cookieHelper'
 import { moduleFederationUtil } from './utils/moduleFederationUtil'
+import { faroUtil } from './utils/faroUtil'
 
 import api, { client, axios } from './core/remoteApi'
 
@@ -38,6 +39,7 @@ export {
   emitter,
   firebaseMessaging,
   i18n,
+  faroUtil,
   imagePreview,
   initialiseConfig,
   logger,
@@ -60,3 +62,5 @@ export {
   useEmbeddedAppStore,
   useAuth
 }
+
+export type { FaroOptions } from './utils/faroUtil';
