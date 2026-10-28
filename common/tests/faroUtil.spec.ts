@@ -3,10 +3,15 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const initializeFaro = vi.fn();
 const metasAdd = vi.fn();
 const pushLog = vi.fn();
+const webInstrumentations = vi.fn();
 
 vi.mock("@grafana/faro-web-sdk", () => ({
   initializeFaro: (...args: any[]) => initializeFaro(...args),
-  getWebInstrumentations: () => [],
+  getWebInstrumentations: (...args: any[]) => {
+    webInstrumentations(...args);
+
+    return [];
+  },
   faro: {
     metas: { add: (...args: any[]) => metasAdd(...args) },
     api: { pushLog: (...args: any[]) => pushLog(...args) }
@@ -29,6 +34,7 @@ describe("faroUtil", () => {
     initializeFaro.mockClear();
     metasAdd.mockClear();
     pushLog.mockClear();
+    webInstrumentations.mockClear();
   });
 
   it("stays off when no collector is configured", async () => {
@@ -128,6 +134,17 @@ describe("faroUtil", () => {
     faroUtil.faroLoggerHook.run({ level: "error", argumentArray: ["too early"] } as any);
 
     expect(pushLog).not.toHaveBeenCalled();
+  });
+
+  it("collects neither console output nor navigation and resource timing", async () => {
+    const { faroUtil } = await load();
+
+    await faroUtil.initialiseFaro({ collectorUrl: COLLECTOR });
+
+    expect(webInstrumentations).toHaveBeenCalledWith({
+      captureConsole: false,
+      enablePerformanceInstrumentation: false
+    });
   });
 
   const COLLECTOR = "https://faro-uat.hotwax.io/collect";
