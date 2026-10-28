@@ -128,6 +128,30 @@ digit and a symbol), `generateInternalId(name)` (`"My Store"` → `"MY_STORE"`).
   `Download logs`, `Logs could not be downloaded.`, `No logs recorded yet.`,
   `This removes every stored log entry on this device.`) go in the app's `en.json`.
 
+## Shipping logs off the device: `faroUtil`
+
+- Opt-in per environment: without `VITE_FARO_COLLECTOR_URL` nothing starts and nothing is sent.
+  Add the key (empty) to the app's `.env.example`.
+- Two lines in `main.ts`, before `createApp`, and the hook on the logger install:
+  ```ts
+  faroUtil.initialiseFaro()
+  // ...
+  .use(logger, { level: import.meta.env.VITE_DEFAULT_LOG_LEVEL, afterHooks: [faroUtil.faroLoggerHook] })
+  ```
+  It is an **after** hook, so everything shipped has already been through `RedactSensitiveDataHook`:
+  a bearer token never leaves the device. The on-device store runs after it either way, so the logs
+  modal keeps working whether or not a collector is configured.
+- **The app does not pass the user.** `faroUtil` reads it from `accxuiConfig` — the context the app
+  already gives `initialiseConfig` — as a Faro meta *getter*, re-read on every capture, so login,
+  logout and OMS switches are picked up with nothing to re-set. `current.userId` / `userLoginId` /
+  `userFullName` and `oms` go out with every log, exception and event, plus the Maarg instance from
+  `commonUtil.getMaargBaseURL()`.
+- `initialiseFaro({ appName, collectorUrl, getContext })` — all optional. `appName` defaults to the
+  `appId` in `VITE_APP_VERSION_CONFIG`. `getContext` is for state the framework cannot see (Company's
+  Maarg instance name and purpose): it is called on every capture and its values are merged into
+  `user.attributes`, empty ones dropped. It must never be an app store read from a util — pass a
+  getter the page or composable owns.
+
 ## i18n: `translate`
 
 - **Every user-facing string**: `translate("Order cancelled")`, with values:
