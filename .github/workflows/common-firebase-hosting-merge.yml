@@ -20,7 +20,7 @@ on:
     secrets:
       envPAT:
         required: true
-      HOTWAX_PUBLIC_SECRET:
+      DEV_FIREBASE_SERVICE_ACCOUNT:
         required: true
       VITE_FIREBASE_CONFIG:
         required: false
@@ -93,11 +93,20 @@ jobs:
       - name: Prepare legacy service-worker recovery
         run: node scripts/hosting/prepare.mjs "apps/${{ inputs.appDir }}"
 
+      - name: Configure Firebase authentication
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.DEV_FIREBASE_SERVICE_ACCOUNT }}
+        run: |
+          [ -n "$FIREBASE_SERVICE_ACCOUNT" ] || { echo "::error::Configure DEV_FIREBASE_SERVICE_ACCOUNT first"; exit 1; }
+          file="$RUNNER_TEMP/firebase-service-account.json"
+          (umask 077; printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$file")
+          jq -e '.type == "service_account"' "$file" > /dev/null ||
+            { echo "::error::DEV_FIREBASE_SERVICE_ACCOUNT is not a service account key"; exit 1; }
+          echo "GOOGLE_APPLICATION_CREDENTIALS=$file" >> "$GITHUB_ENV"
+
       - name: Firebase Install and Deploy
         run: |
           npm install -g firebase-tools
-          firebase use ${{ inputs.firebaseProject }} --token "$HOTWAX_PUBLIC_SECRET"
-          firebase deploy --token "$HOTWAX_PUBLIC_SECRET" -m "Deploying via GitHub actions"  --only hosting:dev
-        env:
-            HOTWAX_PUBLIC_SECRET: ${{ secrets.HOTWAX_PUBLIC_SECRET }}
+          firebase use ${{ inputs.firebaseProject }}
+          firebase deploy -m "Deploying via GitHub actions"  --only hosting:dev
         working-directory: apps/${{ inputs.appDir }}

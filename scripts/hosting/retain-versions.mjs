@@ -59,9 +59,11 @@ export async function retainVersions(appDirectory, projectAlias, versions) {
   const auth = require(path.join(lib, "auth.js"));
   const { requireAuth } = require(path.join(lib, "requireAuth.js"));
   const { Client } = require(path.join(lib, "apiv2.js"));
-  const options = { nonInteractive: true, token: process.env.HOTWAX_PUBLIC_SECRET, account: process.env.FIREBASE_ACCOUNT };
+  const options = { nonInteractive: true, account: process.env.FIREBASE_ACCOUNT };
   if (options.account) auth.setActiveAccount(options, auth.selectAccount(options.account));
-  await requireAuth(options, true);
+  // CI logs in with a service account key (GOOGLE_APPLICATION_CREDENTIALS); local runs use the Firebase CLI login.
+  const serviceAccount = !options.account && Boolean(process.env.GOOGLE_APPLICATION_CREDENTIALS);
+  await requireAuth(options, !serviceAccount);
   const api = new Client({ urlPrefix: "https://firebasehosting.googleapis.com", apiVersion: "v1beta1", auth: true });
   const latestRelease = async () => (await api.get(`/projects/${project}/sites/${site}/releases`, { queryParams: { pageSize: 1 } })).body.releases?.[0];
   const release = await latestRelease();

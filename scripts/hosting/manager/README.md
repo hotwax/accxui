@@ -16,9 +16,9 @@ Read the app's current `.firebaserc` to resolve the project and site. Do not har
 
 ## Credentials and permissions
 
-`envPAT` provides source repository read/clone access. The calling `GITHUB_TOKEN` needs Contents write and Actions read for state. UAT uses the existing `development` environment and its `HOTWAX_PUBLIC_SECRET`, or `FIREBASE_SERVICE_ACCOUNT`. Optional public Firebase configuration is injected for builds. No local operator credentials or newly created credentials are part of these changes.
+`envPAT` provides source repository read/clone access. The calling `GITHUB_TOKEN` needs Contents write and Actions read for state. Firebase access uses a service account key per Firebase project, each holding only the Firebase Hosting Admin role: `UAT_FIREBASE_SERVICE_ACCOUNT` for UAT and `PROD_FIREBASE_SERVICE_ACCOUNT` for production. The workflow selects the key for the requested environment; the deprecated Firebase CLI token is not used. Optional public Firebase configuration is injected for builds. No local operator credentials are part of these changes.
 
-Production requires explicit onboarding, a `production` environment service account, and `APP_HOSTING_PROD_ENABLED=true`. The legacy UAT token is never the production fallback. Configure environment reviewers in GitHub before enabling production. This PR does not change environment settings or deploy anything.
+Production requires explicit onboarding, `PROD_FIREBASE_SERVICE_ACCOUNT`, and `APP_HOSTING_PROD_ENABLED=true`. Configure environment reviewers in GitHub before enabling production. This PR does not change environment settings or deploy anything.
 
 ## Review and execution
 

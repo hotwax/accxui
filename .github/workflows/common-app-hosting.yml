@@ -29,9 +29,9 @@ on:
     secrets:
       envPAT:
         required: true
-      HOTWAX_PUBLIC_SECRET:
+      UAT_FIREBASE_SERVICE_ACCOUNT:
         required: false
-      FIREBASE_SERVICE_ACCOUNT:
+      PROD_FIREBASE_SERVICE_ACCOUNT:
         required: false
       VITE_FIREBASE_CONFIG:
         required: false
@@ -87,27 +87,25 @@ jobs:
         run: gh auth setup-git
       - name: Configure Firebase authentication
         env:
-          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          FIREBASE_SERVICE_ACCOUNT: ${{ inputs.environment == 'prod' && secrets.PROD_FIREBASE_SERVICE_ACCOUNT || secrets.UAT_FIREBASE_SERVICE_ACCOUNT }}
           RM_ENVIRONMENT: ${{ inputs.environment }}
-          LEGACY_UAT_TOKEN: ${{ secrets.HOTWAX_PUBLIC_SECRET }}
         run: |
           node --input-type=module -e '
             import fs from "node:fs";
             import path from "node:path";
             const e=process.env;
-            if(e.FIREBASE_SERVICE_ACCOUNT) {
-              const account=JSON.parse(e.FIREBASE_SERVICE_ACCOUNT);
-              if(account.type!=="service_account")throw Error("Expected a Firebase service account");
-              const file=path.join(e.RUNNER_TEMP,"firebase-service-account.json");
-              fs.writeFileSync(file,JSON.stringify(account),{mode:0o600});
-              fs.appendFileSync(e.GITHUB_ENV,`GOOGLE_APPLICATION_CREDENTIALS=${file}\n`);
-            } else if(e.RM_ENVIRONMENT!=="uat"||!e.LEGACY_UAT_TOKEN)throw Error("Configure environment Firebase credentials first");
+            const name=`${e.RM_ENVIRONMENT.toUpperCase()}_FIREBASE_SERVICE_ACCOUNT`;
+            if(!e.FIREBASE_SERVICE_ACCOUNT)throw Error(`Configure ${name} first`);
+            const account=JSON.parse(e.FIREBASE_SERVICE_ACCOUNT);
+            if(account.type!=="service_account")throw Error(`${name} is not a service account key`);
+            const file=path.join(e.RUNNER_TEMP,"firebase-service-account.json");
+            fs.writeFileSync(file,JSON.stringify(account),{mode:0o600});
+            fs.appendFileSync(e.GITHUB_ENV,`GOOGLE_APPLICATION_CREDENTIALS=${file}\n`);
           '
       - name: Run reviewed hosting operation
         env:
           GH_TOKEN: ${{ secrets.envPAT }}
           STATE_TOKEN: ${{ github.token }}
-          HOTWAX_PUBLIC_SECRET: ${{ secrets.FIREBASE_SERVICE_ACCOUNT == '' && inputs.environment == 'uat' && secrets.HOTWAX_PUBLIC_SECRET || '' }}
           VITE_FIREBASE_CONFIG: ${{ secrets.VITE_FIREBASE_CONFIG }}
           VITE_FIREBASE_VAPID_KEY: ${{ secrets.VITE_FIREBASE_VAPID_KEY }}
           RM_OPERATION: ${{ inputs.operation }}

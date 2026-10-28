@@ -36,7 +36,7 @@ on:
     secrets:
       envPAT:
         required: true
-      HOTWAX_PUBLIC_SECRET:
+      UAT_FIREBASE_SERVICE_ACCOUNT:
         required: true
       VITE_FIREBASE_CONFIG:
         required: false
@@ -230,11 +230,21 @@ jobs:
       - name: Install Firebase CLI
         run: npm install -g firebase-tools@15.34.1
 
+      - name: Configure Firebase authentication
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.UAT_FIREBASE_SERVICE_ACCOUNT }}
+        run: |
+          [ -n "$FIREBASE_SERVICE_ACCOUNT" ] || { echo "::error::Configure UAT_FIREBASE_SERVICE_ACCOUNT first"; exit 1; }
+          file="$RUNNER_TEMP/firebase-service-account.json"
+          (umask 077; printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$file")
+          jq -e '.type == "service_account"' "$file" > /dev/null ||
+            { echo "::error::UAT_FIREBASE_SERVICE_ACCOUNT is not a service account key"; exit 1; }
+          echo "GOOGLE_APPLICATION_CREDENTIALS=$file" >> "$GITHUB_ENV"
+
       # Restore after compatibility preparation so retained files remain byte-for-byte unchanged.
       - name: Retain deployed versions
         if: inputs.reuseHostedVersions
         env:
-          HOTWAX_PUBLIC_SECRET: ${{ secrets.HOTWAX_PUBLIC_SECRET }}
           FIREBASE_PROJECT: ${{ inputs.firebaseProject }}
           APP_DIRECTORY: apps/${{ inputs.appDir }}
         run: |
@@ -243,19 +253,16 @@ jobs:
 
       - name: Deploy to Firebase
         working-directory: apps/${{ inputs.appDir }}
-        env:
-          HOTWAX_PUBLIC_SECRET: ${{ secrets.HOTWAX_PUBLIC_SECRET }}
         run: |
           set -euo pipefail
-          firebase use ${{ inputs.firebaseProject }} --token "$HOTWAX_PUBLIC_SECRET"
-          firebase deploy --token "$HOTWAX_PUBLIC_SECRET" -m "$DEPLOY_MSG" --only hosting:uat
+          firebase use ${{ inputs.firebaseProject }}
+          firebase deploy -m "$DEPLOY_MSG" --only hosting:uat
 
       - name: Refresh release-management inventory
         if: inputs.publishHostingInventory
         env:
           GH_TOKEN: ${{ secrets.envPAT }}
           STATE_TOKEN: ${{ github.token }}
-          HOTWAX_PUBLIC_SECRET: ${{ secrets.HOTWAX_PUBLIC_SECRET }}
           RM_OPERATION: inventory
           RM_ENVIRONMENT: uat
         run: node .hosting-tools/scripts/hosting/manager/run.mjs
