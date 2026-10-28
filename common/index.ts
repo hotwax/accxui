@@ -11,6 +11,7 @@ import { useFastTravel } from './composables/useFastTravel'
 import { getFastTravelApps, getFastTravelApp, buildAppUrl } from './utils/fastTravelRegistry'
 import emitter from './core/emitter'
 import { commonUtil } from './utils/commonUtil'
+import { faroUtil } from './utils/faroUtil'
 import { useSolrSearch } from './composables/useSolrSearch'
 import { useShopify } from './composables/useShopify'
 import logger from './core/logger'
@@ -36,6 +37,7 @@ export {
   createDxpI18n,
   DxpShopifyImg,
   emitter,
+  faroUtil,
   firebaseMessaging,
   i18n,
   imagePreview,
@@ -60,3 +62,5 @@ export {
   useEmbeddedAppStore,
   useAuth
 }
+
+export type { FaroOptions } from './utils/faroUtil';

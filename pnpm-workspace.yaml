@@ -8,6 +8,7 @@ catalog:
   "luxon": "3.7.2"
   "@types/luxon": "3.7.1"
   "vue-logger-plugin": "2.2.3"
+  "@grafana/faro-web-sdk": "2.11.0"
   "@ionic/core": "8.8.0"
   "@ionic/vue": "8.8.0"
   "@ionic/vue-router": "8.8.0"
