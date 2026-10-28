@@ -103,3 +103,53 @@ describe("commonUtil.isVersionGreaterOrEqual", () => {
     expect(commonUtil.isVersionGreaterOrEqual(undefined as any, "1.0.0")).toBe(false);
   });
 });
+
+describe("commonUtil.getErrorMessage", () => {
+  const msg = (e: any) => commonUtil.getErrorMessage(e);
+
+  it("reads OFBiz string and list errors", () => {
+    expect(msg({ response: { data: { _ERROR_MESSAGE_: "Bad item" } } })).toBe("Bad item");
+    expect(msg({ response: { data: { _ERROR_MESSAGE_LIST_: ["first error", "second error"] } } })).toBe("first error, second error");
+  });
+
+  it("reads Moqui string errors", () => {
+    expect(msg({ response: { data: { errors: "No access" } } })).toBe("No access");
+  });
+
+  it("joins multiple Moqui messages separated by line breaks", () => {
+    expect(msg({ response: { data: { errors: "First problem\nSecond problem" } } })).toBe("First problem; Second problem");
+    expect(msg({ response: { data: { errors: "A\r\n\r\nB\n" } } })).toBe("A; B");
+  });
+
+  it("reads errorMessage and error properties", () => {
+    expect(msg({ response: { data: { errorMessage: "Service failed" } } })).toBe("Service failed");
+    expect(msg({ response: { data: { error: "Custom error" } } })).toBe("Custom error");
+  });
+
+  it("reads plain string response data", () => {
+    expect(msg({ response: { data: "Service Unavailable" } })).toBe("Service Unavailable");
+    expect(msg("Direct error string")).toBe("Direct error string");
+  });
+
+  it("ignores empty and whitespace-only bodies and falls back to error.message", () => {
+    expect(msg({ response: { data: "  " }, message: "Network Error" })).toBe("Network Error");
+    expect(msg({ response: { data: "" }, message: "Connection timeout" })).toBe("Connection timeout");
+  });
+
+  it("ignores HTML bodies from gateway/proxy error pages", () => {
+    expect(msg({ response: { data: "<html><body>502 Bad Gateway</body></html>" } })).toBe("");
+    expect(msg({ response: { data: "  <!DOCTYPE html><html>504</html>" } })).toBe("");
+  });
+
+  it("handles an already-unwrapped response object", () => {
+    expect(msg({ data: { _ERROR_MESSAGE_: "From resp" } })).toBe("From resp");
+    expect(msg({ data: { errors: "From Moqui resp" } })).toBe("From Moqui resp");
+  });
+
+  it("returns empty string when no message is extractable", () => {
+    expect(msg({})).toBe("");
+    expect(msg({ response: {} })).toBe("");
+    expect(msg(null)).toBe("");
+    expect(msg(undefined)).toBe("");
+  });
+});

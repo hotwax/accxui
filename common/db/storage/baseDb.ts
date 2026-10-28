@@ -1,0 +1,234 @@
+/**
+ * Base Dexie Database wrapper and Entity definition engine.
+ */
+
+import Dexie, { type Table } from "dexie";
+
+export class BaseDB extends Dexie {
+  syncMeta!: Table<Record<string, any>, string>;
+  protected _tableNames: string[] = [];
+  /** The schema version this build declares. `ensureDbReady` rebuilds when a database disagrees. */
+  readonly declaredVersion: number;
+  /** Tables `clearDatabaseTables` leaves alone on logout (entities declared `retainOnLogout`). */
+  readonly retainedTables: ReadonlySet<string>;
+
+  /**
+   * `version` is the ONE knob. Bump it for any schema change at all — a new table, an added or
+   * removed index, a changed primary key, a changed `fields` map or `rename`. A database that
+   * records a different version is dropped and rebuilt rather than migrated (see `ensureDbReady`),
+   * because nothing stored here is authoritative: every row is re-derivable from the OMS, so
+   * rebuilding is cheaper than reasoning about which changes Dexie can carry in place and which
+   * leave rows the new code cannot read.
+   */
+  constructor(dbName: string, schema: Record<string, string>, version = 1, retainedTables: string[] = []) {
+    super(dbName);
+    this.declaredVersion = version;
+    this.retainedTables = new Set(retainedTables);
+    const combinedSchema = {
+      ...schema,
+      syncMeta: "key",
+    };
+    this._tableNames = Object.keys(combinedSchema);
+    this.version(version).stores(combinedSchema);
+  }
+
+  getTableNames(): string[] {
+    return this._tableNames;
+  }
+}
+
+/** The key under which a database records the schema version it was built with. */
+const SCHEMA_VERSION_KEY = "schemaVersion";
+
+/**
+ * Wipe all data tables in the given Dexie instance on logout.
+ *
+ * Skips the tables in `retainedTables`: catalog data that is the same for every user of the
+ * instance, kept so the next login does not fetch it again. The login markers in `syncMeta` go
+ * regardless; they describe a login, not a table.
+ *
+ * Keeps the schema version record, which still describes the emptied database. Without it the next
+ * realm to open the database — the sync worker the next login starts — takes it for an unrecorded
+ * build and rebuilds it, dropping whatever the main thread wrote first.
+ */
+export async function clearDatabaseTables(db: BaseDB): Promise<void> {
+  try {
+    await db.transaction("rw", db.getTableNames(), async () => {
+      for (const tableName of db.getTableNames()) {
+        if (db.retainedTables?.has(tableName)) {
+          continue;
+        }
+        if (tableName === "syncMeta") {
+          const keys = await db.syncMeta.toCollection().primaryKeys();
+          await db.syncMeta.bulkDelete(keys.filter((key) => key !== SCHEMA_VERSION_KEY));
+        } else {
+          await db.table(tableName).clear();
+        }
+      }
+    });
+  } catch (error) {
+    console.error(`[db] Failed to clear tables for ${db.name}:`, error);
+  }
+}
+
+/**
+ * Databases whose declared version has already been verified in this realm, keyed by database name.
+ *
+ * Only the CHECK is memoised, never the open: `ensureDbReady` stays re-runnable so a connection
+ * that closed later — an OMS-instance switch closes the previous handle, and Dexie closes one
+ * itself when another tab fires `versionchange` — is reopened rather than answered "ready".
+ *
+ * Keyed by name, so switching instance verifies the other tenant's database on its first use.
+ */
+const versionChecked = new Map<string, Promise<void>>();
+
+/** Test-only: forget which databases have been verified. */
+export function __resetDbVersionChecks(): void {
+  versionChecked.clear();
+}
+
+const LOGIN_MARKER_PREFIX = "loginSync:";
+
+/** The `syncMeta` key of `domain`'s once-per-login marker. */
+export function loginMarkerKey(domain: string): string {
+  return `${LOGIN_MARKER_PREFIX}${domain}`;
+}
+
+export async function hasSyncedThisLogin(db: BaseDB, domain: string): Promise<boolean> {
+  try {
+    const record = await db.syncMeta.get(`${LOGIN_MARKER_PREFIX}${domain}`);
+    return Boolean(record?.synced);
+  } catch {
+    return false;
+  }
+}
+
+/** Forget that `domain` synced this login, so its next pass re-seeds it. */
+export async function clearSyncedThisLogin(db: BaseDB, domain: string): Promise<void> {
+  await db.syncMeta.delete(`${LOGIN_MARKER_PREFIX}${domain}`);
+}
+
+export async function markSyncedThisLogin(db: BaseDB, domain: string): Promise<void> {
+  try {
+    await db.syncMeta.put({
+      key: `${LOGIN_MARKER_PREFIX}${domain}`,
+      synced: true,
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    console.warn(`[db] Failed to mark ${domain} synced:`, error);
+  }
+}
+
+async function openDb(db: BaseDB): Promise<void> {
+  try {
+    if (!db.isOpen()) {
+      await db.open();
+    }
+  } catch (err: any) {
+    console.warn(`[db] Database open failed for ${db.name}, rebuilding:`, err);
+    try {
+      db.close();
+      await Dexie.delete(db.name);
+      await db.open();
+    } catch (rebuildErr) {
+      console.error(`[db] Rebuild failed for ${db.name}:`, rebuildErr);
+    }
+  }
+}
+
+/**
+ * Dexie runs a live query's querier in a zone that refuses writes (`ReadOnlyError`), and carries a
+ * zone across native awaits by echoing it over the next microtasks. So the version check, which
+ * writes when it rebuilds, fails when a live query is the database's first use, and an unrelated
+ * native continuation that runs in an echo, such as a caller of the check, can land in that zone and
+ * have every later write refused. A Dexie promise is not affected: it runs each callback in the zone
+ * it was registered in. `Dexie.Promise.PSD` and `usePSD` are how Dexie itself reads and enters zones.
+ */
+const ZonedPromise = Dexie.Promise as any;
+
+/** Run `fn` in Dexie's global zone, outside any live query or transaction. */
+function inGlobalZone<T>(fn: () => T): T {
+  let zone = ZonedPromise.PSD;
+  while(zone && !zone.global) {zone = zone.parent;}
+
+  return zone && typeof ZonedPromise.usePSD === "function" ? ZonedPromise.usePSD(zone, fn) : fn();
+}
+
+/**
+ * Drop and rebuild when the database was built by a different declared version.
+ *
+ * An absent marker counts as a mismatch, so installs predating the marker land on a known state,
+ * and so does a LOWER declared version, which is what a rolled-back deploy looks like.
+ *
+ * Reads `syncMeta` through raw Dexie rather than `dbClient`: every `dbClient` operation calls
+ * `ensureDbReady`, so routing this through it would re-enter the gate that is awaiting this.
+ *
+ * A chain of Dexie promises rather than native awaits, so that once started in the global zone
+ * every step, the rebuild's write included, stays there.
+ */
+function verifyDeclaredVersion(db: BaseDB): Promise<void> {
+  return Dexie.Promise.resolve()
+    .then(() => db.syncMeta.get(SCHEMA_VERSION_KEY))
+    .then((record) => {
+      const recorded = record?.version;
+      if(Number(recorded) === db.declaredVersion) {return;}
+
+      console.info(`[db] ${db.name} was built by version ${recorded ?? "an unrecorded build"}, ` +
+        `this build declares ${db.declaredVersion} — rebuilding.`);
+      db.close();
+
+      return Dexie.Promise.resolve(Dexie.delete(db.name))
+        .then(() => db.open())
+        .then(() => db.syncMeta.put({
+          key: SCHEMA_VERSION_KEY,
+          version: db.declaredVersion,
+          timestamp: Date.now(),
+        }))
+        .then(() => undefined);
+    });
+}
+
+/** The memoised version check for `db`, started in the global zone on its first use in this realm. */
+function versionCheckOf(db: BaseDB): Promise<void> {
+  let checked = versionChecked.get(db.name);
+  if(!checked) {
+    // Swallowed, never rethrown, and not retried: a failed check must not block boot, and
+    // re-attempting a destructive rebuild on every read would be worse than serving what is there.
+    checked = inGlobalZone(() => verifyDeclaredVersion(db).catch((error) => {
+      console.warn(`[db] Version check failed for ${db.name}:`, error);
+    }));
+    versionChecked.set(db.name, checked);
+  }
+
+  return checked;
+}
+
+/**
+ * Make the database usable: open it, and rebuild it if it was built by a different version.
+ *
+ * Every read and write reaches this — `dbClient` awaits it before each operation, and the worker
+ * harness on start — so no query can run, and no `liveQuery` can subscribe, against a database
+ * that has not been verified. That ordering is what makes the rebuild safe: `Dexie.delete` blocks
+ * on open connections, and by construction there are none yet.
+ *
+ * Live queries call this inside their querier (`dbClient.live`, `dbClient.liveRead`), so the open
+ * and the check run in the global zone, and the promise returned here is a Dexie promise made in
+ * the caller's zone. A querier resumes inside its live query, so the reads that follow are
+ * tracked, and any other caller resumes outside it, so its writes are not refused.
+ */
+export function ensureDbReady(db: BaseDB): Promise<void> {
+  return Dexie.Promise.resolve()
+    .then(() => inGlobalZone(() => openDb(db)))
+    .then(() => versionCheckOf(db));
+}
+
+/** Drop the superseded fixed-name cache databases, if present. */
+export async function deleteLegacyCaches(): Promise<void> {
+  await Promise.allSettled([
+    Dexie.delete("DataManagerLogCacheDB"),
+    Dexie.delete("CompanyCacheDB"),
+    // Company's Shopify product-sync error records, now the app db's dataManagerErrorRecords.
+    Dexie.delete("ShopifySyncDB"),
+  ]);
+}

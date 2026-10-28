@@ -1,6 +1,12 @@
 <template>
   <ion-page>
     <ion-content>
+      <div slot="fixed" class="logs-action">
+        <ion-button color="dark" fill="clear" size="small" @click="openLogs()">
+          <ion-icon slot="start" :icon="documentTextOutline" />
+          {{ translate("View logs") }}
+        </ion-button>
+      </div>
       <div class="flex" v-if="!isInitializing && !isConfirmingForActiveSession">
         <form class="login-container" @keyup.enter="handleSubmit()" @submit.prevent>
           <Logo />
@@ -135,17 +141,19 @@ import {
   IonPage,
   IonSpinner,
   loadingController,
+  modalController,
   onIonViewWillEnter
 } from "@ionic/vue";
 import { computed, ref } from "vue";
 import Logo from "./Logo.vue";
-import { arrowBackOutline, arrowForwardOutline, warningOutline } from 'ionicons/icons'
+import { arrowBackOutline, arrowForwardOutline, documentTextOutline, warningOutline } from 'ionicons/icons'
 import { cookieHelper } from "../helpers/cookieHelper";
 import { translate } from "../core/i18n"
 import { commonUtil } from "../utils/commonUtil";
-import { useAuth } from "../composables/useAuth";
+import { omsRef, useAuth } from "../composables/useAuth";
 import { accxuiConfig } from "../core/configRegistry";
 import { discoverLocalApiServers, type LocalApiServer, type LocalApiServerSignal } from "../core/localApiServerDiscovery";
+import logger from "../core/logger";
 
 let route = null as any;
 
@@ -227,7 +235,9 @@ const configuredDevUsername = computed(() => getDevCredentials().devUsername || 
 
 const canDevAutoLoginForCurrentOms = computed(() => {
   if (!canDevAutoLogin()) return false;
-  const currentOms = (cookieHelper().get("oms") || instanceUrl.value || accxuiConfig.value?.oms || "").toString().trim().toLowerCase();
+  // omsRef first: cookies are not reactive, so reading only the cookie kept this answer from the
+  // previous OMS and offered the dev credentials for whatever instance was entered next.
+  const currentOms = (omsRef.value || cookieHelper().get("oms") || instanceUrl.value || accxuiConfig.value?.oms || "").toString().trim().toLowerCase();
   if (!currentOms) return false;
 
   const normalizedCurrentOms = normalizeOmsUrl(currentOms);
@@ -244,6 +254,13 @@ const canDevAutoLoginForCurrentOms = computed(() => {
     ) {
       return true;
     }
+  }
+
+  const matchesAlias = Object.values(alias).some(
+    (url: any) => normalizeOmsUrl(String(url)) === normalizedCurrentOms || normalizeOmsUrl(String(url)) === resolvedCurrentOms
+  );
+  if (matchesAlias) {
+    return true;
   }
 
   return (
@@ -290,7 +307,7 @@ const discoverLocalApiServerOptions = async () => {
   try {
     localApiServers.value = await discoverLocalApiServers();
   } catch (error) {
-    console.error("Failed to discover local API servers:", error);
+    logger.error("Failed to discover local API servers:", error);
   } finally {
     isDiscoveringLocalApiServers.value = false;
   }
@@ -317,7 +334,7 @@ const login = async (params?: any) => {
     }
   } catch (error: any) {
     errorMessage.value = error
-    console.error(error);
+    logger.error("Login failed", error);
   }
   isLoggingIn.value = false;
 };
@@ -325,17 +342,29 @@ const login = async (params?: any) => {
 const setOms = async () => {
   if (!instanceUrl.value) {
     commonUtil.showToast(translate("Please fill in the OMS"));
-    return;
+    return false;
+  }
+
+  const instanceURL = instanceUrl.value.trim().toLowerCase();
+  // An instance name or URL never contains whitespace, so reject it before it reaches a cookie.
+  if (/\s/.test(instanceURL)) {
+    commonUtil.showToast(translate("Enter a valid OMS name or URL."));
+    return false;
   }
 
   isCheckingOms.value = true;
 
-  const instanceURL = instanceUrl.value.trim().toLowerCase();
   updateOMS(alias[instanceURL] ? alias[instanceURL] : instanceURL)
   accxuiConfig.value.oms = alias[instanceURL] ? alias[instanceURL] : instanceURL
 
   // run SAML login flow if login options are configured for the OMS
-  await fetchLoginOptions();
+  const isOmsReachable = await fetchLoginOptions();
+  if (!isOmsReachable) {
+    // Keep the user on the OMS step: signing in now would have no verified instance to go to.
+    commonUtil.showToast(translate("Unable to reach the OMS. Check the OMS name and try again."));
+    isCheckingOms.value = false;
+    return false;
+  }
   await fetchAppVersion();
 
   // checking loginOption.length to know if fetchLoginOptions API returned data
@@ -347,6 +376,7 @@ const setOms = async () => {
     toggleOmsInput();
   }
   isCheckingOms.value = false;
+  return true;
 };
 
 export interface DevServer {
@@ -384,6 +414,21 @@ const devServers = computed<DevServer[]>(() => {
     seenOms.add(normalizedEnvOms);
   }
 
+  // Also include any other configured servers from VITE_ALIAS
+  for (const [key, rawUrl] of Object.entries(alias)) {
+    if (typeof rawUrl !== "string") continue;
+    const normalizedUrl = normalizeOmsUrl(rawUrl);
+    if (!seenOms.has(normalizedUrl)) {
+      servers.push({
+        label: key,
+        oms: rawUrl,
+        hasAutoLogin: canDevAutoLogin(),
+        isEnv: true
+      });
+      seenOms.add(normalizedUrl);
+    }
+  }
+
   // 2. Discovered local API servers
   for (const server of localApiServers.value) {
     const normalizedServerOms = normalizeOmsUrl(server.oms);
@@ -414,7 +459,7 @@ const selectDevServer = async (server: DevServer) => {
   if (isCheckingOms.value) return;
 
   instanceUrl.value = server.oms;
-  await setOms();
+  if (!(await setOms())) return;
 
   // Toggling the oms again so to login into the app instead of moving to the login view where users sees
   // login process in action
@@ -502,18 +547,28 @@ const initialise = async () => {
 
       // VITE_DEFAULT_ALIAS only prefills the OMS input, it never applies it. If dev auto-login
       // is configured and instanceUrl is set, advance to the credentials form so the user lands
-      // directly on the username/password screen with the one-click dev user item.
-      if(canDevAutoLogin() && instanceUrl.value && isBasicLoginOption()) {
+      // directly on the username/password screen with the one-click dev user item (unless multiple
+      // alias options are configured for selection).
+      if(canDevAutoLogin() && instanceUrl.value && isBasicLoginOption() && Object.keys(alias).length <= 1) {
         await setOms();
       }
     }
   } catch (error) {
-    console.error(error);
+    logger.error("Login page failed to initialise", error);
   } finally {
     dismissLoader();
     isInitializing.value = false;
     initInProgress = false;
   }
+};
+
+const openLogs = async () => {
+  const { default: DxpLogsModal } = await import("./DxpLogsModal.vue");
+  const logsModal = await modalController.create({
+    component: DxpLogsModal
+  });
+
+  return logsModal.present();
 };
 
 const handleSubmit = () => {
@@ -538,5 +593,10 @@ onIonViewWillEnter(() => {
   justify-content: center;
   align-items: center;
   height: 100%;
+}
+
+.logs-action {
+  top: calc(var(--ion-safe-area-top, 0px) + 8px);
+  right: calc(var(--ion-safe-area-right, 0px) + 8px);
 }
 </style>

@@ -3,8 +3,8 @@
 //
 // A versioned path looks like `/vX.Y.Z/<rest>` (e.g. `/v5.0.0/tabs/orders`); the first path segment
 // IS the version string. `/<rest>` (first segment not version-shaped) is an unversioned path.
-
-const VERSION_SEGMENT_PATTERN = /^v\d+\.\d+\.\d+$/;
+// Updated the regex to match with vX.Y.Z-<suffix>
+const VERSION_SEGMENT_PATTERN = /^v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
 
 export interface VersionedPathInfo {
   version: string | null;

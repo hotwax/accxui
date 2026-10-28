@@ -1,0 +1,23 @@
+// Creates an expiring Products UAT preview fixture; never changes the live channel.
+import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { firebaseConnection, snapshot, cloneVersion, listFiles, verifyPreserved } from './publish-versions.mjs';
+const [app, channel, version] = process.argv.slice(2);
+if (app !== 'products' || !/^publish-only-[a-z0-9-]+$/.test(channel || '') || !/^v\d+\.\d+\.\d+$/.test(version || '')) throw Error('Expected products publish-only-<unique-id> vX.Y.Z');
+const rc = JSON.parse(await readFile(`apps/${app}/.firebaserc`, 'utf8'));
+const site = rc.targets?.[rc.projects?.uat]?.hosting?.uat?.[0];
+if (site !== 'hotwax-products-uat' || rc.projects.uat !== 'hotwax-digital-commerce-uat') throw Error('Unexpected Products UAT target');
+const { api } = await firebaseConnection();
+const before = await snapshot(api, site, 'live');
+if (!before.files.some(f => f.path === `/${version}/index.html`)) throw Error('Fixture requires an already hosted release to omit');
+const preview = await api('POST', `/sites/${site}/channels`, { ttl: '86400s' }, { channelId: channel });
+const cloned = await cloneVersion(api, site, before.release.version.name, { exclude: { regexes: [`^/${version.replaceAll('.', '\\.')}/.*$`] } });
+await api('PATCH', `/${cloned.name}`, { status: 'FINALIZED' }, { updateMask: 'status' });
+const files = await listFiles(api, cloned.name);
+verifyPreserved(before.files.filter(f => !f.path.startsWith(`/${version}/`)), files, []);
+if (files.some(f => f.path.startsWith(`/${version}/`))) throw Error('Fixture still includes the target version');
+await api('POST', `/sites/${site}/channels/${channel}/releases`, { message: 'Isolated publish-only UAT test baseline' }, { versionName: cloned.name });
+if ((await snapshot(api,site,'live')).release.name !== before.release.name) throw Error('Live changed during fixture creation');
+await mkdir('publish-evidence', {recursive:true});
+await writeFile('publish-evidence/live-before.json', JSON.stringify(before,null,2));
+await writeFile('publish-evidence/preview.json',JSON.stringify({ site, channel, url:preview.url, omittedVersion:version },null,2));
+console.log(JSON.stringify({site,channel,url:preview.url,liveRelease:before.release.name}));

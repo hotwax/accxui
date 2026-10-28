@@ -1,0 +1,83 @@
+# AccxUI — rules for agents
+
+AccxUI is a framework (`common/`) plus apps under `apps/*`. Each app is its **own git repo**: a
+change to `common/` and a change to an app are separate commits in separate repos.
+
+## Local database (IndexedDB) — non-negotiable in apps that have one
+
+**Which apps:** Company, Order Manager and every **new** app keep server data in one IndexedDB
+database per OMS instance, filled by a background sync worker; the rules below apply there. **BOPIS
+and Fulfillment have no app db**: their data lives in Pinia stores, the rules below don't apply, and
+`accxui-apps-without-app-db` says how to work in them (moving one onto an app db is its own project).
+The build's lint (`dbConfig` in `eslint.config.js`) enforces most of this.
+
+1. **Read** only with `useLiveEntity(appDb.tables.x, options)` (and `useSeedData()` for seed
+   tables), in a composable or a `.vue` file. No `appDb.entity(...)` or `loadSeedData()` in app code:
+   those are for `src/workers/**` and `src/db/**`. Stores, utils and the router take rows from their
+   caller.
+2. **Only worker sync domains write the app db.** A record the db is missing:
+   `refreshAfterMutation(domain, pk)`, and the `useLiveEntity` on it shows it. A server change:
+   `api()`, then `refreshAfterMutation(domain, pk)` or `resyncDomain(domain)` once the write has
+   landed. Never write a response into a table.
+3. **No Dexie, `dbClient`, `appDb.raw()` / `.get()` in app code; `appDb.client()` only in workers** (and as the `useDbStatus(...)` argument).
+   Table names always from `appDb.tables`, never a string.
+4. **Worker code (`src/db/**`, `src/workers/**`) uses deep imports only** (`@common/db/model/*`,
+   `@common/db/sync/*`, `@common/core/workerRemoteApi`, …): never `@common`, `@common/db`,
+   `commonUtil`, `api()`, stores or composables.
+5. **Seed lookups:** `useSeedData()` during setup, in the page, component or composable that shows
+   the labels; it shares its live reads with every component below it and closes them on unmount.
+   Never in `App.vue` (lint rejects it): one there holds every seed table open for the session. A
+   store action or util that needs seed rows takes them as an argument.
+6. **Sync lifecycle:** `App.vue` starts sync when `useAuth().isAuthenticated` is true **and** the
+   app-permission check has passed (the user store's permissions status is `"success"`, reset to
+   `"pending"` at the top of `postLogin`), so a login rejected for the app permission never starts it;
+   `postLogin` stops then restarts it; `postLogout` stops it (which clears the tables). A page that
+   activates class A domains deactivates them with the same owner in `onIonViewDidLeave`.
+7. **Any schema change bumps the app db `version`.** Nothing detects a forgotten bump.
+
+**Load the skill before the work:** where code goes (API calls, composables, stores, utils) →
+`accxui-app-layers`; reading or writing the local app db → `accxui-app-db-access`; a new app
+database, table, sync domain or seed table, or extending / overriding a framework entity →
+`accxui-app-db-setup`; a page that polls class A domains (activate / deactivate, Refresh, loading
+state) → `accxui-page-sync`; seed labels and option lists (`useSeedData`) or the Settings status card
+(`useDbStatus`) → `accxui-seed-data`; login, logout, guards and session state (`useAuth`) →
+`accxui-auth`; Solr product or order search (`useSolrSearch`) → `accxui-solr-search`; Firebase push
+notifications and notification preferences → `accxui-push-notifications`; route or button
+permissions (`hasPermission`, `src/authorization`) → `accxui-permissions`; product details by id or product
+search (`useProducts`) → `accxui-product-search`; Shopify embedded / POS (`useShopify`, `ShopifyLogin`) →
+`accxui-shopify-embedded`; packages, env variables, running, releasing or deploying →
+`accxui-dependencies-and-config`. Toasts, loader, logging, translations, date / status / product-id
+formatting (`commonUtil`, `logger`, `translate`, `emitter`) → `accxui-common-helpers`. A new app,
+or an app's shell (`main.ts`, `App.vue`, router, user store, `vite.config`) → `accxui-new-app`; changing
+BOPIS or Fulfillment → `accxui-apps-without-app-db`; pages, modals, menus, Settings, forms and
+framework components → `accxui-ui-conventions`; links to other HotWax apps (`buildAppUrl`,
+`FastTravel`) → `accxui-fast-travel`; writing or running tests → `accxui-app-testing`; anything under
+`common/` → `accxui-framework-change`. Full reference: `docs/APP_DB_DEVELOPER_GUIDE.md`.
+
+## App layout
+
+The build's lint enforces these too (the `use…` / `use…Store` naming rules only in the root `pnpm lint`); the
+`accxui-app-layers` skill has the recipes.
+
+- **Composables** (`@/composables/*`, plus `useLiveEntity` and `useSeedData`) are used only by other
+  composables and `.vue` files: never in a store, util, router, `src/db` or a worker. The framework's
+  plain helpers (`useAuth`, `useSolrSearch`, …) are not affected.
+- **API calls** live only in composables, Pinia stores (when a store needs the data) and worker sync
+  domains. A `.vue` file calls a composable or store; utils and the router never call the API.
+- **Utils are pure:** no API, no stores, no app db, no composables. They take what they need as
+  parameters.
+- **Stores and the app db stay apart:** a store never imports an app db module (only `@/db/appDbSync`
+  to reconcile after a write), and `src/db` / `src/workers` never import a store. A page or domain
+  composable joins store data with `useLiveEntity` / `useSeedData` rows.
+- `src/db/` holds only the database objects, the schema, the sync facade (`appDbSync.ts`) and any
+  app-local Dexie store. There is no `src/services/`.
+
+## Checks
+
+- Framework: `npx vitest run common/tests` from this root. Never bare `vitest` here: it collects the
+  apps' specs, which fail on `@/` aliases.
+- An app: `pnpm test:unit` and `pnpm build` from `apps/<app>` (the build lints first in Company and
+  Order Manager). BOPIS and Fulfillment: `npx vitest run` (their `test:unit` watches) and
+  `npx eslint <changed files>`, since their build doesn't lint.
+- Style findings from the root lint are pre-existing noise: match the surrounding file. The layer,
+  data-access and translation-key findings are the ones that count.

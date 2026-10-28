@@ -13,6 +13,10 @@ on:
       firebaseProject:
         default: 'dev'
         type: string
+      buildEnvironment:
+        description: 'Optional JSON object of public environment values for this app build only'
+        default: '{}'
+        type: string
     secrets:
       envPAT:
         required: true
@@ -21,6 +25,12 @@ on:
       VITE_FIREBASE_CONFIG:
         required: false
       VITE_FIREBASE_VAPID_KEY:
+        required: false
+      SHOPIFY_SHOP_CONFIG:
+        required: false
+      VITE_FARO_COLLECTOR_URL:
+        required: false
+      VITE_FARO_API_KEY:
         required: false
 
 jobs:
@@ -71,8 +81,34 @@ jobs:
           VITE_FIREBASE_VAPID_KEY: ${{ secrets.VITE_FIREBASE_VAPID_KEY }}
         working-directory: apps/${{ inputs.appDir }}
 
+      - name: Set Shopify Shop Config
+        run: |
+          if [[ -n "$SHOPIFY_SHOP_CONFIG" ]]; then
+            sed -i "s|^VITE_SHOPIFY_SHOP_CONFIG=.*|VITE_SHOPIFY_SHOP_CONFIG=$SHOPIFY_SHOP_CONFIG|g" .env
+          fi
+        env:
+          SHOPIFY_SHOP_CONFIG: ${{ secrets.SHOPIFY_SHOP_CONFIG }}
+        working-directory: apps/${{ inputs.appDir }}
+
+      - name: Set Faro Config
+        run: |
+          if [[ -n "$VITE_FARO_COLLECTOR_URL" ]]; then
+            sed -i "s|^VITE_FARO_COLLECTOR_URL=.*|VITE_FARO_COLLECTOR_URL='$VITE_FARO_COLLECTOR_URL'|g" .env
+          fi
+          if [[ -n "$VITE_FARO_API_KEY" ]]; then
+            sed -i "s|^VITE_FARO_API_KEY=.*|VITE_FARO_API_KEY='$VITE_FARO_API_KEY'|g" .env
+          fi
+        env:
+          VITE_FARO_COLLECTOR_URL: ${{ secrets.VITE_FARO_COLLECTOR_URL }}
+          VITE_FARO_API_KEY: ${{ secrets.VITE_FARO_API_KEY }}
+        working-directory: apps/${{ inputs.appDir }}
+
       - name: Build
+        env: ${{ fromJSON(inputs.buildEnvironment) }}
         run: pnpm --filter ${{ inputs.appDir }} build
+
+      - name: Prepare legacy service-worker recovery
+        run: node scripts/hosting/prepare.mjs "apps/${{ inputs.appDir }}"
 
       - name: Firebase Install and Deploy
         run: |

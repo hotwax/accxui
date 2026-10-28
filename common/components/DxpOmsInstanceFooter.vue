@@ -28,7 +28,7 @@
               {{ displayInstanceLabel }}<ion-note
                 v-if="displayTimeZone"
                 :color="isTimeZoneMismatched ? 'danger' : ''"
-              >{{ displayInstanceLabel ? ' ' : '' }}{{ displayTimeZone }}{{ displayZoneTime ? ` ${displayZoneTime}` : '' }}</ion-note>
+              ><template v-if="displayInstanceLabel"> · </template>{{ displayTimeZone }}<template v-if="displayZoneTime"> · {{ displayZoneTime }}</template></ion-note>
             </p>
             <template v-if="selectLabel">{{ selectLabel }}</template>
           </ion-label>
@@ -46,7 +46,7 @@
             {{ displayInstanceLabel }}<ion-note
               v-if="displayTimeZone"
               :color="isTimeZoneMismatched ? 'danger' : ''"
-            >{{ displayInstanceLabel ? ' ' : '' }}{{ displayTimeZone }}{{ displayZoneTime ? ` ${displayZoneTime}` : '' }}</ion-note>
+            ><template v-if="displayInstanceLabel"> · </template>{{ displayTimeZone }}<template v-if="displayZoneTime"> · {{ displayZoneTime }}</template></ion-note>
           </p>
           {{ currentStoreLabel }}
         </ion-label>

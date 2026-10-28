@@ -4,6 +4,7 @@ declare module '*.jpeg';
 declare module '*.gif';
 declare module '*.svg';
 declare module 'luxon';
+declare module 'vue-virtual-scroller';
 
 interface ImportMetaEnv {
   readonly [key: string]: string | undefined;

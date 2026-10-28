@@ -19,11 +19,33 @@ interface LoginOption {
 
 const loginOption = ref<LoginOption>({})
 export const omsRef = ref("")
-// Which backend fetchLoginOptions() actually found the entered OMS to be — kept in sync so
-// login() hits the matching URL instead of assuming the static VITE_OMS_TYPE build flag.
-const isMoquiOmsRef = ref(commonUtil.isMoqui())
+// Share the verified backend across tabs, scoped to the OMS cookie. Only detection metadata
+// is stored here; credentials and authentication still follow the existing session flow.
+const backendStorageKey = "accxui.omsBackend";
+const readBackendMode = (): boolean => {
+  try {
+    // Migrate a previously verified tab when upgrading from tab-local persistence.
+    const saved = JSON.parse(localStorage.getItem(backendStorageKey) || sessionStorage.getItem(backendStorageKey) || "null");
+    const oms = cookieHelper().get("oms");
+    if (oms && saved?.oms === oms && typeof saved?.isMoqui === "boolean") {
+      try { localStorage.setItem(backendStorageKey, JSON.stringify(saved)); } catch { /* Optional persistence. */ }
+      return saved.isMoqui;
+    }
+  } catch { /* Storage may be unavailable; detection still works for this page. */ }
+  return commonUtil.isMoqui();
+};
+export const isMoquiOmsRef = ref(readBackendMode());
+const clearBackendMode = () => {
+  isMoquiOmsRef.value = commonUtil.isMoqui();
+  try { localStorage.removeItem(backendStorageKey); } catch { /* Optional persistence. */ }
+  try { sessionStorage.removeItem(backendStorageKey); } catch { /* Optional persistence. */ }
+};
 const token = ref(cookieHelper().get("token") || "")
 const expirationTime = ref(cookieHelper().get("expirationTime") || "")
+let explicitlyLoggedOut = false;
+// Module state, so false again on every page load: a signed-in reload re-reads the version pinned in
+// the OMS once (checkAppVersionRedirect), picking up a pin an admin changed mid-session.
+let appVersionFetched = false;
 
 export function useAuth() {
   const getDuration = (expirationTime?: any) => {
@@ -33,6 +55,7 @@ export function useAuth() {
 
 
   const updateToken = (newToken: any, newExpirationTime: any) => {
+    if (newToken) explicitlyLoggedOut = false;
     const duration = getDuration(newExpirationTime);
     cookieHelper().set("token", newToken, duration)
     cookieHelper().set("expirationTime", newExpirationTime, duration)
@@ -43,6 +66,7 @@ export function useAuth() {
   }
 
   const updateOMS = (oms: any) => {
+    if (oms !== cookieHelper().get("oms")) clearBackendMode();
     cookieHelper().set("oms", oms, getDuration())
     omsRef.value = oms
   }
@@ -52,6 +76,7 @@ export function useAuth() {
   }
 
   const clearAuth = () => {
+    clearBackendMode();
     cookieHelper().remove("token");
     cookieHelper().remove("expirationTime");
     cookieHelper().remove("maarg");
@@ -92,6 +117,12 @@ export function useAuth() {
     let expiresAt = expirationTime
     try {
       if(!omsToken && username && password) {
+        const loginBaseURL = isMoquiOmsRef.value ? commonUtil.getMaargURL() : commonUtil.getOmsURL(false)
+        // No verified instance to sign in to, e.g. the entered OMS never answered checkLoginOptions.
+        if(!loginBaseURL) {
+          commonUtil.showToast(translate("Unable to reach the OMS. Check the OMS name and try again."));
+          return Promise.reject(new Error("OMS is not verified"));
+        }
         const resp = await api({
           url: isMoquiOmsRef.value ? "admin/login" : "login",
           method: "post",
@@ -102,16 +133,17 @@ export function useAuth() {
             "USERNAME": username,
             "PASSWORD": password
           },
-          baseURL: isMoquiOmsRef.value ? commonUtil.getMaargURL() : commonUtil.getOmsURL(false)
+          baseURL: loginBaseURL
         });
 
         if(commonUtil.hasError(resp)) {
-          commonUtil.showToast(translate("Sorry, your username or password is incorrect. Please try again."));
-          logger.error("error", resp.data._ERROR_MESSAGE_);
+          const serverError = commonUtil.getErrorMessage(resp);
+          logger.error("Failed to login", serverError);
+          commonUtil.showToast(`${translate("Failed to login.")} ${serverError}`);
           updateUserId("")
           updateToken("", "")
 
-          return Promise.reject(new Error(resp.data._ERROR_MESSAGE_));
+          return Promise.reject(new Error(serverError));
         }
 
         omsToken = resp.data.token
@@ -133,18 +165,23 @@ export function useAuth() {
 
       // Moqui login returns a non-2xx status (e.g. bad credentials), so axios rejects
       // before `hasError()` can inspect the body - surface that message here instead.
-      const loginErrorMessage = err?.response?.data?.errors;
-      commonUtil.showToast(loginErrorMessage ? translate(loginErrorMessage) : translate("Something went wrong while login. Please contact administrator."));
-      logger.error("error: ", err.toString());
+      const serverError = commonUtil.getErrorMessage(err);
+      logger.error("Failed to login", serverError);
+      commonUtil.showToast(`${translate("Failed to login.")} ${serverError}`);
 
-      return Promise.reject(loginErrorMessage ? new Error(loginErrorMessage) : (err instanceof Object ? err : new Error(err)));
+      return Promise.reject(new Error(serverError));
     }
   }
 
   const logout = async (payload?: any) => {
+    // Late requests after logout must not restart teardown or report a second expiry.
+    // Keep handling invalidation when this tab or an embedded app still has a token.
+    if (payload?.isUserUnauthorised && explicitlyLoggedOut && !token.value && !commonUtil.getToken()) return;
+
     let redirectionUrl = "";
 
     if(!payload?.isUserUnauthorised) {
+      explicitlyLoggedOut = true;
       emitter.emit("presentLoader", {
         message: "Logging out",
         backdropDismiss: false,
@@ -170,7 +207,8 @@ export function useAuth() {
         }
 
         let resp = await api(payload) as any;
-        resp = JSON.parse(resp.data.startsWith("//") ? resp.data.replace("//", "") : resp.data);
+        // OFBiz prefixes its JSON with "//", so axios leaves it as text; Maarg's arrives parsed.
+        resp = typeof resp.data === "string" ? JSON.parse(resp.data.startsWith("//") ? resp.data.replace("//", "") : resp.data) : resp.data;
 
         if(resp?.logoutAuthType == "SAML2SSO") {
           redirectionUrl = resp.logoutUrl;
@@ -226,8 +264,13 @@ export function useAuth() {
     emitter.emit("dismissLoader");
   }
 
+  // Resolves true only when the entered OMS answered checkLoginOptions. The maarg cookie is
+  // cleared first: it belongs to whichever OMS was verified last, and keeping it after a
+  // failed check would send the next login to that other instance.
   const fetchLoginOptions = async () => {
+    clearBackendMode();
     loginOption.value = {}
+    cookieHelper().remove("maarg")
     try {
       let resp;
       let isMoquiOms = commonUtil.isMoqui();
@@ -259,9 +302,13 @@ export function useAuth() {
         }
       }
 
-      isMoquiOmsRef.value = isMoquiOms
-
       if(!commonUtil.hasError(resp)) {
+        isMoquiOmsRef.value = isMoquiOms;
+        try {
+          localStorage.setItem(backendStorageKey, JSON.stringify({
+            oms: cookieHelper().get("oms"), isMoqui: isMoquiOms
+          }));
+        } catch { /* A storage restriction must not prevent login. */ }
         loginOption.value = resp.data
         if (resp.data.maargInstanceUrl) {
           // OFBiz deployment: OFBiz tells the PWA where its Moqui instance is
@@ -277,10 +324,12 @@ export function useAuth() {
             : omsVal
           cookieHelper().set("maarg", maargVal, getDuration())
         }
+        return true
       }
     } catch (error) {
       logger.error(error)
     }
+    return false
   };
 
   // Enforce the canonical URL for the resolved appVersion (accxuiConfig, so it's app-agnostic): redirect
@@ -289,6 +338,9 @@ export function useAuth() {
   // (not resolved yet — acting would risk a premature/looping redirect) or already canonical. Shared by
   // the router guard (every navigation) and fetchAppVersion (right after it resolves the version).
   const checkAppVersionRedirect = () => {
+    // First check of a signed-in page load: re-read the pin; fetchAppVersion redirects when it lands.
+    if(!appVersionFetched && isAuthenticated.value) void fetchAppVersion();
+
     const configuredVersion = accxuiConfig.value.appVersion;
     if(configuredVersion === undefined) return false;
 
@@ -300,6 +352,8 @@ export function useAuth() {
   };
 
   const fetchAppVersion = async () => {
+    // Any fetch (the Login page's included) counts for this page load, so the guard doesn't repeat it.
+    appVersionFetched = true;
     try {
       // appId (endpoint path) and environmentTypeId come from the single multi-version config object
       // (VITE_APP_VERSION_CONFIG), so they match this deployment's app rather than being hardcoded.
@@ -312,6 +366,8 @@ export function useAuth() {
           environmentTypeId
         }
       });
+      // An error body is a failure, not "no version configured": let the catch keep the resolved one.
+      if(commonUtil.hasError(resp)) throw resp.data;
 
       const appVersions = Array.isArray(resp.data) ? resp.data : resp.data?.docs;
       const configuredVersion = appVersions?.[0]?.currentVersion;
@@ -321,8 +377,9 @@ export function useAuth() {
       checkAppVersionRedirect();
     } catch (error) {
       // The call failed outright (endpoint unreachable/absent, or the config JSON was unparseable).
-      // Resolve to "" so the app runs unversioned at root instead of staying unresolved.
-      accxuiConfig.value.appVersion = "";
+      // Keep a version resolved earlier (a refresh while signed in must not drop a pinned user to root
+      // on a network blip); only a never-resolved one falls back to "" so the app runs at root.
+      if(accxuiConfig.value.appVersion === undefined) accxuiConfig.value.appVersion = "";
       checkAppVersionRedirect();
       logger.error(error);
     }
