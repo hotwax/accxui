@@ -31,8 +31,10 @@ on:
         default: main
         type: string
     secrets:
+      # Optional: the app and AccxUI repos are public, so the job's own token can read and clone them.
+      # Pass a PAT only when a source repository is private.
       envPAT:
-        required: true
+        required: false
       UAT_FIREBASE_SERVICE_ACCOUNT:
         required: false
       PROD_FIREBASE_SERVICE_ACCOUNT:
@@ -88,7 +90,7 @@ jobs:
         with:
           repository: hotwax/accxui
           ref: ${{ inputs.tools_ref }}
-          token: ${{ secrets.envPAT }}
+          token: ${{ secrets.envPAT || github.token }}
           persist-credentials: false
           sparse-checkout: scripts/hosting
       # A moving `main` is resolved once here; execute refuses a plan made with different tools.
@@ -105,7 +107,7 @@ jobs:
         run: npm install -g firebase-tools@15.34.1
       - name: Configure GitHub checkout authentication
         env:
-          GH_TOKEN: ${{ secrets.envPAT }}
+          GH_TOKEN: ${{ secrets.envPAT || github.token }}
         run: gh auth setup-git
       - name: Configure Firebase authentication
         env:
@@ -126,7 +128,7 @@ jobs:
           '
       - name: Run reviewed hosting operation
         env:
-          GH_TOKEN: ${{ secrets.envPAT }}
+          GH_TOKEN: ${{ secrets.envPAT || github.token }}
           STATE_TOKEN: ${{ github.token }}
           DEV_VUE_APP_FIREBASE_CONFIG: ${{ secrets.DEV_VUE_APP_FIREBASE_CONFIG }}
           DEV_VUE_APP_FIREBASE_VAPID_KEY: ${{ secrets.DEV_VUE_APP_FIREBASE_VAPID_KEY }}
