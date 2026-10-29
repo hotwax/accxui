@@ -139,6 +139,9 @@ export function configFor(plan, config) {
     next.redirects = (next.redirects || []).filter(
       (r) => !String(r.location || "").startsWith(prefix),
     );
+    next.headers = (next.headers || []).filter(
+      (h) => h.regex !== versionPattern(v),
+    );
   }
   if (["publish", "replace"].includes(plan.action)) {
     // Newly added versions get their routes; already-hosted ones keep the routes they have.
@@ -147,12 +150,13 @@ export function configFor(plan, config) {
       ...added.map((v) => ({ regex: versionPattern(v), path: `/${v}/index.html` })),
       ...(next.rewrites || []),
     ];
+    // First, so later rules (the immutable `**/assets/**` cache) still win for the version's files.
     next.headers = [
-      ...(next.headers || []),
       ...added.map((v) => ({
         regex: versionPattern(v),
         headers: { "Cache-Control": "no-cache" },
       })),
+      ...(next.headers || []),
     ];
   }
   // Company reads the version manifest cross-origin and must never get a cached copy.

@@ -211,7 +211,7 @@ test("publish routes are scoped and existing security/redirect rules survive", (
     planChange({ ...base, action: "publish", version: "v3.0.0" }),
     original,
   );
-  assert.deepEqual(next.headers[0], original.headers[0]);
+  assert.deepEqual(next.headers.at(-2), original.headers[0]);
   assert.deepEqual(next.redirects, original.redirects);
   assert.equal(
     new RegExp(next.rewrites[0].regex).test("/v3.0.0/products"),
@@ -257,6 +257,39 @@ test("replace drops routes of removed versions and adds routes only for new ones
     "/v2.0.0/index.html",
     "/index.html",
   ]);
+});
+test("a published version keeps the immutable cache on its assets", () => {
+  const original = {
+    headers: [
+      { source: "**", headers: [{ key: "Cache-Control", value: "no-cache" }] },
+      {
+        source: "**/assets/**",
+        headers: [{ key: "Cache-Control", value: "public,max-age=31536000,immutable" }],
+      },
+    ],
+  };
+  const next = configFor(
+    planChange({ ...base, action: "publish", version: "v3.0.0" }),
+    original,
+  );
+  // Firebase applies matching rules in order; the last Cache-Control wins.
+  const version = next.headers.findIndex(
+    (h) => h.regex && new RegExp(h.regex).test("/v3.0.0/assets/app.js"),
+  );
+  const assets = next.headers.findIndex((h) => h.source === "**/assets/**");
+  assert.ok(version >= 0 && version < assets);
+});
+test("removal drops the removed version's cache rule", () => {
+  const published = configFor(
+    planChange({ ...base, action: "publish", version: "v3.0.0" }),
+    {},
+  );
+  assert.equal(published.headers.some((h) => h.regex), true);
+  const next = configFor(
+    planChange({ ...base, hosted: ["v3.0.0", ...base.hosted], action: "remove", version: "v3.0.0" }),
+    published,
+  );
+  assert.equal(next.headers.some((h) => h.regex), false);
 });
 test("the version manifest always gets an uncached cross-origin header, once", () => {
   const plan = planChange({ ...base, action: "publish", version: "v3.0.0" });
