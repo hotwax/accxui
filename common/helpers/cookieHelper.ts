@@ -1,11 +1,13 @@
+export const cookieDomain = (hostname: string, isDevelopment: boolean) =>
+    !isDevelopment && (hostname === "hotwax.io" || hostname.endsWith(".hotwax.io"))
+        ? "; domain=hotwax.io" : "";
+
 export const cookieHelper = () => {
 
     // Function to set a cookie with an optional expiration
     const set = (name: string, value: string, maxAge?: number) => {
-        const hostname = window.location.hostname;
         // Shared HotWax sessions stay on HotWax hosts; previews need host-only cookies.
-        const domain = !import.meta.env.DEV && (hostname === "hotwax.io" || hostname.endsWith(".hotwax.io"))
-            ? "; domain=hotwax.io" : "";
+        const domain = cookieDomain(window.location.hostname, import.meta.env.DEV);
         let cookieString = `${encodeURIComponent(name)}=${encodeURIComponent(value)}; path=/; SameSite=Lax${domain}`;
         if (maxAge) {
             cookieString += `; max-age=${maxAge}`;
