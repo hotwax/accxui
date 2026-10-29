@@ -128,6 +128,8 @@ export function planChange({
   };
 }
 const versionPattern = (v) => `^/${v.replaceAll(".", "\\.")}(?:/.*)?$`;
+const isVersionRule = (h) =>
+  typeof h.regex === "string" && /^\^\/v[^/]+\(\?:\/\.\*\)\?\$$/.test(h.regex);
 export function configFor(plan, config) {
   const next = structuredClone(config || {});
   // Retain unrelated routing/security rules; remove rules aimed at deleted directories.
@@ -150,7 +152,6 @@ export function configFor(plan, config) {
       ...added.map((v) => ({ regex: versionPattern(v), path: `/${v}/index.html` })),
       ...(next.rewrites || []),
     ];
-    // First, so later rules (the immutable `**/assets/**` cache) still win for the version's files.
     next.headers = [
       ...added.map((v) => ({
         regex: versionPattern(v),
@@ -180,6 +181,13 @@ export function configFor(plan, config) {
       ...(next.rewrites || []),
     ];
   }
+  // Version cache rules go first, so later rules (the immutable `**/assets/**` cache) still win for
+  // the version's files. Every operation reorders them, which also repairs rules written after.
+  const headers = next.headers || [];
+  next.headers = [
+    ...headers.filter(isVersionRule),
+    ...headers.filter((h) => !isVersionRule(h)),
+  ];
   return next;
 }
 export function verifyFileChanges(before, after, plan, uploads) {

@@ -279,6 +279,20 @@ test("a published version keeps the immutable cache on its assets", () => {
   const assets = next.headers.findIndex((h) => h.source === "**/assets/**");
   assert.ok(version >= 0 && version < assets);
 });
+test("any operation moves existing version cache rules ahead of the assets rule", () => {
+  const assets = {
+    source: "**/assets/**",
+    headers: [{ key: "Cache-Control", value: "public,max-age=31536000,immutable" }],
+  };
+  const stale = { regex: "^/v1\\.0\\.0(?:/.*)?$", headers: { "Cache-Control": "no-cache" } };
+  for (const action of ["default", "publish", "rebuild"]) {
+    const next = configFor(
+      planChange({ ...base, action, version: action === "rebuild" ? null : "v1.0.0" }),
+      { headers: [assets, stale] },
+    );
+    assert.deepEqual(next.headers.slice(0, 2), [stale, assets], action);
+  }
+});
 test("removal drops the removed version's cache rule", () => {
   const published = configFor(
     planChange({ ...base, action: "publish", version: "v3.0.0" }),
