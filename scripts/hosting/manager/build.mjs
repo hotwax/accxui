@@ -84,6 +84,29 @@ export async function resolveBuild(gh, app, version) {
     config,
   };
 }
+// App build values come from secrets named per environment; UAT builds use the dev values, as the tag rollout does.
+export const BUILD_SECRETS = {
+  uat: {
+    VITE_FIREBASE_CONFIG: "DEV_VUE_APP_FIREBASE_CONFIG",
+    VITE_FIREBASE_VAPID_KEY: "DEV_VUE_APP_FIREBASE_VAPID_KEY",
+    VITE_SHOPIFY_SHOP_CONFIG: "DEV_SHOPIFY_SHOP_CONFIG",
+  },
+  prod: {
+    VITE_FIREBASE_CONFIG: "PROD_VUE_APP_FIREBASE_CONFIG",
+    VITE_FIREBASE_VAPID_KEY: "PROD_VUE_APP_FIREBASE_VAPID_KEY",
+    VITE_SHOPIFY_SHOP_CONFIG: "PROD_SHOPIFY_SHOP_CONFIG",
+    VITE_ALIAS: "PROD_OMS_ALIAS",
+    VITE_FARO_COLLECTOR_URL: "PROD_FARO_COLLECTOR_URL",
+    VITE_FARO_API_KEY: "PROD_FARO_API_KEY",
+  },
+};
+export function buildValues(environment, secrets = process.env) {
+  return Object.fromEntries(
+    Object.entries(BUILD_SECRETS[environment] || {})
+      .filter(([, name]) => secrets[name])
+      .map(([key, name]) => [key, secrets[name]]),
+  );
+}
 export async function buildRelease(
   app,
   source,
@@ -143,9 +166,7 @@ export async function buildRelease(
       buildVersion: rootBuild ? "" : source.version,
     }),
   };
-  // Public Firebase configuration stays server-side and is supplied by the operator for builds that need it.
-  for (const key of ["VITE_FIREBASE_CONFIG", "VITE_FIREBASE_VAPID_KEY"])
-    if (process.env[key]) env[key] = process.env[key];
+  Object.assign(env, buildValues(environment));
   if (env.VITE_FIREBASE_CONFIG) {
     const worker = path.join(appDir, "public/firebase-messaging-sw.js");
     let content;

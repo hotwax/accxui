@@ -33,9 +33,24 @@ on:
         required: false
       PROD_FIREBASE_SERVICE_ACCOUNT:
         required: false
-      VITE_FIREBASE_CONFIG:
+      # App build values per environment (UAT uses the DEV_* values); build.mjs maps them to VITE_* names.
+      DEV_VUE_APP_FIREBASE_CONFIG:
         required: false
-      VITE_FIREBASE_VAPID_KEY:
+      DEV_VUE_APP_FIREBASE_VAPID_KEY:
+        required: false
+      DEV_SHOPIFY_SHOP_CONFIG:
+        required: false
+      PROD_VUE_APP_FIREBASE_CONFIG:
+        required: false
+      PROD_VUE_APP_FIREBASE_VAPID_KEY:
+        required: false
+      PROD_SHOPIFY_SHOP_CONFIG:
+        required: false
+      PROD_OMS_ALIAS:
+        required: false
+      PROD_FARO_COLLECTOR_URL:
+        required: false
+      PROD_FARO_API_KEY:
         required: false
 jobs:
   hosting:
@@ -106,8 +121,15 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.envPAT }}
           STATE_TOKEN: ${{ github.token }}
-          VITE_FIREBASE_CONFIG: ${{ secrets.VITE_FIREBASE_CONFIG }}
-          VITE_FIREBASE_VAPID_KEY: ${{ secrets.VITE_FIREBASE_VAPID_KEY }}
+          DEV_VUE_APP_FIREBASE_CONFIG: ${{ secrets.DEV_VUE_APP_FIREBASE_CONFIG }}
+          DEV_VUE_APP_FIREBASE_VAPID_KEY: ${{ secrets.DEV_VUE_APP_FIREBASE_VAPID_KEY }}
+          DEV_SHOPIFY_SHOP_CONFIG: ${{ secrets.DEV_SHOPIFY_SHOP_CONFIG }}
+          PROD_VUE_APP_FIREBASE_CONFIG: ${{ inputs.environment == 'prod' && secrets.PROD_VUE_APP_FIREBASE_CONFIG || '' }}
+          PROD_VUE_APP_FIREBASE_VAPID_KEY: ${{ inputs.environment == 'prod' && secrets.PROD_VUE_APP_FIREBASE_VAPID_KEY || '' }}
+          PROD_SHOPIFY_SHOP_CONFIG: ${{ inputs.environment == 'prod' && secrets.PROD_SHOPIFY_SHOP_CONFIG || '' }}
+          PROD_OMS_ALIAS: ${{ inputs.environment == 'prod' && secrets.PROD_OMS_ALIAS || '' }}
+          PROD_FARO_COLLECTOR_URL: ${{ inputs.environment == 'prod' && secrets.PROD_FARO_COLLECTOR_URL || '' }}
+          PROD_FARO_API_KEY: ${{ inputs.environment == 'prod' && secrets.PROD_FARO_API_KEY || '' }}
           RM_OPERATION: ${{ inputs.operation }}
           RM_ENVIRONMENT: ${{ inputs.environment }}
           RM_REQUEST_ID: ${{ inputs.request_id }}

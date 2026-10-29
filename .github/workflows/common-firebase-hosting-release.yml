@@ -42,6 +42,8 @@ on:
         required: false
       VITE_FIREBASE_VAPID_KEY:
         required: false
+      SHOPIFY_SHOP_CONFIG:
+        required: false
 jobs:
   build_and_deploy:
     runs-on: ubuntu-latest
@@ -97,6 +99,7 @@ jobs:
           REUSE_HOSTED_VERSIONS: ${{ inputs.reuseHostedVersions }}
           VITE_FIREBASE_CONFIG: ${{ secrets.VITE_FIREBASE_CONFIG }}
           VITE_FIREBASE_VAPID_KEY: ${{ secrets.VITE_FIREBASE_VAPID_KEY }}
+          SHOPIFY_SHOP_CONFIG: ${{ secrets.SHOPIFY_SHOP_CONFIG }}
         run: |
           set -euo pipefail
 
@@ -109,6 +112,9 @@ jobs:
               if [ -f public/firebase-messaging-sw.js ]; then
                 sed -i "s|const firebaseConfig =.*|const firebaseConfig = $VITE_FIREBASE_CONFIG|g" public/firebase-messaging-sw.js
               fi
+            fi
+            if [ -n "$SHOPIFY_SHOP_CONFIG" ]; then
+              sed -i "s|^VITE_SHOPIFY_SHOP_CONFIG=.*|VITE_SHOPIFY_SHOP_CONFIG=$SHOPIFY_SHOP_CONFIG|g" .env
             fi
           }
 
@@ -129,7 +135,7 @@ jobs:
             fi
 
             # VITE_FIREBASE_* must NOT leak in the same way — .env holds the quote-stripped values.
-            ( unset VITE_FIREBASE_CONFIG VITE_FIREBASE_VAPID_KEY
+            ( unset VITE_FIREBASE_CONFIG VITE_FIREBASE_VAPID_KEY SHOPIFY_SHOP_CONFIG
               if [ -n "$cfg" ]; then export VITE_APP_VERSION_CONFIG="$cfg"; fi
               pnpm --filter ${{ inputs.appDir }} build )
 
