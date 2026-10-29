@@ -128,6 +128,8 @@ export function planChange({
   };
 }
 const versionPattern = (v) => `^/${v.replaceAll(".", "\\.")}(?:/.*)?$`;
+const isVersionRule = (h) =>
+  typeof h.regex === "string" && /^\^\/v[^/]+\(\?:\/\.\*\)\?\$$/.test(h.regex);
 export function configFor(plan, config) {
   const next = structuredClone(config || {});
   // Retain unrelated routing/security rules; remove rules aimed at deleted directories.
@@ -139,6 +141,9 @@ export function configFor(plan, config) {
     next.redirects = (next.redirects || []).filter(
       (r) => !String(r.location || "").startsWith(prefix),
     );
+    next.headers = (next.headers || []).filter(
+      (h) => h.regex !== versionPattern(v),
+    );
   }
   if (["publish", "replace"].includes(plan.action)) {
     // Newly added versions get their routes; already-hosted ones keep the routes they have.
@@ -148,11 +153,11 @@ export function configFor(plan, config) {
       ...(next.rewrites || []),
     ];
     next.headers = [
-      ...(next.headers || []),
       ...added.map((v) => ({
         regex: versionPattern(v),
         headers: { "Cache-Control": "no-cache" },
       })),
+      ...(next.headers || []),
     ];
   }
   // Company reads the version manifest cross-origin and must never get a cached copy.
@@ -176,6 +181,13 @@ export function configFor(plan, config) {
       ...(next.rewrites || []),
     ];
   }
+  // Version cache rules go first, so later rules (the immutable `**/assets/**` cache) still win for
+  // the version's files. Every operation reorders them, which also repairs rules written after.
+  const headers = next.headers || [];
+  next.headers = [
+    ...headers.filter(isVersionRule),
+    ...headers.filter((h) => !isVersionRule(h)),
+  ];
   return next;
 }
 export function verifyFileChanges(before, after, plan, uploads) {
