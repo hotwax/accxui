@@ -99,3 +99,29 @@ test("immutable plan lookup rejects branches and parses a git blob", async () =>
   );
   assert.equal(got.actor, "tester");
 });
+test("the Hosting fingerprint ignores map key order but not rule order or values", () => {
+  const snap = (headers, files = [{ path: "/index.html", hash: "a" }]) => ({
+    release: { name: "sites/s/channels/live/releases/1" },
+    version: { config: { headers } },
+    files,
+  });
+  const manifest = { "Cache-Control": "no-store", "Access-Control-Allow-Origin": "*" };
+  const assets = { glob: "**/assets/**", headers: { "Cache-Control": "immutable" } };
+  const base = fingerprint(snap([{ glob: "/hosted-versions.json", headers: manifest }, assets]));
+  // Same config read again, with Firebase returning the map keys in another order.
+  assert.equal(
+    fingerprint(
+      snap([{ headers: { "Access-Control-Allow-Origin": "*", "Cache-Control": "no-store" }, glob: "/hosted-versions.json" }, assets]),
+    ),
+    base,
+  );
+  assert.notEqual(fingerprint(snap([assets, { glob: "/hosted-versions.json", headers: manifest }])), base);
+  assert.notEqual(
+    fingerprint(snap([{ glob: "/hosted-versions.json", headers: { ...manifest, "Cache-Control": "no-cache" } }, assets])),
+    base,
+  );
+  assert.notEqual(
+    fingerprint(snap([{ glob: "/hosted-versions.json", headers: manifest }, assets], [{ path: "/index.html", hash: "b" }])),
+    base,
+  );
+});

@@ -70,12 +70,24 @@ export async function snapshot(api, site) {
     throw Error("The current Hosting file inventory is incomplete.");
   return { release, version, files };
 }
+// Firebase returns map fields (each header rule's `headers`) in no fixed key order, so object keys
+// are sorted; array order (rule precedence) still counts.
+const canonical = (value) =>
+  Array.isArray(value)
+    ? value.map(canonical)
+    : value && typeof value === "object"
+      ? Object.fromEntries(
+          Object.keys(value)
+            .sort()
+            .map((k) => [k, canonical(value[k])]),
+        )
+      : value;
 export const fingerprint = (s) =>
   createHash("sha256")
     .update(
       JSON.stringify({
         release: s.release.name,
-        config: s.version.config,
+        config: canonical(s.version.config),
         files: s.files.map((f) => [f.path, f.hash]).sort(),
       }),
     )
