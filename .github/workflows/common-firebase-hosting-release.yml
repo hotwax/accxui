@@ -269,7 +269,7 @@ jobs:
       - name: Refresh release-management inventory
         if: inputs.publishHostingInventory
         env:
-          GH_TOKEN: ${{ secrets.envPAT }}
+          GH_TOKEN: ${{ secrets.envPAT || github.token }}
           STATE_TOKEN: ${{ github.token }}
           RM_OPERATION: inventory
           RM_ENVIRONMENT: uat
