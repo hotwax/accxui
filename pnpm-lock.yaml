@@ -194,6 +194,9 @@ importers:
       '@capacitor/ios':
         specifier: 'catalog:'
         version: 8.2.0(@capacitor/core@8.2.0)
+      '@grafana/faro-web-sdk':
+        specifier: 'catalog:'
+        version: 2.11.0
       '@ionic/core':
         specifier: 'catalog:'
         version: 8.8.0
@@ -402,6 +405,9 @@ importers:
       '@capacitor/ios':
         specifier: 'catalog:'
         version: 8.2.0(@capacitor/core@8.2.0)
+      '@grafana/faro-web-sdk':
+        specifier: 'catalog:'
+        version: 2.11.0
       '@ionic/core':
         specifier: 'catalog:'
         version: 8.8.0
@@ -423,6 +429,9 @@ importers:
       mitt:
         specifier: 'catalog:'
         version: 3.0.1
+      pdfjs-dist:
+        specifier: 6.2.108
+        version: 6.2.108
       pinia:
         specifier: 3.0.4
         version: 3.0.4(typescript@6.0.2)(vue@3.5.30(typescript@6.0.2))
@@ -535,6 +544,9 @@ importers:
       axios-cache-adapter:
         specifier: 'catalog:'
         version: 2.7.3(axios@0.21.1)
+      comlink:
+        specifier: 'catalog:'
+        version: 4.4.2
       cron-parser:
         specifier: 'catalog:'
         version: 5.4.0
@@ -671,6 +683,9 @@ importers:
       firebase:
         specifier: 'catalog:'
         version: 10.3.1
+      ionicons:
+        specifier: 'catalog:'
+        version: 8.0.13
       luxon:
         specifier: 'catalog:'
         version: 3.7.2
@@ -729,6 +744,9 @@ importers:
       '@vue/test-utils':
         specifier: ^2.0.0-0
         version: 2.4.6
+      chrome-ide-trace:
+        specifier: ^0.1.0
+        version: 0.1.1(@vue/compiler-dom@3.5.30)(@vue/compiler-sfc@3.5.30)(vite@5.2.0(@types/node@24.13.3)(lightningcss@1.33.0)(terser@5.46.1))
       eslint:
         specifier: 'catalog:'
         version: 10.2.0(jiti@2.6.1)
@@ -889,6 +907,12 @@ importers:
       '@types/node-json-transform':
         specifier: 'catalog:'
         version: 1.0.0
+      '@zxing/browser':
+        specifier: 0.2.1
+        version: 0.2.1(@zxing/library@0.23.0)
+      '@zxing/library':
+        specifier: 0.23.0
+        version: 0.23.0
       axios:
         specifier: 'catalog:'
         version: 0.21.1
@@ -983,6 +1007,12 @@ importers:
       '@typescript-eslint/parser':
         specifier: ~5.26.0
         version: 5.26.0(eslint@10.2.0(jiti@2.6.1))(typescript@6.0.2)
+      '@vitejs/plugin-legacy':
+        specifier: 'catalog:'
+        version: 5.0.0(terser@5.48.0)(vite@5.2.0(@types/node@24.13.3)(lightningcss@1.33.0)(terser@5.48.0))
+      '@vitejs/plugin-vue':
+        specifier: 'catalog:'
+        version: 4.6.2(vite@5.2.0(@types/node@24.13.3)(lightningcss@1.33.0)(terser@5.48.0))(vue@3.5.30(typescript@6.0.2))
       '@vue/compiler-sfc':
         specifier: ^3.0.0-0
         version: 3.5.30
@@ -1010,9 +1040,15 @@ importers:
       typescript:
         specifier: 'catalog:'
         version: 6.0.2
+      vite:
+        specifier: 'catalog:'
+        version: 5.2.0(@types/node@24.13.3)(lightningcss@1.33.0)(terser@5.48.0)
       vite-plugin-pwa:
         specifier: 'catalog:'
-        version: 1.2.0(@vite-pwa/assets-generator@1.0.2)(vite@8.2.1(@types/node@24.13.3)(jiti@2.6.1)(terser@5.48.0))(workbox-build@6.6.0(@types/babel__core@7.20.5))(workbox-window@7.4.0)
+        version: 1.2.0(@vite-pwa/assets-generator@1.0.2)(vite@5.2.0(@types/node@24.13.3)(lightningcss@1.33.0)(terser@5.48.0))(workbox-build@6.6.0(@types/babel__core@7.20.5))(workbox-window@7.4.0)
+      vitest:
+        specifier: 'catalog:'
+        version: 1.3.1(@types/node@24.13.3)(jsdom@28.1.0)(lightningcss@1.33.0)(terser@5.48.0)
 
   apps/job-manager:
     dependencies:
@@ -1343,6 +1379,91 @@ importers:
       vue-tsc:
         specifier: 3.3.4
         version: 3.3.4(typescript@6.0.2)
+
+  apps/preorder:
+    dependencies:
+      '@capacitor/core':
+        specifier: 'catalog:'
+        version: 8.2.0
+      '@ionic/core':
+        specifier: 'catalog:'
+        version: 8.8.0
+      '@ionic/vue':
+        specifier: 'catalog:'
+        version: 8.8.0(@stencil/core@4.1.0)(vue-router@4.5.0(vue@3.5.30(typescript@6.0.2)))(vue@3.5.30(typescript@6.0.2))
+      '@ionic/vue-router':
+        specifier: 'catalog:'
+        version: 8.8.0(@stencil/core@4.1.0)(vue-router@4.5.0(vue@3.5.30(typescript@6.0.2)))(vue@3.5.30(typescript@6.0.2))
+      comlink:
+        specifier: 'catalog:'
+        version: 4.4.2
+      dexie:
+        specifier: 'catalog:'
+        version: 4.4.3
+      file-saver:
+        specifier: 'catalog:'
+        version: 2.0.5
+      ionicons:
+        specifier: 'catalog:'
+        version: 8.0.13
+      luxon:
+        specifier: 'catalog:'
+        version: 3.7.2
+      mitt:
+        specifier: 'catalog:'
+        version: 3.0.1
+      papaparse:
+        specifier: 'catalog:'
+        version: 5.5.3
+      pinia:
+        specifier: 3.0.4
+        version: 3.0.4(typescript@6.0.2)(vue@3.5.30(typescript@6.0.2))
+      pinia-plugin-persistedstate:
+        specifier: 'catalog:'
+        version: 4.7.1(pinia@3.0.4(typescript@6.0.2)(vue@3.5.30(typescript@6.0.2)))
+      qs:
+        specifier: 'catalog:'
+        version: 6.15.0
+      vue:
+        specifier: 'catalog:'
+        version: 3.5.30(typescript@6.0.2)
+      vue-logger-plugin:
+        specifier: 'catalog:'
+        version: 2.2.3
+      vue-router:
+        specifier: 'catalog:'
+        version: 4.5.0(vue@3.5.30(typescript@6.0.2))
+    devDependencies:
+      '@capacitor/cli':
+        specifier: 'catalog:'
+        version: 8.2.0
+      '@types/file-saver':
+        specifier: 'catalog:'
+        version: 2.0.7
+      '@types/luxon':
+        specifier: 'catalog:'
+        version: 3.7.1
+      '@types/papaparse':
+        specifier: 'catalog:'
+        version: 5.5.2
+      '@vitejs/plugin-legacy':
+        specifier: 'catalog:'
+        version: 5.0.0(terser@5.48.0)(vite@5.2.0(@types/node@24.13.3)(lightningcss@1.33.0)(terser@5.48.0))
+      '@vitejs/plugin-vue':
+        specifier: 'catalog:'
+        version: 4.6.2(vite@5.2.0(@types/node@24.13.3)(lightningcss@1.33.0)(terser@5.48.0))(vue@3.5.30(typescript@6.0.2))
+      eslint:
+        specifier: 'catalog:'
+        version: 10.2.0(jiti@2.6.1)
+      typescript:
+        specifier: 'catalog:'
+        version: 6.0.2
+      vite:
+        specifier: 'catalog:'
+        version: 5.2.0(@types/node@24.13.3)(lightningcss@1.33.0)(terser@5.48.0)
+      vite-plugin-pwa:
+        specifier: 'catalog:'
+        version: 1.2.0(@vite-pwa/assets-generator@1.0.2)(vite@5.2.0(@types/node@24.13.3)(lightningcss@1.33.0)(terser@5.48.0))(workbox-build@6.6.0(@types/babel__core@7.20.5))(workbox-window@7.4.0)
 
   apps/products:
     dependencies:
@@ -2709,6 +2830,12 @@ packages:
   '@firebase/webchannel-wrapper@0.10.2':
     resolution: {integrity: sha512-xDxhD9++451HuCv3xKBEdSYaArX9NcokODXZYH/MxGw1XFFOz7OKkTRItZ5wf6npBN/inwp8dUZCP7SpAg46yQ==}
 
+  '@grafana/faro-core@2.13.0':
+    resolution: {integrity: sha512-Zfmroynd3y/NRghfIYXGCAinIb7mIx8EhGBpC3WUYoJT/4nO/jWvbKBEpELP29Z7g1Ul2TlJwbmNa1yh3x3+uw==}
+
+  '@grafana/faro-web-sdk@2.11.0':
+    resolution: {integrity: sha512-oGwdqlFJkIrK6V45wDlPaggNXOJCcXRFobho0PBQvohAB4Y4UTyMH18Sr1Tznp3z6POr/zh7RUtB0L/iN2X+HA==}
+
   '@grpc/grpc-js@1.8.22':
     resolution: {integrity: sha512-oAjDdN7fzbUi+4hZjKG96MR6KTEubAeMpQEb+77qy+3r0Ua5xTFuie6JOLr4ZZgl5g+W5/uRTS2M1V8mVAFPuA==}
     engines: {node: ^8.13.0 || >=10.10.0}
@@ -3066,6 +3193,76 @@ packages:
   '@module-federation/webpack-bundler-runtime@0.7.7':
     resolution: {integrity: sha512-zqc41cCRUqwGwjAHoNPZUefEVnx/3xwzHrOSqlff7mwTmXcFh5Ua/AqJcwAPYF4bYOVvj87aQn8k71CgpbVb/g==}
 
+  '@napi-rs/canvas-android-arm64@1.0.13':
+    resolution: {integrity: sha512-trn7AaDzQ+yeeA0ezhkC7cB1ZDPtp4UYk0EvB5F8qtYL9jEVWtVrU30WOpI52DszoTxaTsCgf5PP4ZVaOlOIHQ==}
+    engines: {node: '>= 10'}
+    cpu: [arm64]
+    os: [android]
+
+  '@napi-rs/canvas-darwin-arm64@1.0.13':
+    resolution: {integrity: sha512-6Y2djEetL8copxfNK6hg7oig/xqTwOchv19hBOm+zBNdKc/02Z3kjZN5wrLzv/l5O04/bAQS6I/AlQpwBlXgPg==}
+    engines: {node: '>= 10'}
+    cpu: [arm64]
+    os: [darwin]
+
+  '@napi-rs/canvas-darwin-x64@1.0.13':
+    resolution: {integrity: sha512-OZoPwwu4TMMg8GTCFBrg8UFExwQTU/55i3uTC/izDat6PHE+ro9dimyQoOboFf91+NY7Pnn70ScR8f8I8+eZXw==}
+    engines: {node: '>= 10'}
+    cpu: [x64]
+    os: [darwin]
+
+  '@napi-rs/canvas-linux-arm-gnueabihf@1.0.13':
+    resolution: {integrity: sha512-dZSYaKROuswU2eUWG5aBKndNVe68elo1YX93xtRax7q658tj8rYE+HwduovWJgs6qwv1r1/CLR60nDeBbyjvyg==}
+    engines: {node: '>= 10'}
+    cpu: [arm]
+    os: [linux]
+
+  '@napi-rs/canvas-linux-arm64-gnu@1.0.13':
+    resolution: {integrity: sha512-W6FzYE8ADHI93In1vi80KBL6btDtAMuj50Ch5ptkWS8xuntyzbR4h5JDUmXoakxZn2yMInksudTEqVSWoFqFGg==}
+    engines: {node: '>= 10'}
+    cpu: [arm64]
+    os: [linux]
+
+  '@napi-rs/canvas-linux-arm64-musl@1.0.13':
+    resolution: {integrity: sha512-+6fQ+rR49hkAa4voh2stLIwQ+4t+gmoseM8Bc53/DlMXb73IKymDPWK9A/NtWeqTW4ijWppYuyuxS2hPI8tzNA==}
+    engines: {node: '>= 10'}
+    cpu: [arm64]
+    os: [linux]
+
+  '@napi-rs/canvas-linux-riscv64-gnu@1.0.13':
+    resolution: {integrity: sha512-17XEMO3t9RW/TtHtSFf2AkaSWuCWdzbPeidz7zrOFawHxoLSJCnpTI1hN5aUvrZNnkNNmt/vZVJCh0ryUaik3A==}
+    engines: {node: '>= 10'}
+    cpu: [riscv64]
+    os: [linux]
+
+  '@napi-rs/canvas-linux-x64-gnu@1.0.13':
+    resolution: {integrity: sha512-lc48IwknVHBsNzXn9Xs5OkUsRX38Ml3Z1aOybQ51mMEzZckm8+4A0qROlyYHEoBPzr1kL3IU8ZUAqDb7wtdX8w==}
+    engines: {node: '>= 10'}
+    cpu: [x64]
+    os: [linux]
+
+  '@napi-rs/canvas-linux-x64-musl@1.0.13':
+    resolution: {integrity: sha512-bGY1r26S2bs8UNFJcPWcCSNdCFbKep5PATsvtgtC9A5u6SRgr2/jJE/RlhHL5m9ZpixNDhVkLY/5h16Kx5V9YA==}
+    engines: {node: '>= 10'}
+    cpu: [x64]
+    os: [linux]
+
+  '@napi-rs/canvas-win32-arm64-msvc@1.0.13':
+    resolution: {integrity: sha512-2vRPBZoaIvJrUkDhZTE2Hn0YrnpJRCWVM3EJACoBKjuWI6WgPxGtUoRMsxRviCsyks8bKTSFdyw14CellnG2qA==}
+    engines: {node: '>= 10'}
+    cpu: [arm64]
+    os: [win32]
+
+  '@napi-rs/canvas-win32-x64-msvc@1.0.13':
+    resolution: {integrity: sha512-DUlW3lZPz63kYsf8mxgyyZuevhlH0T3/BGP9l+NazhB0F1+gL6D4hqZdnhZpw24DlWmTpATDcyYSZlJOi+DdfQ==}
+    engines: {node: '>= 10'}
+    cpu: [x64]
+    os: [win32]
+
+  '@napi-rs/canvas@1.0.13':
+    resolution: {integrity: sha512-b87ugZpQ5ViwqVBkjervxpwa0GmJPsKHLBNoZN6GpjWeHzTbDUGryriq+2DYW2XbB+xCqSIINQysC0/I87nPbw==}
+    engines: {node: '>= 10'}
+
   '@napi-rs/wasm-runtime@0.2.12':
     resolution: {integrity: sha512-ZVWUcfwY4E/yPitQJl481FjFo3K22D6qF0DuFH6Y/nbnE11GY5uguDxZMGXPQ8WQ0128MXQD7TnfHyK4oWoIJQ==}
 
@@ -3083,6 +3280,54 @@ packages:
 
   '@one-ini/wasm@0.1.1':
     resolution: {integrity: sha512-XuySG1E38YScSJoMlqovLru4KTUNSjgVTIjyh7qMX6aNN5HY5Ct5LhRJdxO79JtTzKfzV/bnWpz+zquYrISsvw==}
+
+  '@opentelemetry/api-logs@0.223.0':
+    resolution: {integrity: sha512-Oepm6etVPFCn0VWB1t833iOTgz1eYBDUPxcrOR/XvwzD1+Ag9VzSPSrrKAFNJ/haatj+8CXbG47pZXvdNQKDJw==}
+    engines: {node: '>=8.0.0'}
+
+  '@opentelemetry/api@1.10.0':
+    resolution: {integrity: sha512-lMkyes8iHrG+mk6WH7X70MdCLI2RS0FwNBY1PyQ8UemaijE2m5mv5A0Niy3HtbYTFrgkUEQjFMXmSAk2hQDuPQ==}
+    engines: {node: '>=8.0.0'}
+
+  '@opentelemetry/core@2.12.0':
+    resolution: {integrity: sha512-1HsSAuvT4/my0QrXWsyXFdWjKaPeCHsismKZgEEIb8NK13LP6DrMRlsUbvD/0F9mDWK3xDom9AMv3IscxgOnOQ==}
+    engines: {node: ^18.19.0 || >=20.6.0}
+    peerDependencies:
+      '@opentelemetry/api': '>=1.0.0 <1.10.0'
+
+  '@opentelemetry/otlp-transformer@0.223.0':
+    resolution: {integrity: sha512-oxmmPL5/MbSsO8K588V9n/XLIe7FZTK30Fo+/U/lAnt0ZIK/hoPM03n2WpSTZVbUBGTUE7aLyxnAzh7nE2PD4Q==}
+    engines: {node: ^18.19.0 || >=20.6.0}
+    peerDependencies:
+      '@opentelemetry/api': ^1.3.0
+
+  '@opentelemetry/resources@2.12.0':
+    resolution: {integrity: sha512-+rSRoOdln6NhXTVcBdHSlZxJDNzwxadeweK2ltZO3tVtfp6aklABc06xclDk6ovRR+EiGgIcSbh/6NgjFhnb3A==}
+    engines: {node: ^18.19.0 || >=20.6.0}
+    peerDependencies:
+      '@opentelemetry/api': '>=1.3.0 <1.10.0'
+
+  '@opentelemetry/sdk-logs@0.223.0':
+    resolution: {integrity: sha512-ApiAfUiUh6fmJt1GbsBuoeDn8D8IL42UvGyPUr8o1Z89ZeIiOCE1rZ78KkIUjEX3OV8Oorl9ez5Qjo43ZynDyw==}
+    engines: {node: ^18.19.0 || >=20.6.0}
+    peerDependencies:
+      '@opentelemetry/api': '>=1.4.0 <1.10.0'
+
+  '@opentelemetry/sdk-metrics@2.12.0':
+    resolution: {integrity: sha512-mVMaEHwCUJuY3S4Esn+nT0yQA3qCEGh+SOPJsXygU0Gl453WcsDNjtEa8EfdewMwoLyr1tlofB4fXytVpiXuow==}
+    engines: {node: ^18.19.0 || >=20.6.0}
+    peerDependencies:
+      '@opentelemetry/api': '>=1.9.0 <1.10.0'
+
+  '@opentelemetry/sdk-trace@2.12.0':
+    resolution: {integrity: sha512-ImVuRQ6faOsTi1Wna88s2avgrrf/iDgXPigIeynkUhjstMuoQUDOJXgkez2j1mlU4btjXcXBGa+q7qKFYR3GsA==}
+    engines: {node: ^18.19.0 || >=20.6.0}
+    peerDependencies:
+      '@opentelemetry/api': '>=1.3.0 <1.10.0'
+
+  '@opentelemetry/semantic-conventions@1.44.0':
+    resolution: {integrity: sha512-E3JkOlMBi3N8OGGkbl7tFyqk2MAS6/lySRZBK3Mu7AzjF1fT8oIChH9ChE48SUWzDn9Kdwta+G/p5LJ4xW4CLQ==}
+    engines: {node: '>=14'}
 
   '@originjs/vite-plugin-federation@1.4.1':
     resolution: {integrity: sha512-Uo08jW5pj1t58OUKuZNkmzcfTN2pqeVuAWCCiKf/75/oll4Efq4cHOqSE1FXMlvwZNGDziNdDyBbQ5IANem3CQ==}
@@ -3971,9 +4216,18 @@ packages:
   '@xtuc/long@4.2.2':
     resolution: {integrity: sha512-NuHqBY1PB/D8xU6s/thBgOAiAP7HOYDQ32+BFZILJ8ivkUkAHQnWfn6WhL79Owj1qmUnoN/YPhktdIoucipkAQ==}
 
+  '@zxing/browser@0.2.1':
+    resolution: {integrity: sha512-92pVfVDUXbc15xu9vIEmhNyqIEASMEkDF92CwT6T+7sg2EHXJRktH9CQKoQSXe51UtbNsj+Fm09H/JBWHMs/Sw==}
+    peerDependencies:
+      '@zxing/library': ^0.23.0
+
   '@zxing/library@0.19.3':
     resolution: {integrity: sha512-RUv5svewpDoD0ymXleOP8yVTO5BLkR0zn5coGC/Vs1671u0OBJ4xdtR8WVWf08OcvrieEMHdSfQY3ZKtqII/hg==}
     engines: {node: '>= 10.4.0'}
+
+  '@zxing/library@0.23.0':
+    resolution: {integrity: sha512-6fkkoFwP8CHxl6ugnPsj74PLJgX2iRv5zczGAyt5OBzQgxFhuhF0NCEc4t4OvSr8xAv2MRLlI0Iu9ZGDZQ2urA==}
+    engines: {node: '>= 24.0.0'}
 
   '@zxing/text-encoding@0.9.0':
     resolution: {integrity: sha512-U/4aVJ2mxI0aDNI8Uq0wEhMgY+u4CNtEb0om3+y3+niDAsoTCOB33UF0sxpzqzdqXLqmvc+vZyAt4O8pPdfkwA==}
@@ -4612,9 +4866,6 @@ packages:
   detect-libc@2.1.2:
     resolution: {integrity: sha512-Btj2BOOO83o3WyH59e8MgXsxEQVcarkUOpEYrubB0urwnN10yQ364rsiByU11nZlqWYZm05i/of7io4mzihBtQ==}
     engines: {node: '>=8'}
-
-  dexie@4.0.7:
-    resolution: {integrity: sha512-M+Lo6rk4pekIfrc2T0o2tvVJwL6EAAM/B78DNfb8aaxFVoI1f8/rz5KTxuAnApkwqTSuxx7T5t0RKH7qprapGg==}
 
   dexie@4.4.3:
     resolution: {integrity: sha512-N+3IGQ3HPlyO2YAkntGAwitm42BpBGV86MttzUMiRzWLa4NGh0pltVRcUVF4ybL/OnXjCrr9k7SDPIKkFYP2Lg==}
@@ -6205,6 +6456,10 @@ packages:
   pathval@1.1.1:
     resolution: {integrity: sha512-Dp6zGqpTdETdR63lehJYPeIOqpiNBNtc7BpWSLrOje7UaIsE5aY92r/AunQA7rsXvet3lrJ3JnZX29UPTKXyKQ==}
 
+  pdfjs-dist@6.2.108:
+    resolution: {integrity: sha512-YxFb+SQcodN2rnX9Tn3dHYlqfb7NjlzzfONPpJd+AKoKtUjEdevTfbC07d5TcczzOK6261auRkP/M8OBHs9vFQ==}
+    engines: {node: '>=22.13.0 || >=24'}
+
   pend@1.2.0:
     resolution: {integrity: sha512-F3asv42UuXchdzt+xXqfW1OGlVBe+mxa2mqI0pg5yAHZPvFmY3Y6drSf/GQ1A86WgWEN9Kzh/WrgKa6iGcHXLg==}
 
@@ -7000,6 +7255,10 @@ packages:
     engines: {node: '>=14.17'}
     hasBin: true
 
+  ua-parser-js@1.0.41:
+    resolution: {integrity: sha512-LbBDqdIC5s8iROCUjMbW1f5dJQTEFB1+KO9ogbvlb3nm9n4YHa5p4KTvFPWvh2Hs8gZMBuiB1/8+pdfe/tDPug==}
+    hasBin: true
+
   uc.micro@1.0.6:
     resolution: {integrity: sha512-8Y75pvTYkLJW2hWQHXxoqRgV7qb9B+9vFEtidML+7koHUFapnVJAZ6cKs+Qjz5Aw3aZWHMC6u0wJE3At+nSGwA==}
 
@@ -7367,6 +7626,9 @@ packages:
 
   web-vitals@3.5.2:
     resolution: {integrity: sha512-c0rhqNcHXRkY/ogGDJQxZ9Im9D19hDihbzSQJrsioex+KnFgmMzBiy57Z1EjkhX/+OjyBpclDCzz2ITtjokFmg==}
+
+  web-vitals@6.2.3:
+    resolution: {integrity: sha512-Dmy+vdO1UPMqXiAtZSNayhl4f794Bxfd94W4HIj2HlYtczEQfEOon969memlcpcHrTuOKLa5baFjX7WbgmOq+A==}
 
   webidl-conversions@3.0.1:
     resolution: {integrity: sha512-2JAn3z8AR6rjK8Sm8orRC0h/bcl/DqL7tRPdGZ4I1CjdF+EaMLmYxBHyXuKL849eucPFhvBoxMsflfOb8kxaeQ==}
@@ -8976,6 +9238,17 @@ snapshots:
 
   '@firebase/webchannel-wrapper@0.10.2': {}
 
+  '@grafana/faro-core@2.13.0':
+    dependencies:
+      '@opentelemetry/api': 1.10.0
+      '@opentelemetry/otlp-transformer': 0.223.0(@opentelemetry/api@1.10.0)
+
+  '@grafana/faro-web-sdk@2.11.0':
+    dependencies:
+      '@grafana/faro-core': 2.13.0
+      ua-parser-js: 1.0.41
+      web-vitals: 6.2.3
+
   '@grpc/grpc-js@1.8.22':
     dependencies:
       '@grpc/proto-loader': 0.7.15
@@ -9496,6 +9769,54 @@ snapshots:
       '@module-federation/runtime': 0.7.7
       '@module-federation/sdk': 0.7.7
 
+  '@napi-rs/canvas-android-arm64@1.0.13':
+    optional: true
+
+  '@napi-rs/canvas-darwin-arm64@1.0.13':
+    optional: true
+
+  '@napi-rs/canvas-darwin-x64@1.0.13':
+    optional: true
+
+  '@napi-rs/canvas-linux-arm-gnueabihf@1.0.13':
+    optional: true
+
+  '@napi-rs/canvas-linux-arm64-gnu@1.0.13':
+    optional: true
+
+  '@napi-rs/canvas-linux-arm64-musl@1.0.13':
+    optional: true
+
+  '@napi-rs/canvas-linux-riscv64-gnu@1.0.13':
+    optional: true
+
+  '@napi-rs/canvas-linux-x64-gnu@1.0.13':
+    optional: true
+
+  '@napi-rs/canvas-linux-x64-musl@1.0.13':
+    optional: true
+
+  '@napi-rs/canvas-win32-arm64-msvc@1.0.13':
+    optional: true
+
+  '@napi-rs/canvas-win32-x64-msvc@1.0.13':
+    optional: true
+
+  '@napi-rs/canvas@1.0.13':
+    optionalDependencies:
+      '@napi-rs/canvas-android-arm64': 1.0.13
+      '@napi-rs/canvas-darwin-arm64': 1.0.13
+      '@napi-rs/canvas-darwin-x64': 1.0.13
+      '@napi-rs/canvas-linux-arm-gnueabihf': 1.0.13
+      '@napi-rs/canvas-linux-arm64-gnu': 1.0.13
+      '@napi-rs/canvas-linux-arm64-musl': 1.0.13
+      '@napi-rs/canvas-linux-riscv64-gnu': 1.0.13
+      '@napi-rs/canvas-linux-x64-gnu': 1.0.13
+      '@napi-rs/canvas-linux-x64-musl': 1.0.13
+      '@napi-rs/canvas-win32-arm64-msvc': 1.0.13
+      '@napi-rs/canvas-win32-x64-msvc': 1.0.13
+    optional: true
+
   '@napi-rs/wasm-runtime@0.2.12':
     dependencies:
       '@emnapi/core': 1.9.1
@@ -9516,6 +9837,56 @@ snapshots:
       fastq: 1.20.1
 
   '@one-ini/wasm@0.1.1': {}
+
+  '@opentelemetry/api-logs@0.223.0':
+    dependencies:
+      '@opentelemetry/api': 1.10.0
+
+  '@opentelemetry/api@1.10.0': {}
+
+  '@opentelemetry/core@2.12.0(@opentelemetry/api@1.10.0)':
+    dependencies:
+      '@opentelemetry/api': 1.10.0
+      '@opentelemetry/semantic-conventions': 1.44.0
+
+  '@opentelemetry/otlp-transformer@0.223.0(@opentelemetry/api@1.10.0)':
+    dependencies:
+      '@opentelemetry/api': 1.10.0
+      '@opentelemetry/api-logs': 0.223.0
+      '@opentelemetry/core': 2.12.0(@opentelemetry/api@1.10.0)
+      '@opentelemetry/resources': 2.12.0(@opentelemetry/api@1.10.0)
+      '@opentelemetry/sdk-logs': 0.223.0(@opentelemetry/api@1.10.0)
+      '@opentelemetry/sdk-metrics': 2.12.0(@opentelemetry/api@1.10.0)
+      '@opentelemetry/sdk-trace': 2.12.0(@opentelemetry/api@1.10.0)
+
+  '@opentelemetry/resources@2.12.0(@opentelemetry/api@1.10.0)':
+    dependencies:
+      '@opentelemetry/api': 1.10.0
+      '@opentelemetry/core': 2.12.0(@opentelemetry/api@1.10.0)
+      '@opentelemetry/semantic-conventions': 1.44.0
+
+  '@opentelemetry/sdk-logs@0.223.0(@opentelemetry/api@1.10.0)':
+    dependencies:
+      '@opentelemetry/api': 1.10.0
+      '@opentelemetry/api-logs': 0.223.0
+      '@opentelemetry/core': 2.12.0(@opentelemetry/api@1.10.0)
+      '@opentelemetry/resources': 2.12.0(@opentelemetry/api@1.10.0)
+      '@opentelemetry/semantic-conventions': 1.44.0
+
+  '@opentelemetry/sdk-metrics@2.12.0(@opentelemetry/api@1.10.0)':
+    dependencies:
+      '@opentelemetry/api': 1.10.0
+      '@opentelemetry/core': 2.12.0(@opentelemetry/api@1.10.0)
+      '@opentelemetry/resources': 2.12.0(@opentelemetry/api@1.10.0)
+
+  '@opentelemetry/sdk-trace@2.12.0(@opentelemetry/api@1.10.0)':
+    dependencies:
+      '@opentelemetry/api': 1.10.0
+      '@opentelemetry/core': 2.12.0(@opentelemetry/api@1.10.0)
+      '@opentelemetry/resources': 2.12.0(@opentelemetry/api@1.10.0)
+      '@opentelemetry/semantic-conventions': 1.44.0
+
+  '@opentelemetry/semantic-conventions@1.44.0': {}
 
   '@originjs/vite-plugin-federation@1.4.1':
     dependencies:
@@ -10541,7 +10912,19 @@ snapshots:
   '@xtuc/long@4.2.2':
     optional: true
 
+  '@zxing/browser@0.2.1(@zxing/library@0.23.0)':
+    dependencies:
+      '@zxing/library': 0.23.0
+    optionalDependencies:
+      '@zxing/text-encoding': 0.9.0
+
   '@zxing/library@0.19.3':
+    dependencies:
+      ts-custom-error: 3.3.1
+    optionalDependencies:
+      '@zxing/text-encoding': 0.9.0
+
+  '@zxing/library@0.23.0':
     dependencies:
       ts-custom-error: 3.3.1
     optionalDependencies:
@@ -10904,6 +11287,12 @@ snapshots:
       '@vue/compiler-sfc': 3.5.30
       vite: 5.2.0(@types/node@22.19.15)(lightningcss@1.33.0)(terser@5.46.1)
 
+  chrome-ide-trace@0.1.1(@vue/compiler-dom@3.5.30)(@vue/compiler-sfc@3.5.30)(vite@5.2.0(@types/node@24.13.3)(lightningcss@1.33.0)(terser@5.46.1)):
+    dependencies:
+      '@vue/compiler-dom': 3.5.30
+      '@vue/compiler-sfc': 3.5.30
+      vite: 5.2.0(@types/node@24.13.3)(lightningcss@1.33.0)(terser@5.46.1)
+
   chrome-trace-event@1.0.4:
     optional: true
 
@@ -11202,8 +11591,6 @@ snapshots:
   destroy@1.2.0: {}
 
   detect-libc@2.1.2: {}
-
-  dexie@4.0.7: {}
 
   dexie@4.4.3: {}
 
@@ -12977,6 +13364,10 @@ snapshots:
 
   pathval@1.1.1: {}
 
+  pdfjs-dist@6.2.108:
+    optionalDependencies:
+      '@napi-rs/canvas': 1.0.13
+
   pend@1.2.0: {}
 
   perfect-debounce@1.0.0: {}
@@ -13850,6 +14241,8 @@ snapshots:
 
   typescript@6.0.2: {}
 
+  ua-parser-js@1.0.41: {}
+
   uc.micro@1.0.6: {}
 
   ufo@1.6.3: {}
@@ -14415,6 +14808,8 @@ snapshots:
     optional: true
 
   web-vitals@3.5.2: {}
+
+  web-vitals@6.2.3: {}
 
   webidl-conversions@3.0.1: {}
 
