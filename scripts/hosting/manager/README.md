@@ -1,6 +1,6 @@
 # App hosting workflows
 
-The Release Management UI uses the signed-in user's GitHub token to dispatch a thin workflow in the app repo. That workflow calls `common-app-hosting.yml` and pins both the reusable workflow and `tools_ref` to the same full AccxUI commit SHA. Firebase credentials remain in the Actions environment. `pnpm deploy:app` (`scripts/hosting/deploy-app.mjs`) dispatches the same workflow from the command line with the signed-in GitHub CLI user, so local deploys follow the same plan and execute steps.
+The Release Management UI uses the signed-in user's GitHub token to dispatch a thin workflow in the app repo. That workflow calls `common-app-hosting.yml@main` with `tools_ref: main` (a full AccxUI commit SHA also works, to pin both). The run resolves the tools to an exact commit and binds the plan to it, so if `main` moves between plan and execute, execute refuses and asks for a new plan. Firebase credentials remain in the Actions environment. `pnpm deploy:app` (`scripts/hosting/deploy-app.mjs`) dispatches the same workflow from the command line with the signed-in GitHub CLI user, so local deploys follow the same plan and execute steps.
 
 ## Contract
 

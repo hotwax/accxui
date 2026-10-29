@@ -26,8 +26,9 @@ on:
       confirmation:
         type: string
         default: ""
+      # `main` or a full AccxUI commit SHA. Plans are bound to the exact commit it resolves to.
       tools_ref:
-        required: true
+        default: main
         type: string
     secrets:
       envPAT:
@@ -80,7 +81,7 @@ jobs:
             const e=process.env;
             if(!/^hotwax\/[a-z0-9-]+$/.test(e.GITHUB_REPOSITORY)||!/^refs\/heads\//.test(e.GITHUB_REF)||e.GITHUB_REF!==`refs/heads/${e.RM_DEFAULT_BRANCH}`)throw Error("Use the app default branch");
             if(!["uat","prod"].includes(e.RM_ENVIRONMENT)||!["inventory","plan","execute"].includes(e.RM_OPERATION))throw Error("Invalid operation");
-            if(!/^[a-f0-9]{40}$/.test(e.RM_TOOLS_REF))throw Error("Pin hosting tools to a full commit SHA");
+            if(e.RM_TOOLS_REF!=="main"&&!/^[a-f0-9]{40}$/.test(e.RM_TOOLS_REF))throw Error("Use main or a full commit SHA for the hosting tools");
             if(e.RM_ENVIRONMENT==="prod"&&e.RM_PRODUCTION_ENABLED!=="true")throw Error("Production management is disabled");
           '
       - uses: actions/checkout@v4
@@ -90,6 +91,9 @@ jobs:
           token: ${{ secrets.envPAT }}
           persist-credentials: false
           sparse-checkout: scripts/hosting
+      # A moving `main` is resolved once here; execute refuses a plan made with different tools.
+      - name: Record hosting tools commit
+        run: echo "RM_TOOLS_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -141,7 +145,6 @@ jobs:
           RM_DEFAULT_VERSION: ${{ inputs.default_version }}
           RM_PLAN_SHA: ${{ inputs.plan_sha }}
           RM_CONFIRMATION: ${{ inputs.confirmation }}
-          RM_TOOLS_SHA: ${{ inputs.tools_ref }}
           RM_PRODUCTION_ENABLED: ${{ vars.APP_HOSTING_PROD_ENABLED }}
           RM_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: node scripts/hosting/manager/run.mjs
