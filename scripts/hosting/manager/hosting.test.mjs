@@ -109,6 +109,37 @@ test("publish uploads scoped files, verifies preservation, then releases", async
     1,
   );
 });
+test("file names with spaces publish", async () => {
+  const client = model();
+  await applyHosting(
+    client,
+    { site: "demo" },
+    before,
+    planChange({ ...base, action: "publish", version: "v3.0.0" }),
+    new Map([
+      ["/v3.0.0/index.html", Buffer.from("version")],
+      ["/v3.0.0/img/icons/Job manager.png", Buffer.from("icon")],
+    ]),
+    () => {},
+  );
+  assert.ok(client.calls.some((c) => c.method === "POST" && c.url.endsWith("/releases")));
+});
+test("an unsafe file name is rejected before anything is cloned", async () => {
+  const client = model();
+  await assert.rejects(
+    () =>
+      applyHosting(
+        client,
+        { site: "demo" },
+        before,
+        planChange({ ...base, action: "publish", version: "v3.0.0" }),
+        new Map([["/v3.0.0/a#b.js", Buffer.from("x")]]),
+        () => {},
+      ),
+    /Unsafe artifact path: "\/v3\.0\.0\/a#b\.js"/,
+  );
+  assert.equal(client.calls.some((c) => c.url.includes("versions:clone")), false);
+});
 for (const staleAt of [1, 2])
   test(`channel movement at checkpoint ${staleAt} prevents publication`, async () => {
     const client = model({ staleAt });

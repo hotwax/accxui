@@ -20,6 +20,15 @@ export async function applyHosting(
       );
   };
   await unchanged();
+  // Checked before cloning so a bad build leaves nothing behind. Spaces are allowed (Firebase serves
+  // them URL-encoded, e.g. Job Manager's "Job manager.png"); characters a URL path cannot carry are not.
+  for (const file of artifacts.keys())
+    if (
+      !file.startsWith("/") ||
+      /[\\%?#\x00-\x1f\x7f]/.test(file) ||
+      file.split("/").some((p) => p === "." || p === "..")
+    )
+      throw Error(`Unsafe artifact path: ${JSON.stringify(file)}`);
   // Removed versions go away; replaced versions are cleared so stale hashed assets do not survive.
   const exclusions = [...plan.removed, ...(plan.replaced || [])];
   let operation = await api("POST", `/sites/${target.site}/versions:clone`, {
@@ -46,12 +55,6 @@ export async function applyHosting(
   const blobs = new Map(),
     digests = new Map();
   for (const [file, bytes] of artifacts) {
-    if (
-      !file.startsWith("/") ||
-      /[\\%?#\x00-\x20]/.test(file) ||
-      file.split("/").some((p) => p === "." || p === "..")
-    )
-      throw Error("Unsafe artifact path.");
     const compressed = gzipSync(bytes, { level: 9 }),
       digest = hash(compressed);
     blobs.set(digest, compressed);
