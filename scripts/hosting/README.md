@@ -2,7 +2,7 @@
 
 Run `node scripts/hosting/prepare.mjs apps/<app>` after the complete Firebase
 hosting tree and rewrites have been assembled. Both shared deployment workflows
-and `scripts/deploy.sh` do this. PR builds exercise the same preparation step.
+do this, and the hosting manager adds the same retirement worker to every build. PR builds exercise the same preparation step.
 It uses Node builtins and does not change an app's dependencies or pinned framework.
 The release workflow checks out the current hosting tools separately because it
 switches the framework checkout between historical refs while building tags.
@@ -62,60 +62,25 @@ The helper uses the pinned Firebase CLI's authentication and Hosting API client.
 For a read-only local trial, use `FIREBASE_ACCOUNT` with an existing CLI login;
 `FIREBASE_TOOLS_LIB` can point to that installation's `firebase-tools/lib` directory.
 
-## Publish versions while preserving the default
+## Deploying with `pnpm deploy:app`
 
-`pnpm deploy:app --publish-only --app products --environment uat --versions v1.0.0 --channel live`
-prints and saves a read-only plan. Add `--execute` to build and publish. Production execution also
-requires `--confirm-production <exact-site-id>`. A plan does not build or write to Firebase.
+`pnpm deploy:app` no longer builds or deploys from the local machine. It starts the app's
+`manage-app-hosting.yml` workflow in GitHub Actions, shows the reviewed plan, asks for confirmation and
+follows the execute run (see `manager/README.md`). Builds therefore use the same pinned app and AccxUI
+commits and the same GitHub secrets as the tag rollout and Release Management; there are no local
+environment files.
 
-This opt-in path does not run the normal root-building deployment. It snapshots the channel,
-skips already-hosted version directories, builds each additional published stable release against
-its recorded AccxUI pin in isolated worktrees, clones the existing Hosting version, and uploads
-only new version-prefixed files. It preserves every existing file hash and the complete root
-configuration. Only the new prefixes gain rewrites and cache headers. No instance setting is
-read or written by the publisher. Authentication uses the installed Firebase CLI session, or the
-existing CI Firebase secret; credentials are never saved in the plan.
+- `pnpm deploy:app` (or `--count N`): the site becomes the latest patch of the newest N minors, with the
+  latest release at root. Versions outside that set are removed.
+- `pnpm deploy:app --versions v3.5.0,v3.4.2 --default v3.4.2`: the site becomes exactly the listed
+  versions, with the chosen Default (one of them) at root.
+- `pnpm deploy:app --publish-only --versions v3.6.0,v3.4.2`: adds new versions and rebuilds listed versions
+  that are already hosted. The root and unlisted versions are untouched.
+- `--app <app> --environment dev|uat|prod` skips the prompts. Dev re-runs the latest merge deployment of the
+  default branch; versioned builds are UAT and production only.
 
-Before final release it verifies all old hashes, the new files and the planned configuration,
-and checks that the channel has not advanced. A repeat publication skips existing versions;
-it cannot overwrite them or prune old releases. Files and plans remain under `apps/_worktrees/`
-for inspection. Existing service workers are left byte-for-byte
-unchanged; Company's URL checks discover newly published GitHub release versions independently.
+The site must already have a deployment, the app must be onboarded (`.github/app-hosting.json` and
+`manage-app-hosting.yml`), and production must be enabled for the app. Requires the GitHub CLI with
+Actions write access to the app repository.
 
-Preflight the actual customer instance settings before publishing: a pin to a previously absent
-version could become active once its URL is added. Also check the environment compiled into the
-current default; retaining an AppEnvDev default does not migrate it to AppEnvProd. Serialize all
-releases to the site: Firebase release creation has no compare-and-swap precondition, so the
-last-read check cannot protect against an independent deployment racing in that final instant.
-The Products manual UAT test uses the same GitHub release concurrency group as normal releases.
-
-Testing: `node --test scripts/hosting/*.test.mjs`. `prepare-publish-test.mjs` makes a one-day Products
-UAT preview, omitting one already-hosted release only in the preview. Publish that release into the
-preview, verify its deep links and all preserved hashes, and verify the live release is unchanged.
-This is a hosted UAT test; it does not change the main UAT default or any production deployment.
-## Local release build preflight
-
-Run `pnpm deploy:app --build-only` from the framework root to prepare an app for
-Dev, UAT or Prod without calling Firebase (including login). The same interactive
-app, environment and retained-version choices apply. Each app tag's
-`firebase-hosting-release.yml` supplies its `accxuiVersion`; releases without that
-input use the caller's framework commit. Missing refs and frozen-lockfile install
-failures stop the build.
-
-The script creates isolated framework and nested app worktrees beneath
-`apps/_worktrees/deploy-<app>-<environment>.*`. It does not switch or edit the
-caller checkouts. These worktrees remain available after success or failure for
-inspection; `build-versions.tsv` records the exact app and framework revisions.
-The nested app contains `dist/`, generated Firebase configuration and a hosted
-version manifest with the selected environment. Keep the generated environment
-file private. Remove the worktrees through Git after the artifact is no longer
-needed, following the repository's cleanup rules.
-
-Normal `pnpm deploy:app` uses the same preparation, then asks whether to deploy.
-Production additionally requires typing `deploy` after the build. Firebase gets
-an explicit project, config path and environment Hosting target. The original
-production artifact should be recorded separately before a rollout: rebuilding
-an older app tag is not a substitute for keeping the existing Hosting version
-available for an exact rollback.
-
-Regression checks: `node --test scripts/deploy.test.mjs scripts/hosting/*.test.mjs`.
+Regression checks: `node --test scripts/hosting/*.test.mjs scripts/hosting/manager/*.test.mjs`.

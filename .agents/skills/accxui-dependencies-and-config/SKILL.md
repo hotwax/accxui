@@ -1,6 +1,6 @@
 ---
 name: accxui-dependencies-and-config
-description: Use when adding or upgrading a package, adding or reading an environment variable, running an AccxUI app locally, cutting a release or deploying, in the accxui workspace (common/ framework or any app under apps/*). Triggers include pnpm add / pnpm install, "catalog:", pnpm-workspace.yaml, pnpm-lock.yaml, frozen-lockfile, package.json version, .env / .env.example / .env.local, import.meta.env.VITE_*, VITE_APP_VERSION_CONFIG, VITE_APP_PERMISSION_ID, commonEnvPlugin, dev auto login (VITE_ALIAS, VITE_DEV_USERNAME), scripts/env-config, pnpm --filter <app> dev / build, pnpm release / cut-release.sh, pnpm deploy:app / deploy.sh, accxuiVersion, firebase-hosting-merge / release workflows, GitHub secrets, multi-version hosting (/vX.Y.Z/), and pnpm update:apps.
+description: Use when adding or upgrading a package, adding or reading an environment variable, running an AccxUI app locally, cutting a release or deploying, in the accxui workspace (common/ framework or any app under apps/*). Triggers include pnpm add / pnpm install, "catalog:", pnpm-workspace.yaml, pnpm-lock.yaml, frozen-lockfile, package.json version, .env / .env.example / .env.local, import.meta.env.VITE_*, VITE_APP_VERSION_CONFIG, VITE_APP_PERMISSION_ID, commonEnvPlugin, dev auto login (VITE_ALIAS, VITE_DEV_USERNAME), pnpm --filter <app> dev / build, pnpm release / cut-release.sh, pnpm deploy:app / deploy.sh, accxuiVersion, firebase-hosting-merge / release workflows, GitHub secrets, multi-version hosting (/vX.Y.Z/), and pnpm update:apps.
 ---
 
 # Dependencies, env config and releases
@@ -37,9 +37,9 @@ One pnpm workspace: the framework lives in the accxui root (`common/`, root `pac
   read as `import.meta.env.VITE_X` (typed loosely in `common/env.d.ts`). JSON values (`VITE_APP_VERSION_CONFIG`,
   `VITE_SHOPIFY_SHOP_CONFIG`, `VITE_FIREBASE_CONFIG`) are `JSON.parse`d by the code that uses them.
 - **Adding one:** add the name to `.env.example` (and your `.env`), read it where needed. If it holds a
-  per-environment or secret value, it must also be set at deploy: in `scripts/env-config/.env.<dev|uat|prod>`
-  for `pnpm deploy:app`, and as a GitHub secret injected by the hosting workflow (ask; CI only injects
-  the Firebase and Shopify secrets today).
+  per-environment or secret value, it must also be set at deploy, as a GitHub secret the hosting workflows
+  inject (ask). Every deploy, `pnpm deploy:app` included, builds in GitHub Actions; per-environment build
+  values are mapped in `BUILD_SECRETS` (`scripts/hosting/manager/build.mjs`) and in the shared workflows.
 - **Shared by every app:** `VITE_OMS_TYPE`, `VITE_I18N_LOCALE`, `VITE_I18N_FALLBACK_LOCALE`,
   `VITE_CACHE_MAX_AGE`, `VITE_VIEW_SIZE`, `VITE_APP_PERMISSION_ID` (app access, **accxui-permissions**),
   `VITE_APP_VERSION_CONFIG` (`{ appId, environmentTypeId, buildVersion }`, below), `VITE_DEFAULT_LOG_LEVEL`.
@@ -49,7 +49,7 @@ One pnpm workspace: the framework lives in the accxui root (`common/`, root `pac
   serving**, only where the app's own value is empty. Never put credentials in an app's `.env` or
   `.env.local` (a production build reads them into the bundle), and never list a production instance in
   `VITE_ALIAS`.
-- Never commit `.env`, `.env.local` or `scripts/env-config/.env.*`.
+- Never commit `.env` or `.env.local`.
 
 ## Running locally
 
@@ -69,9 +69,12 @@ Checks: `npx vitest run common/tests` at the root; `pnpm test:unit` and `pnpm bu
   and creates the GitHub release `vX.Y.Z` with generated notes; the tag triggers the UAT deploy.
   **Release accxui first** when the app needs framework changes: the app's tag pins an accxui tag.
   `--dry-run` shows what it would do.
-- **Deploy by hand:** `pnpm deploy:app` (interactive: app, dev / uat / prod, how many versions). It
-  builds from `.env.example` plus `scripts/env-config/.env.<env>` and runs `firebase deploy`. Prod asks
-  you to type `deploy`.
+- **Deploy on demand:** `pnpm deploy:app` (needs the GitHub CLI). Nothing builds locally: it runs the
+  app's `manage-app-hosting.yml` in GitHub Actions, shows the plan, asks for confirmation, then executes.
+  Default: the latest patch of the newest N minors with the latest release at root (`--count N`);
+  `--versions a,b --default a` makes the site exactly those versions; `--publish-only --versions a,b`
+  adds or rebuilds just those, leaving root alone. Dev re-runs the latest merge deploy. UAT / prod only
+  for apps onboarded with `.github/app-hosting.json` (`scripts/hosting/manager/README.md`).
 - **CI** (`hotwax/accxui/.github/workflows/common-*.yml`, called by each app's thin workflows): a PR
   builds the app; a push to `main` deploys dev; a tag deploys every retained version to UAT.
 - Release notes live on GitHub releases only (`--generate-notes`); don't edit `release-notes.md` /
@@ -88,4 +91,4 @@ Checks: `npx vitest run common/tests` at the root; `pnpm test:unit` and `pnpm bu
 | Credentials in an app `.env` | shipped in the production bundle | root `.env.development.local` |
 | Releasing an app before accxui | CI fails: the pinned accxui tag doesn't exist | release accxui first |
 | Hardcoding `/vX.Y.Z/` paths | breaks other versions | use `BASE_URL` / router paths |
-| Committing `.env*` or `scripts/env-config/.env.*` | leaked secrets | they're git-ignored; keep them so |
+| Committing `.env*` | leaked secrets | they're git-ignored; keep them so |

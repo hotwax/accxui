@@ -62,11 +62,16 @@ export async function firebaseConnection() {
   const auth = require(path.join(lib, 'auth.js'));
   const { requireAuth } = require(path.join(lib, 'requireAuth.js'));
   const { Client } = require(path.join(lib, 'apiv2.js'));
-  const options = { nonInteractive: true, token: process.env.HOTWAX_PUBLIC_SECRET, account: process.env.FIREBASE_ACCOUNT };
+  const options = { nonInteractive: true, account: process.env.FIREBASE_ACCOUNT };
   if (options.account) auth.setActiveAccount(options, auth.selectAccount(options.account));
-  await requireAuth(options, true);
+  // CI logs in with a service account key (GOOGLE_APPLICATION_CREDENTIALS); local runs use the Firebase CLI login.
+  const serviceAccount = !options.account && Boolean(process.env.GOOGLE_APPLICATION_CREDENTIALS);
+  await requireAuth(options, !serviceAccount);
+  // Service account access tokens last an hour and builds can run longer, so fetch a current one before each call.
+  const authorize = async () => { if (serviceAccount) await requireAuth(options); };
   const client = new Client({ urlPrefix: 'https://firebasehosting.googleapis.com', apiVersion: 'v1beta1', auth: true });
   const api = async (method, route, body, queryParams) => {
+    await authorize();
     try { return (await client.request({ method, path: route, ...(body ? { body } : {}), ...(queryParams ? { queryParams } : {}) })).body; }
     catch (error) { throw new Error(`Firebase ${method} ${route} failed (HTTP ${error.status || 'unknown'})`); }
   };
@@ -74,6 +79,7 @@ export async function firebaseConnection() {
     const parsed = new URL(url);
     if (parsed.protocol !== 'https:' || parsed.hostname !== 'upload-firebasehosting.googleapis.com') throw new Error('Unexpected Firebase upload origin');
     const uploader = new Client({ urlPrefix: url, auth: true });
+    await authorize();
     try { await uploader.request({ method: 'POST', path: `/${digest}`, body: bytes, headers: { 'Content-Type': 'application/octet-stream' } }); }
     catch (error) { throw new Error(`Firebase upload failed (HTTP ${error.status || 'unknown'})`); }
   };
