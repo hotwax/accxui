@@ -1,3 +1,4 @@
+import { defineAsyncComponent } from "vue"
 import imagePreview from './directives/imagePreview'
 import segmentHeight from './directives/segmentHeight'
 import DxpShopifyImg from "./components/DxpShopifyImg.vue"
@@ -13,10 +14,12 @@ import { useFastTravel } from './composables/useFastTravel'
 import { getFastTravelApps, getFastTravelApp, buildAppUrl } from './utils/fastTravelRegistry'
 import emitter from './core/emitter'
 import { commonUtil } from './utils/commonUtil'
+import { faroUtil } from './utils/faroUtil'
 import { useSolrSearch } from './composables/useSolrSearch'
 import { useProducts } from './composables/useProducts'
 import { useShopify } from './composables/useShopify'
 import logger from './core/logger'
+import { logStore } from './core/logStore'
 import { cookieHelper } from './helpers/cookieHelper'
 import { moduleFederationUtil } from './utils/moduleFederationUtil'
 
@@ -31,6 +34,8 @@ import { initialiseConfig } from './core/configRegistry'
 import { onSessionCleared, clearSessionScopedState } from './core/sessionScope'
 import { useAuth, isMoquiOmsRef } from './composables/useAuth'
 
+const DxpLogsModal = defineAsyncComponent(() => import("./components/DxpLogsModal.vue"))
+
 // ✅ These are pure types (erased during build)
 export { api, client, axios }
 
@@ -38,9 +43,11 @@ export {
   commonUtil,
   cookieHelper,
   createDxpI18n,
+  DxpLogsModal,
   DxpOmsInstanceFooter,
   DxpShopifyImg,
   emitter,
+  faroUtil,
   firebaseMessaging,
   i18n,
   imagePreview,
@@ -49,6 +56,7 @@ export {
   onSessionCleared,
   clearSessionScopedState,
   logger,
+  logStore,
   Login,
   RadioFacetGroup,
   Sparkline,
@@ -72,7 +80,8 @@ export {
 }
 
 export * from './db';
-
+export type { LogRecord, LogStoreOptions } from './core/logStore';
+export type { FaroOptions } from './utils/faroUtil';
 export { useIosKeyboardScroll } from './composables/useIosKeyboardScroll';
 export type { IosKeyboardScrollOptions } from './composables/useIosKeyboardScroll';
 export { supportsIosKeyboardScroll } from './utils/keyboardScroll';

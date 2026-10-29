@@ -44,6 +44,10 @@ on:
         required: false
       SHOPIFY_SHOP_CONFIG:
         required: false
+      VITE_FARO_COLLECTOR_URL:
+        required: false
+      VITE_FARO_API_KEY:
+        required: false
 jobs:
   build_and_deploy:
     runs-on: ubuntu-latest
@@ -100,6 +104,8 @@ jobs:
           VITE_FIREBASE_CONFIG: ${{ secrets.VITE_FIREBASE_CONFIG }}
           VITE_FIREBASE_VAPID_KEY: ${{ secrets.VITE_FIREBASE_VAPID_KEY }}
           SHOPIFY_SHOP_CONFIG: ${{ secrets.SHOPIFY_SHOP_CONFIG }}
+          VITE_FARO_COLLECTOR_URL: ${{ secrets.VITE_FARO_COLLECTOR_URL }}
+          VITE_FARO_API_KEY: ${{ secrets.VITE_FARO_API_KEY }}
         run: |
           set -euo pipefail
 
@@ -115,6 +121,12 @@ jobs:
             fi
             if [ -n "$SHOPIFY_SHOP_CONFIG" ]; then
               sed -i "s|^VITE_SHOPIFY_SHOP_CONFIG=.*|VITE_SHOPIFY_SHOP_CONFIG=$SHOPIFY_SHOP_CONFIG|g" .env
+            fi
+            if [ -n "$VITE_FARO_COLLECTOR_URL" ]; then
+              sed -i "s|^VITE_FARO_COLLECTOR_URL=.*|VITE_FARO_COLLECTOR_URL='$VITE_FARO_COLLECTOR_URL'|g" .env
+            fi
+            if [ -n "$VITE_FARO_API_KEY" ]; then
+              sed -i "s|^VITE_FARO_API_KEY=.*|VITE_FARO_API_KEY='$VITE_FARO_API_KEY'|g" .env
             fi
           }
 
@@ -135,7 +147,7 @@ jobs:
             fi
 
             # VITE_FIREBASE_* must NOT leak in the same way — .env holds the quote-stripped values.
-            ( unset VITE_FIREBASE_CONFIG VITE_FIREBASE_VAPID_KEY SHOPIFY_SHOP_CONFIG
+            ( unset VITE_FIREBASE_CONFIG VITE_FIREBASE_VAPID_KEY SHOPIFY_SHOP_CONFIG VITE_FARO_COLLECTOR_URL VITE_FARO_API_KEY
               if [ -n "$cfg" ]; then export VITE_APP_VERSION_CONFIG="$cfg"; fi
               pnpm --filter ${{ inputs.appDir }} build )
 
@@ -206,15 +218,6 @@ jobs:
           echo "RETAINED_VERSIONS=${retained_versions[*]:-}" >> "$GITHUB_ENV"
           [ -f dist/index.html ] || { echo "::error::root bootstrap was overwritten"; exit 1; }
 
-          # Company discovers only the stable versions actually included in this deployment.
-          if git show "$latest:.env.example" 2>/dev/null | grep '^VITE_APP_VERSION_CONFIG=' >/dev/null; then
-            app_id=$(git show "$latest:.env.example" | grep '^VITE_APP_VERSION_CONFIG=' | cut -d= -f2- | jq -r .appId)
-            jq -n --arg appId "$app_id" --arg rootVersion "$latest" --args '
-              {schemaVersion:1,appId:$appId,environmentTypeId:"AppEnvUAT",rootVersion:$rootVersion,
-               versions:[$ARGS.positional[] | select(length > 0) | {version:.,environmentTypeId:"AppEnvUAT"}]}
-              ' "${versions[@]:-}" > dist/hosted-versions.json
-          fi
-
           # Hosting config comes from the release serving root; the loop left us on the oldest one.
           # Version rewrites first, catch-all last: Firebase is first-match-wins and the catch-all has to
           # fall through to the root bootstrap.
@@ -223,8 +226,7 @@ jobs:
             'map({source:("/"+.+"/**"), destination:("/"+.+"/index.html")}) + [{source:"**",destination:"/index.html"}]')
           jq --argjson r "$rewrites" '.hosting |= map(.rewrites = $r | .headers = ((.headers // []) + [
             {source:"**",headers:[{key:"Cache-Control",value:"no-cache"}]},
-            {source:"**/assets/**",headers:[{key:"Cache-Control",value:"public,max-age=31536000,immutable"}]},
-            {source:"/hosted-versions.json",headers:[{key:"Cache-Control",value:"no-store"},{key:"Access-Control-Allow-Origin",value:"*"}]}
+            {source:"**/assets/**",headers:[{key:"Cache-Control",value:"public,max-age=31536000,immutable"}]}
           ]))' firebase.json > fb.tmp && mv fb.tmp firebase.json
           jq -c '.hosting[] | {target, rewrites}' firebase.json
           find dist -mindepth 1 -maxdepth 1 -type d | sort

@@ -1,6 +1,12 @@
 <template>
   <ion-page>
     <ion-content>
+      <div slot="fixed" class="logs-action">
+        <ion-button color="dark" fill="clear" size="small" @click="openLogs()">
+          <ion-icon slot="start" :icon="documentTextOutline" />
+          {{ translate("View logs") }}
+        </ion-button>
+      </div>
       <div class="flex" v-if="!isInitializing && !isConfirmingForActiveSession">
         <form class="login-container" @keyup.enter="handleSubmit()" @submit.prevent>
           <Logo />
@@ -135,17 +141,19 @@ import {
   IonPage,
   IonSpinner,
   loadingController,
+  modalController,
   onIonViewWillEnter
 } from "@ionic/vue";
 import { computed, ref } from "vue";
 import Logo from "./Logo.vue";
-import { arrowBackOutline, arrowForwardOutline, warningOutline } from 'ionicons/icons'
+import { arrowBackOutline, arrowForwardOutline, documentTextOutline, warningOutline } from 'ionicons/icons'
 import { cookieHelper } from "../helpers/cookieHelper";
 import { translate } from "../core/i18n"
 import { commonUtil } from "../utils/commonUtil";
 import { omsRef, useAuth } from "../composables/useAuth";
 import { accxuiConfig } from "../core/configRegistry";
 import { discoverLocalApiServers, type LocalApiServer, type LocalApiServerSignal } from "../core/localApiServerDiscovery";
+import logger from "../core/logger";
 
 let route = null as any;
 
@@ -299,7 +307,7 @@ const discoverLocalApiServerOptions = async () => {
   try {
     localApiServers.value = await discoverLocalApiServers();
   } catch (error) {
-    console.error("Failed to discover local API servers:", error);
+    logger.error("Failed to discover local API servers:", error);
   } finally {
     isDiscoveringLocalApiServers.value = false;
   }
@@ -326,7 +334,7 @@ const login = async (params?: any) => {
     }
   } catch (error: any) {
     errorMessage.value = error
-    console.error(error);
+    logger.error("Login failed", error);
   }
   isLoggingIn.value = false;
 };
@@ -546,12 +554,21 @@ const initialise = async () => {
       }
     }
   } catch (error) {
-    console.error(error);
+    logger.error("Login page failed to initialise", error);
   } finally {
     dismissLoader();
     isInitializing.value = false;
     initInProgress = false;
   }
+};
+
+const openLogs = async () => {
+  const { default: DxpLogsModal } = await import("./DxpLogsModal.vue");
+  const logsModal = await modalController.create({
+    component: DxpLogsModal
+  });
+
+  return logsModal.present();
 };
 
 const handleSubmit = () => {
@@ -576,5 +593,10 @@ onIonViewWillEnter(() => {
   justify-content: center;
   align-items: center;
   height: 100%;
+}
+
+.logs-action {
+  top: calc(var(--ion-safe-area-top, 0px) + 8px);
+  right: calc(var(--ion-safe-area-right, 0px) + 8px);
 }
 </style>
