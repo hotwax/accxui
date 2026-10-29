@@ -21,7 +21,9 @@ export function validateRequest(input) {
   if (!input.actor) throw Error("Missing GitHub actor");
   if (
     input.operation !== "inventory" &&
-    !["publish", "default", "remove", "rebuild"].includes(input.action)
+    !["publish", "default", "remove", "rebuild", "replace"].includes(
+      input.action,
+    )
   )
     throw Error("Invalid hosting action");
 }
@@ -32,7 +34,8 @@ export function validatePlan(plan, input, live, sources) {
     plan.actor !== input.actor ||
     plan.environment !== input.environment ||
     plan.action !== input.action ||
-    plan.version !== (input.version || null)
+    plan.version !== (input.version || null) ||
+    (plan.targetDefault || null) !== (input.defaultVersion || null)
   )
     throw Error(
       "This plan does not match the actor, app, environment or requested operation",
@@ -107,13 +110,6 @@ export async function preparePlan(gh, connection, input) {
     input.repo,
     input.environment,
   );
-  if (
-    input.action === "publish" &&
-    live.before.files.some((f) => f.path.startsWith(`/${input.version}/`))
-  )
-    throw Error(
-      "This version directory already exists. Inspect it before publishing.",
-    );
   const releases = await githubPages(gh, `/repos/${input.repo}/releases`);
   let buildCapable = false;
   try {
@@ -125,6 +121,7 @@ export async function preparePlan(gh, connection, input) {
   }
   const change = planChange({
     ...input,
+    targetDefault: input.defaultVersion,
     defaultVersion: live.hosting.defaultVersion,
     hosted: live.hosting.versions,
     releases,
@@ -156,13 +153,19 @@ export async function preparePlan(gh, connection, input) {
     writable: true,
     warnings: [],
   };
-  if (plan.action === "remove")
+  if (plan.removed.length)
     plan.warnings.push(
-      "Check Company instance selections before removal. Instances pinned to this version are not changed.",
+      `Removes ${plan.removed.join(", ")}. Check Company instance selections first: instances pinned to a removed version are not changed.`,
+    );
+  if (plan.action === "publish" && plan.replaced.length)
+    plan.warnings.push(
+      `Already hosted and rebuilt in place: ${plan.replaced.join(", ")}.`,
     );
   if (plan.rootChanges)
     plan.warnings.push(
-      "Users of the main URL receive this rebuilt Default. Pinned releases remain hosted.",
+      plan.action === "replace"
+        ? `Users of the main URL receive ${plan.nextDefault}. The site afterwards serves only ${plan.retained.join(", ")}.`
+        : "Users of the main URL receive this rebuilt Default. Pinned releases remain hosted.",
     );
   if (plan.action === "rebuild")
     plan.warnings.push(
@@ -184,6 +187,8 @@ export async function executePlan(
   // Recompute all change lists from live state; stored plans are never executable instructions.
   const reviewed = [
     "build",
+    "added",
+    "replaced",
     "removed",
     "retained",
     "previousDefault",
@@ -196,7 +201,7 @@ export async function executePlan(
       throw Error("The reviewed change differs from the current plan");
   await mkdir(workspace, { recursive: true });
   const artifacts = new Map();
-  if (["publish", "rebuild"].includes(fresh.action))
+  if (["publish", "rebuild", "replace"].includes(fresh.action))
     for (const source of fresh.sources)
       for (const [file, bytes] of await buildRelease(
         fresh.app,
@@ -217,29 +222,34 @@ export async function executePlan(
       progress,
     ))
       artifacts.set(file, bytes);
-  if (fresh.action !== "publish") {
+  // Every action refreshes the version manifest Company reads, once the Default is known.
+  if (fresh.nextDefault) {
     let manifest = {};
     if (live.before.files.some((f) => f.path === "/hosted-versions.json"))
       manifest = JSON.parse(
         await verifiedFile(live.before, live.target, "/hosted-versions.json"),
       );
+    const environmentTypeId =
+      input.environment === "uat" ? "AppEnvUAT" : "AppEnvProd";
     const metadata = Buffer.from(
       JSON.stringify(
         {
           ...manifest,
           schemaVersion: 1,
+          appId: manifest.appId || fresh.sources[0]?.appId,
           rootVersion: fresh.nextDefault,
-          environmentTypeId:
-            input.environment === "uat" ? "AppEnvUAT" : "AppEnvProd",
-          versions: fresh.retained.map((version) => ({ version })),
+          environmentTypeId,
+          versions: fresh.retained.map((version) => ({
+            version,
+            environmentTypeId,
+          })),
         },
         null,
         2,
       ),
     );
     artifacts.set("/release-manager.json", metadata);
-    if (live.before.files.some((f) => f.path === "/hosted-versions.json"))
-      artifacts.set("/hosted-versions.json", metadata);
+    artifacts.set("/hosted-versions.json", metadata);
   }
   return applyHosting(
     connection,

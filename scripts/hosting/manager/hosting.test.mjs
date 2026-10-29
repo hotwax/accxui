@@ -152,6 +152,28 @@ test("changed Default content fails verification before publication", async () =
     false,
   );
 });
+test("replace clears every hosted version folder and keeps only the new set", async () => {
+  const client = model();
+  const plan = planChange({
+    ...base,
+    action: "replace",
+    version: "v3.0.0,v2.0.0",
+    targetDefault: "v3.0.0",
+  });
+  const r = await applyHosting(
+    client,
+    { site: "demo" },
+    before,
+    plan,
+    new Map([
+      ["/index.html", Buffer.from("root v3")],
+      ["/v3.0.0/index.html", Buffer.from("v3")],
+      ["/v2.0.0/index.html", Buffer.from("v2 rebuilt")],
+    ]),
+    () => {},
+  );
+  assert.equal(r.files, 3);
+});
 test("removal excludes only its version and preserves the default", async () => {
   const client = model();
   const r = await applyHosting(

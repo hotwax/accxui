@@ -3,6 +3,13 @@
 AccxUI is a framework (`common/`) plus apps under `apps/*`. Each app is its **own git repo**: a
 change to `common/` and a change to an app are separate commits in separate repos.
 
+## Deployments — never production
+
+Agents never deploy to production: no `pnpm deploy:app` with `prod`, no `manage-app-hosting.yml` /
+`common-app-hosting.yml` run (plan included) or re-run with `environment=prod`, and no `firebase deploy`
+to a production project. When production is needed, give the user the exact command to run. Dev and UAT
+deploy to real sites too: ask before each run.
+
 ## Local database (IndexedDB) — non-negotiable in apps that have one
 
 **Which apps:** Company, Order Manager and every **new** app keep server data in one IndexedDB

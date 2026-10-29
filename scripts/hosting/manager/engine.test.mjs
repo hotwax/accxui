@@ -44,6 +44,7 @@ for (const [field, value] of Object.entries({
   version: "v3.4.2",
   toolsSha: "b".repeat(40),
   expiresAt: "2000-01-01",
+  targetDefault: "v3.5.0",
 }))
   test(`rejects changed ${field}`, () =>
     assert.throws(() =>

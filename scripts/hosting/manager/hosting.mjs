@@ -20,10 +20,8 @@ export async function applyHosting(
       );
   };
   await unchanged();
-  const exclusions = [
-    ...plan.removed,
-    ...(plan.action === "rebuild" ? plan.retained : []),
-  ];
+  // Removed versions go away; replaced versions are cleared so stale hashed assets do not survive.
+  const exclusions = [...plan.removed, ...(plan.replaced || [])];
   let operation = await api("POST", `/sites/${target.site}/versions:clone`, {
     sourceVersion: before.version.name,
     finalize: false,

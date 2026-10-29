@@ -8,39 +8,64 @@ export const hostedVersions = (files) =>
       }),
     ),
   ].sort((a, b) => b.localeCompare(a, undefined, { numeric: true }));
+// Publish and replace take a comma-separated list; the other actions take one version.
+export function versionList(value) {
+  const list = String(value || "")
+    .split(",")
+    .map((v) => v.trim())
+    .filter(Boolean);
+  if (!list.length || list.some((v) => !VERSION.test(v)))
+    throw Error("Choose stable vX.Y.Z releases.");
+  if (new Set(list).size !== list.length)
+    throw Error("Each version can be listed only once.");
+  return list;
+}
 export function planChange({
   action,
   version,
   environment,
   defaultVersion,
+  targetDefault,
   hosted,
   releases,
   buildCapable,
 }) {
-  if (!["publish", "default", "remove", "rebuild"].includes(action))
+  if (!["publish", "default", "remove", "rebuild", "replace"].includes(action))
     throw Error("Unknown operation.");
   if (!["uat", "prod"].includes(environment))
     throw Error("Choose UAT or Production.");
-  if (action !== "rebuild" && !VERSION.test(version || ""))
+  const versions = ["publish", "replace"].includes(action)
+    ? versionList(version)
+    : null;
+  if (!versions && action !== "rebuild" && !VERSION.test(version || ""))
     throw Error("Choose a stable vX.Y.Z release.");
   if (action !== "remove" && !buildCapable)
     throw Error("This app does not yet support versioned AccxUI builds.");
   const published = new Set(
     releases.filter((r) => !r.draft && !r.prerelease).map((r) => r.tag_name),
   );
-  const retained = [...hosted];
+  if (versions?.some((v) => !published.has(v)))
+    throw Error("Only published stable GitHub releases can be deployed.");
+  let retained = [...hosted];
   let build = [],
     removed = [],
+    replaced = [],
     nextDefault = defaultVersion;
   if (action === "publish") {
-    if (!published.has(version))
-      throw Error("Only a published stable GitHub release can be deployed.");
-    if (hosted.includes(version))
-      throw Error(
-        "This version is already hosted. Use Rebuild all to rebuild it.",
-      );
-    retained.push(version);
-    build = [version];
+    // Listed versions that are already hosted are rebuilt in place; root and unlisted versions stay.
+    build = versions;
+    replaced = versions.filter((v) => hosted.includes(v));
+    retained.push(...versions.filter((v) => !hosted.includes(v)));
+  }
+  if (action === "replace") {
+    // The site becomes exactly these versions with targetDefault at root; everything else is removed.
+    if (!versions.includes(targetDefault))
+      throw Error("The Default must be one of the listed versions.");
+    build = versions;
+    replaced = versions.filter((v) => hosted.includes(v));
+    removed = hosted.filter((v) => !versions.includes(v));
+    retained = [...versions];
+    nextDefault = targetDefault;
   }
   if (action === "default") {
     if (!hosted.includes(version))
@@ -77,30 +102,37 @@ export function planChange({
         "Every hosted version and Default must still have a published GitHub release to rebuild.",
       );
     if (!hosted.includes(defaultVersion)) retained.push(defaultVersion);
+    replaced = [...retained];
   }
   return {
     action,
     environment,
     version: version || null,
+    targetDefault: action === "replace" ? targetDefault : null,
     build,
+    added: build.filter((v) => !hosted.includes(v)),
+    replaced,
     removed,
     retained,
     previousDefault: defaultVersion,
     nextDefault,
-    rootChanges: ["default", "rebuild"].includes(action),
+    rootChanges: ["default", "rebuild", "replace"].includes(action),
     confirmation:
       action === "remove"
         ? `REMOVE ${version}`
         : environment === "prod"
           ? "PUBLISH TO PRODUCTION"
-          : null,
+          : action === "replace" && removed.length
+            ? `REPLACE ${environment.toUpperCase()} SITE`
+            : null,
   };
 }
+const versionPattern = (v) => `^/${v.replaceAll(".", "\\.")}(?:/.*)?$`;
 export function configFor(plan, config) {
   const next = structuredClone(config || {});
-  if (plan.action === "remove") {
-    // Retain unrelated routing/security rules; remove rules aimed at the deleted directory.
-    const prefix = `/${plan.version}/`;
+  // Retain unrelated routing/security rules; remove rules aimed at deleted directories.
+  for (const v of plan.removed || []) {
+    const prefix = `/${v}/`;
     next.rewrites = (next.rewrites || []).filter(
       (r) => !String(r.path || "").startsWith(prefix),
     );
@@ -108,22 +140,33 @@ export function configFor(plan, config) {
       (r) => !String(r.location || "").startsWith(prefix),
     );
   }
-  if (plan.action === "publish") {
+  if (["publish", "replace"].includes(plan.action)) {
+    // Newly added versions get their routes; already-hosted ones keep the routes they have.
+    const added = plan.added || [];
     next.rewrites = [
-      {
-        regex: `^/${plan.version.replaceAll(".", "\\.")}(?:/.*)?$`,
-        path: `/${plan.version}/index.html`,
-      },
+      ...added.map((v) => ({ regex: versionPattern(v), path: `/${v}/index.html` })),
       ...(next.rewrites || []),
     ];
     next.headers = [
       ...(next.headers || []),
-      {
-        regex: `^/${plan.version.replaceAll(".", "\\.")}(?:/.*)?$`,
+      ...added.map((v) => ({
+        regex: versionPattern(v),
         headers: { "Cache-Control": "no-cache" },
-      },
+      })),
     ];
   }
+  // Company reads the version manifest cross-origin and must never get a cached copy.
+  if (!(next.headers || []).some((h) => JSON.stringify(h).includes("hosted-versions.json")))
+    next.headers = [
+      ...(next.headers || []),
+      {
+        glob: "/hosted-versions.json",
+        headers: {
+          "Cache-Control": "no-store",
+          "Access-Control-Allow-Origin": "*",
+        },
+      },
+    ];
   if (plan.action === "rebuild") {
     next.rewrites = [
       ...plan.retained.map((v) => ({
@@ -144,8 +187,7 @@ export function verifyFileChanges(before, after, plan, uploads) {
       continue;
     }
     if (
-      plan.action === "rebuild" &&
-      plan.retained.some((v) => old.path.startsWith(`/${v}/`)) &&
+      (plan.replaced || []).some((v) => old.path.startsWith(`/${v}/`)) &&
       !uploads.has(old.path)
     ) {
       if (actual.has(old.path))

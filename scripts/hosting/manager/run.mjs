@@ -18,6 +18,7 @@ const input = {
   environment: process.env.RM_ENVIRONMENT || "uat",
   action: process.env.RM_ACTION,
   version: process.env.RM_VERSION || null,
+  defaultVersion: process.env.RM_DEFAULT_VERSION || null,
   confirmation: process.env.RM_CONFIRMATION || "",
   toolsSha: process.env.RM_TOOLS_SHA,
 };

@@ -1,10 +1,10 @@
 # App hosting workflows
 
-The Release Management UI uses the signed-in user's GitHub token to dispatch a thin workflow in the app repo. That workflow calls `common-app-hosting.yml` and pins both the reusable workflow and `tools_ref` to the same full AccxUI commit SHA. Firebase credentials remain in the Actions environment.
+The Release Management UI uses the signed-in user's GitHub token to dispatch a thin workflow in the app repo. That workflow calls `common-app-hosting.yml` and pins both the reusable workflow and `tools_ref` to the same full AccxUI commit SHA. Firebase credentials remain in the Actions environment. `pnpm deploy:app` (`scripts/hosting/deploy-app.mjs`) dispatches the same workflow from the command line with the signed-in GitHub CLI user, so local deploys follow the same plan and execute steps.
 
 ## Contract
 
-Caller `workflow_dispatch` inputs: `operation` (`inventory`, `plan`, `execute`), `environment` (`uat` initially), `request_id` (UUID), `action` (`publish`, `default`, `remove`, `rebuild`), `version`, `plan_sha`, `confirmation`. Its `run-name` must include `[${{ inputs.request_id }}]` for UI tracking. Dispatch only on the app's default branch. Job Manager's initial caller rejects production.
+Caller `workflow_dispatch` inputs: `operation` (`inventory`, `plan`, `execute`), `environment` (`uat` initially), `request_id` (UUID), `action` (`publish`, `default`, `remove`, `rebuild`, `replace`), `version` (a comma-separated list for `publish` and `replace`), `default_version` (`replace` only), `plan_sha`, `confirmation`. Its `run-name` must include `[${{ inputs.request_id }}]` for UI tracking. Dispatch only on the app's default branch. Job Manager's initial caller rejects production.
 
 Repository discovery file `.github/app-hosting.json`:
 
@@ -24,7 +24,7 @@ Production requires explicit onboarding, `PROD_FIREBASE_SERVICE_ACCOUNT`, and `A
 
 Inventory and operation results are written to `app-hosting-state`: `inventory/<environment>.json`, `requests/<uuid>.json`, and `plans/<uuid>.json`. Plans expire after one hour. Execute takes the exact plan blob SHA, checks actor/repository/environment/action/version/tool SHA/confirmation, re-inspects live Hosting, re-resolves source commits, and recomputes the plan. Changes require a fresh review.
 
-Builds run in isolated runner directories from the released app commit and its immutable framework pin, using frozen dependencies and the correct AppEnvUAT/AppEnvProd. A failed build prevents publishing. File hashes and routing/security configuration are verified before release and read back afterward. Publish preserves existing files and Default. Default changes require the old Default to have a retained version URL. Removal rejects the current Default. Rebuild includes every hosted version and Default, not merely the latest two releases.
+Builds run in isolated runner directories from the released app commit and its immutable framework pin, using frozen dependencies and the correct AppEnvUAT/AppEnvProd. A failed build prevents publishing. File hashes and routing/security configuration are verified before release and read back afterward. Publish adds the listed versions and rebuilds listed versions that are already hosted, clearing their old files; the root and unlisted versions are preserved. Default changes require the old Default to have a retained version URL. Removal rejects the current Default. Rebuild includes every hosted version and Default, not merely the latest two releases. Replace makes the site exactly the listed versions with the chosen Default (one of them) at root and removes every other version; it does not require a verified current Default, and asks for `REPLACE <ENV> SITE` when it removes versions. Every action rewrites `hosted-versions.json` and `release-manager.json` once the Default is known, and keeps the manifest's uncached cross-origin header.
 
 The job shares `release-${{ github.repository }}` concurrency with the existing tag rollout. Other workflows/console operators must use the same discipline: Firebase lacks an atomic release precondition, so external simultaneous deployments remain a race despite last-moment fingerprint checks. A failed result after publication may mean verification/state persistence failed; inspect live Hosting before retrying.
 
@@ -32,6 +32,6 @@ The existing tag rollout is unchanged unless `publishHostingInventory` is opted 
 
 ## Validation
 
-Run `node --test scripts/deploy.test.mjs scripts/hosting/*.test.mjs scripts/hosting/manager/*.test.mjs`. These use modeled API responses for destructive paths. A read-only run of `preparePlan` against Job Manager UAT confirmed Default v3.5.0, hosted v3.5.0/v3.4.2 and immutable source resolution for a potential v3.4.2 rollback. No Firebase writes were made.
+Run `node --test scripts/hosting/*.test.mjs scripts/hosting/manager/*.test.mjs`. These use modeled API responses for destructive paths. A read-only run of `preparePlan` against Job Manager UAT confirmed Default v3.5.0, hosted v3.5.0/v3.4.2 and immutable source resolution for a potential v3.4.2 rollback. No Firebase writes were made.
 
 After approved merges, run a separately authorized UAT end-to-end exercise covering inventory, plan, execution, workflow tracking, publish/default/rollback/remove/rebuild and browser readback. Local tests and CI checks alone do not prove a live deployment.

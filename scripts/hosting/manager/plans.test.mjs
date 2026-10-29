@@ -35,11 +35,71 @@ test("publish preserves Default and every old version", () => {
   assert.deepEqual(plan.retained, ["v2.0.0", "v1.0.0", "v3.0.0"]);
   assert.deepEqual(plan.build, ["v3.0.0"]);
 });
-test("existing versions cannot be silently overwritten by publication", () =>
+test("publish takes a list, adds new versions and rebuilds hosted ones in place", () => {
+  const plan = planChange({
+    ...base,
+    action: "publish",
+    version: "v3.0.0,v1.0.0",
+  });
+  assert.deepEqual(plan.build, ["v3.0.0", "v1.0.0"]);
+  assert.deepEqual(plan.added, ["v3.0.0"]);
+  assert.deepEqual(plan.replaced, ["v1.0.0"]);
+  assert.deepEqual(plan.removed, []);
+  assert.deepEqual(plan.retained, ["v2.0.0", "v1.0.0", "v3.0.0"]);
+  assert.equal(plan.nextDefault, "v2.0.0");
+  assert.equal(plan.rootChanges, false);
+});
+test("version lists reject duplicates and malformed entries", () => {
+  for (const version of ["v3.0.0,v3.0.0", "v3.0.0,main", ","])
+    assert.throws(() => planChange({ ...base, action: "publish", version }));
+});
+test("replace makes the site exactly the listed versions with the chosen Default", () => {
+  const plan = planChange({
+    ...base,
+    action: "replace",
+    version: "v3.0.0,v2.0.0",
+    targetDefault: "v2.0.0",
+  });
+  assert.deepEqual(plan.build, ["v3.0.0", "v2.0.0"]);
+  assert.deepEqual(plan.added, ["v3.0.0"]);
+  assert.deepEqual(plan.replaced, ["v2.0.0"]);
+  assert.deepEqual(plan.removed, ["v1.0.0"]);
+  assert.deepEqual(plan.retained, ["v3.0.0", "v2.0.0"]);
+  assert.equal(plan.nextDefault, "v2.0.0");
+  assert.equal(plan.rootChanges, true);
+  assert.equal(plan.confirmation, "REPLACE UAT SITE");
+});
+test("replace needs the Default in the list but not a verified current Default", () => {
   assert.throws(
-    () => planChange({ ...base, action: "publish", version: "v1.0.0" }),
-    /already hosted/,
-  ));
+    () =>
+      planChange({
+        ...base,
+        action: "replace",
+        version: "v3.0.0",
+        targetDefault: "v2.0.0",
+      }),
+    /one of the listed/,
+  );
+  const plan = planChange({
+    ...base,
+    action: "replace",
+    version: "v3.0.0,v2.0.0,v1.0.0",
+    targetDefault: "v3.0.0",
+    defaultVersion: null,
+  });
+  assert.deepEqual(plan.removed, []);
+  assert.equal(plan.confirmation, null);
+  assert.equal(
+    planChange({
+      ...base,
+      environment: "prod",
+      action: "replace",
+      version: "v3.0.0",
+      targetDefault: "v3.0.0",
+    }).confirmation,
+    "PUBLISH TO PRODUCTION",
+  );
+});
 test("draft, prerelease, malformed and absent releases cannot deploy", () => {
   for (const version of ["v4.0.0", "main", "v1.0.0/../x"])
     assert.throws(() => planChange({ ...base, action: "publish", version }));
@@ -173,6 +233,66 @@ test("removal removes version routing without changing root routing", () => {
       config,
     ).rewrites,
     [{ glob: "**", path: "/index.html" }],
+  );
+});
+test("replace drops routes of removed versions and adds routes only for new ones", () => {
+  const config = {
+    rewrites: [
+      { glob: "/v1.0.0/**", path: "/v1.0.0/index.html" },
+      { glob: "/v2.0.0/**", path: "/v2.0.0/index.html" },
+      { glob: "**", path: "/index.html" },
+    ],
+  };
+  const next = configFor(
+    planChange({
+      ...base,
+      action: "replace",
+      version: "v3.0.0,v2.0.0",
+      targetDefault: "v3.0.0",
+    }),
+    config,
+  );
+  assert.deepEqual(next.rewrites.map((r) => r.path), [
+    "/v3.0.0/index.html",
+    "/v2.0.0/index.html",
+    "/index.html",
+  ]);
+});
+test("the version manifest always gets an uncached cross-origin header, once", () => {
+  const plan = planChange({ ...base, action: "publish", version: "v3.0.0" });
+  const next = configFor(plan, {});
+  const rules = next.headers.filter((h) => h.glob === "/hosted-versions.json");
+  assert.equal(rules.length, 1);
+  assert.equal(rules[0].headers["Access-Control-Allow-Origin"], "*");
+  assert.equal(
+    configFor(plan, next).headers.filter((h) =>
+      JSON.stringify(h).includes("hosted-versions.json"),
+    ).length,
+    1,
+  );
+});
+test("publish over a hosted version clears its stale assets", () => {
+  const before = [
+    { path: "/index.html", hash: "root" },
+    { path: "/v1.0.0/assets/old.js", hash: "old" },
+  ];
+  const plan = planChange({ ...base, action: "publish", version: "v1.0.0" });
+  const uploads = new Map([["/v1.0.0/assets/new.js", "new"]]);
+  verifyFileChanges(
+    before,
+    [before[0], { path: "/v1.0.0/assets/new.js", hash: "new" }],
+    plan,
+    uploads,
+  );
+  assert.throws(
+    () =>
+      verifyFileChanges(
+        before,
+        [...before, { path: "/v1.0.0/assets/new.js", hash: "new" }],
+        plan,
+        uploads,
+      ),
+    /Stale rebuilt/,
   );
 });
 test("post-upload verification fails on changed root, omitted upload or surviving removed version", () => {

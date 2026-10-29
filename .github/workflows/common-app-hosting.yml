@@ -17,6 +17,9 @@ on:
       version:
         type: string
         default: ""
+      default_version:
+        type: string
+        default: ""
       plan_sha:
         type: string
         default: ""
@@ -135,6 +138,7 @@ jobs:
           RM_REQUEST_ID: ${{ inputs.request_id }}
           RM_ACTION: ${{ inputs.action }}
           RM_VERSION: ${{ inputs.version }}
+          RM_DEFAULT_VERSION: ${{ inputs.default_version }}
           RM_PLAN_SHA: ${{ inputs.plan_sha }}
           RM_CONFIRMATION: ${{ inputs.confirmation }}
           RM_TOOLS_SHA: ${{ inputs.tools_ref }}
