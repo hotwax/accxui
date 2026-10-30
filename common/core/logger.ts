@@ -1,4 +1,5 @@
 import { createLogger, StringifyObjectsHook } from 'vue-logger-plugin'
+import { RedactSensitiveDataHook } from './logRedaction'
 
 // TODO Implement logic to send logs to server
 // https://github.com/dev-tavern/vue-logger-plugin#sample-custom-hook---leveraging-axios-to-send-logs-to-server
@@ -20,7 +21,7 @@ import { createLogger, StringifyObjectsHook } from 'vue-logger-plugin'
 
 const logger = createLogger({
   enabled: true,
-  beforeHooks: [ StringifyObjectsHook ]
+  beforeHooks: [ RedactSensitiveDataHook, StringifyObjectsHook ]
 });
 
 function getStack(error: any) {
@@ -45,8 +46,12 @@ export default {
     }
     const level = options.level ? options.level : "error"
 
+    const afterHooks = [...(options.afterHooks || [])]
+
     logger.apply({
-      level
+      level,
+      afterHooks,
+      ...(options.callerInfo !== undefined ? { callerInfo: options.callerInfo } : {})
     })
 
     logger.install(app);
