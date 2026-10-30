@@ -1,7 +1,9 @@
 import { createLogger, StringifyObjectsHook } from 'vue-logger-plugin'
 import { RedactSensitiveDataHook } from './logRedaction'
 
-// TODO Implement logic to send logs to server
+// Apps ship logs to a backend by passing `afterHooks` through `app.use(logger, ...)`.
+// afterHooks run after the beforeHooks below, so anything they receive is already
+// redacted — see the RedactSensitiveDataHook note further down.
 // https://github.com/dev-tavern/vue-logger-plugin#sample-custom-hook---leveraging-axios-to-send-logs-to-server
 
 // https://github.com/dev-tavern/vue-logger-plugin#levels
@@ -19,6 +21,9 @@ import { RedactSensitiveDataHook } from './logRedaction'
 // Setting enabled to false will disable all logger functionality (console output + hook invocations).
 // Setting consoleEnabled to false will disable just the console output but will still invoke the hooks.
 
+// RedactSensitiveDataHook runs FIRST, and must: StringifyObjectsHook is what serialises an
+// axios error, and an axios error carries the request config — Authorization header included.
+// Redacting before that runs is what keeps a live bearer token out of the console.
 const logger = createLogger({
   enabled: true,
   beforeHooks: [ RedactSensitiveDataHook, StringifyObjectsHook ]
@@ -37,6 +42,31 @@ function getStack(error: any) {
   return error;
 }
 
+let hasGlobalErrorListeners = false;
+
+/**
+ * Sends errors that never reach Vue's errorHandler — an unhandled promise rejection, or an error thrown
+ * outside a component (a timer, an event listener, a script) — through the logger, so the log store
+ * keeps them like any other line, redacted first. Errors inside components already go through
+ * app.config.errorHandler and do not reach window, so nothing is logged twice.
+ */
+function listenForGlobalErrors() {
+  if(hasGlobalErrorListeners || typeof window === "undefined" || !window.addEventListener) {return;}
+  hasGlobalErrorListeners = true;
+
+  window.addEventListener("unhandledrejection", (event: PromiseRejectionEvent) => {
+    const reason = event.reason;
+    // An Error stringifies to "{}", so its stack (which carries the message) is logged instead
+    logger.error("Unhandled promise rejection:", reason instanceof Error ? getStack(reason) : reason);
+  });
+
+  window.addEventListener("error", (event: ErrorEvent) => {
+    // event.error is null for a cross-origin script, which only reports "Script error."
+    const location = event.filename ? ` (${event.filename}:${event.lineno}:${event.colno})` : "";
+    logger.error(`Unhandled error:${location}`, event.error ? getStack(event.error) : event.message);
+  });
+}
+
 export default {
   install(app: any, options: any) {
 
@@ -44,9 +74,11 @@ export default {
       // TODO Improve code to add more information related to code failed
       logger.error("Global handler:" + getStack(error));
     }
-    const level = options.level ? options.level : "error"
+    const level = options.level ? options.level : "warn"
 
+    // The log store always runs last, after any app hook (Faro, for one), so the logs modal works in every app
     const afterHooks = [...(options.afterHooks || [])]
+    listenForGlobalErrors()
 
     logger.apply({
       level,
