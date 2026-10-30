@@ -42,6 +42,31 @@ function getStack(error: any) {
   return error;
 }
 
+let hasGlobalErrorListeners = false;
+
+/**
+ * Sends errors that never reach Vue's errorHandler — an unhandled promise rejection, or an error thrown
+ * outside a component (a timer, an event listener, a script) — through the logger, so the log store
+ * keeps them like any other line, redacted first. Errors inside components already go through
+ * app.config.errorHandler and do not reach window, so nothing is logged twice.
+ */
+function listenForGlobalErrors() {
+  if(hasGlobalErrorListeners || typeof window === "undefined" || !window.addEventListener) {return;}
+  hasGlobalErrorListeners = true;
+
+  window.addEventListener("unhandledrejection", (event: PromiseRejectionEvent) => {
+    const reason = event.reason;
+    // An Error stringifies to "{}", so its stack (which carries the message) is logged instead
+    logger.error("Unhandled promise rejection:", reason instanceof Error ? getStack(reason) : reason);
+  });
+
+  window.addEventListener("error", (event: ErrorEvent) => {
+    // event.error is null for a cross-origin script, which only reports "Script error."
+    const location = event.filename ? ` (${event.filename}:${event.lineno}:${event.colno})` : "";
+    logger.error(`Unhandled error:${location}`, event.error ? getStack(event.error) : event.message);
+  });
+}
+
 export default {
   install(app: any, options: any) {
 
@@ -49,11 +74,15 @@ export default {
       // TODO Improve code to add more information related to code failed
       logger.error("Global handler:" + getStack(error));
     }
-    const level = options.level ? options.level : "error"
+    const level = options.level ? options.level : "warn"
+
+    // The log store always runs last, after any app hook (Faro, for one), so the logs modal works in every app
+    const afterHooks = [...(options.afterHooks || [])]
+    listenForGlobalErrors()
 
     logger.apply({
       level,
-      ...(options.afterHooks ? { afterHooks: options.afterHooks } : {}),
+      afterHooks,
       ...(options.callerInfo !== undefined ? { callerInfo: options.callerInfo } : {})
     })
 
