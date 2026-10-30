@@ -1,7 +1,3 @@
-// The SDK is imported for its types only, so nothing from it reaches an app's bundle unless that
-// app configures a collector: initialiseFaro() loads it with a dynamic import, which Vite splits
-// into a chunk of its own. Every app imports `@common`, so an eager import here would put ~100 kB
-// of Faro in all eleven bundles, including the ones that never send a log anywhere.
 import type { Faro, LogLevel } from "@grafana/faro-web-sdk";
 import type { LogEvent, LoggerHook, LogLevel as VueLogLevel } from "vue-logger-plugin";
 import { accxuiConfig } from "../core/configRegistry";
@@ -62,12 +58,19 @@ const appContextMeta = () => {
 
   try {
     const profile = accxuiConfig.value.current ?? {};
-    if(profile.userId) {user.id = String(profile.userId);}
-    // userLoginId is the username in this codebase; userFullName is the display name.
-    if(profile.userLoginId) {user.username = String(profile.userLoginId);}
-    if(profile.userFullName) {user.fullName = String(profile.userFullName);}
+    if(profile.userId) {
+      user.id = String(profile.userId);
+    }
+    if(profile.userLoginId) {
+      user.username = String(profile.userLoginId);
+    }
+    if(profile.userFullName) {
+      user.fullName = String(profile.userFullName);
+    }
 
-    if(accxuiConfig.value.oms) {attributes.oms = String(accxuiConfig.value.oms);}
+    if(accxuiConfig.value.oms) {
+      attributes.oms = String(accxuiConfig.value.oms);
+    }
   } catch {
     // initialiseConfig has not run yet, or the session was torn down.
   }
@@ -76,7 +79,9 @@ const appContextMeta = () => {
     // The raw instance identifier ("demo", or a full URL) rather than the derived REST
     // base, so the value matches what an operator would recognise and type.
     const instance = commonUtil.getMaargBaseURL();
-    if(instance) {attributes.maargInstance = String(instance);}
+    if(instance) {
+      attributes.maargInstance = String(instance);
+    }
   } catch {
     // No Maarg instance selected yet.
   }
@@ -85,7 +90,9 @@ const appContextMeta = () => {
     const extra = appContext ? appContext() : {};
     Object.keys(extra).forEach((key) => {
       const value = extra[key];
-      if(value !== undefined && value !== null && value !== "") {attributes[key] = String(value);}
+      if(value !== undefined && value !== null && value !== "") {
+        attributes[key] = String(value);
+      }
     })
   } catch {
     // The app's getter depends on state that is not ready, which is its business, not ours.
@@ -97,7 +104,8 @@ const appContextMeta = () => {
 }
 
 const start = async (collectorUrl: string, options: FaroOptions) => {
-  const { LogLevel, faro, getWebInstrumentations, initializeFaro } = await import("@grafana/faro-web-sdk");
+  const sdk = await import("@grafana/faro-web-sdk");
+  const { LogLevel, getWebInstrumentations, initializeFaro } = sdk;
 
   // vue-logger-plugin and Faro happen to share the same level strings, but map them
   // explicitly so a change on either side surfaces as a type error rather than silently
@@ -113,11 +121,11 @@ const start = async (collectorUrl: string, options: FaroOptions) => {
   const versionConfig = parseJson(import.meta.env.VITE_APP_VERSION_CONFIG);
   const versionInfo = parseJson(import.meta.env.VITE_APP_VERSION_INFO);
 
-  initializeFaro({
+  const instance = initializeFaro({
     url: collectorUrl,
     apiKey: import.meta.env.VITE_FARO_API_KEY,
     app: {
-      name: options.appName || versionConfig.appId || "accxui",
+      name: options.appName || versionConfig.appId,
       version: versionInfo.version,
       environment: versionConfig.environmentTypeId,
       gitHash: versionInfo.revision
@@ -131,11 +139,11 @@ const start = async (collectorUrl: string, options: FaroOptions) => {
       // highest-volume signal Faro emits, and not what these logs are for.
       ...getWebInstrumentations({ captureConsole: false, enablePerformanceInstrumentation: false })
     ]
-  });
+  }) ?? sdk.faro;
 
-  faro.metas.add(appContextMeta);
+  instance.metas.add(appContextMeta);
 
-  faroApi = faro;
+  faroApi = instance;
 }
 
 /**
@@ -147,10 +155,14 @@ const start = async (collectorUrl: string, options: FaroOptions) => {
  * — stays the record of what happened at startup.
  */
 const initialiseFaro = (options: FaroOptions = {}) => {
-  if(starting) {return starting;}
+  if(starting) {
+    return starting;
+  }
 
   const collectorUrl = options.collectorUrl || import.meta.env.VITE_FARO_COLLECTOR_URL;
-  if(!collectorUrl) {return Promise.resolve();}
+  if(!collectorUrl) {
+    return Promise.resolve();
+  }
 
   appContext = options.getContext;
 
@@ -169,7 +181,9 @@ const initialiseFaro = (options: FaroOptions = {}) => {
  */
 const faroLoggerHook: LoggerHook = {
   run(event: LogEvent) {
-    if(!faroApi || !faroLogLevel) {return;}
+    if(!faroApi || !faroLogLevel) {
+      return;
+    }
 
     const caller = event.caller;
 

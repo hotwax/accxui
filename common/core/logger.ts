@@ -77,7 +77,7 @@ export default {
       // TODO Improve code to add more information related to code failed
       logger.error("Global handler:" + getStack(error));
     }
-    const level = options.level ? options.level : "error"
+    const level = options.level ? options.level : "warn"
 
     // The log store always runs last, after any app hook (Faro, for one), so the logs modal works in every app
     const afterHooks = [...(options.afterHooks || []), logStore.logStoreHook]
