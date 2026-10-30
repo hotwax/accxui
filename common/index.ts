@@ -25,7 +25,7 @@ import { moduleFederationUtil } from './utils/moduleFederationUtil'
 
 import api, { client, axios } from './core/remoteApi'
 
-import { createDxpI18n, i18n, translate } from './core/i18n'
+import { createDxpI18n, currentLocale, i18n, setLocale, translate } from './core/i18n'
 
 import { firebaseMessaging } from './core/firebaseMessaging'
 import { useNotificationStore } from './store/notification'
@@ -49,6 +49,7 @@ export {
   emitter,
   faroUtil,
   firebaseMessaging,
+  currentLocale,
   i18n,
   imagePreview,
   segmentHeight,
@@ -73,6 +74,7 @@ export {
   useSolrSearch,
   useProducts,
   useShopify,
+  setLocale,
   translate,
   useNotificationStore,
   useEmbeddedAppStore,
