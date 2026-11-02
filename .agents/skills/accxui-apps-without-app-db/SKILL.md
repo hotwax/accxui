@@ -90,7 +90,7 @@ store, v4 takes `persist: { pick: ["a", "b"] }`; Fulfillment's `util.ts` passes 
 **BOPIS**
 - Tabs, not a side menu: `views/Tabs.vue` (`ion-tabs` with a bottom `ion-tab-bar`).
 - End-to-end tests only, with Playwright against deployed environments (**accxui-app-testing**);
-  every interactive element gets a `data-testid` per `apps/bopis/testidguideline.md`.
+  every interactive element gets a `data-testid` (**accxui-test-ids**).
 
 **Dates:** Fulfillment's `setUserTimeZone` doesn't update Luxon's `Settings.defaultZone`, so
 `commonUtil.getDateAndTime` keeps the old zone after a switch. Format with

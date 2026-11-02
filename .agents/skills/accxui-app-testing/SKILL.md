@@ -144,7 +144,7 @@ calls `.open()`, so schema tests need no `fake-indexeddb`.
 one worker, a `setup` project (`auth.setup.js`) that logs in and saves `playwright/.auth/user.json`
 for the `chromium` project. Environments map to **deployed** URLs in `playwright/config.js`
 (credentials from `.env`), so they don't run against localhost. Run with `pnpm test:e2e` in
-`apps/bopis`. Selectors use `data-testid` (**accxui-ui-conventions**, Test ids).
+`apps/bopis`. Selectors use `data-testid` (**accxui-test-ids**).
 
 ## Common mistakes
 

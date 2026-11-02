@@ -26,7 +26,7 @@ data behind a list (loading vs empty) is **accxui-page-sync** / **accxui-app-db-
 5. **Status badges use `commonUtil.getStatusColor(statusId)`**, product images `<DxpShopifyImg>`,
    loaders the `emitter` (**accxui-common-helpers**).
 6. **Add a `data-testid`** to interactive elements and to loading / empty / error states in new
-   markup (`apps/bopis/testidguideline.md`, summarised under Test ids).
+   markup (summarised under Test ids; **accxui-test-ids** has the full rules).
 
 ## A page
 
@@ -235,7 +235,8 @@ From `apps/bopis/testidguideline.md`: kebab-case `<scope>-<feature>-<element>-<t
 -modal -popover -loading -empty -error`. Put it on the Ionic element the user interacts with (the
 `ion-input` / `ion-searchbar` wrapper); in a `v-for` use the entity id, never the index
 (`audits-row-${auditId}`); overlays get ids on their trigger, confirm and cancel. Never rename an
-existing id: tests depend on it.
+existing id: tests depend on it. Adding ids to a whole page or app, overlays created in script
+(`htmlAttributes`), reusable components and the scan for broken ids: **accxui-test-ids**.
 
 ## Forms and validation
 

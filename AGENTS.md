@@ -58,7 +58,8 @@ formatting (`commonUtil`, `logger`, `translate`, `emitter`) → `accxui-common-h
 or an app's shell (`main.ts`, `App.vue`, router, user store, `vite.config`) → `accxui-new-app`; changing
 BOPIS or Fulfillment → `accxui-apps-without-app-db`; pages, modals, menus, Settings, forms and
 framework components → `accxui-ui-conventions`; links to other HotWax apps (`buildAppUrl`,
-`FastTravel`) → `accxui-fast-travel`; writing or running tests → `accxui-app-testing`; anything under
+`FastTravel`) → `accxui-fast-travel`; writing or running tests → `accxui-app-testing`;
+adding or auditing `data-testid`s in any app → `accxui-test-ids`; anything under
 `common/` → `accxui-framework-change`. Full reference: `docs/APP_DB_DEVELOPER_GUIDE.md`.
 
 ## App layout
