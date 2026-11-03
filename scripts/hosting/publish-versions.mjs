@@ -45,7 +45,12 @@ export function planPublication(snapshot, versions) {
   return { baseRelease: snapshot.release.name, baseVersion: snapshot.release.version.name, existing, additions, config };
 }
 
+// Firebase Hosting writes its reserved /__/ files itself and may regenerate or drop them on a clone; they are not ours to verify.
+const isFirebaseReserved = f => f.path.startsWith('/__/');
+
 export function verifyPreserved(before, after, additions) {
+  before = before.filter(f => !isFirebaseReserved(f));
+  after = after.filter(f => !isFirebaseReserved(f));
   const actual = new Map(after.map(f => [f.path, f]));
   if (actual.size !== after.length) throw new Error('Duplicate files in published manifest');
   for (const old of before) {

@@ -45,6 +45,12 @@ test('preservation checks reject removal, overwrite and unexpected root files',(
  const changed=structuredClone(b);changed[1].hash='b'.repeat(64);assert.throws(()=>verifyPreserved(b,changed,[]),/Existing/);
  assert.throws(()=>verifyPreserved(b,[...b,file('/root-new.js')],[]),/Unexpected/);
 });
+test('preservation checks ignore Firebase reserved /__/ files',()=>{
+ const b=[...baseline().files,file('/__/firebase/init.js')];
+ verifyPreserved(b,[...b.slice(0,-1),file('/__/firebase/init.js','b'.repeat(64))],[]);
+ verifyPreserved(b,b.slice(0,-1),[]);
+ verifyPreserved(b.slice(0,-1),[...b,file('/__/firebase/init.json')],[]);
+});
 test('adds version files and verifies all existing hashes before and after release',async()=>{
  const b=baseline(),p=planPublication(b,['v1.1.0']), c=fakeHosting(b);
  const r=await publishPrepared(c,'demo','live',b,p,new Map([['/v1.1.0/index.html',Buffer.from('version')]]));
