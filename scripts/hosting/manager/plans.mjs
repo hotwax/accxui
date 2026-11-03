@@ -190,7 +190,12 @@ export function configFor(plan, config) {
   ];
   return next;
 }
+// Firebase Hosting writes its reserved /__/ files (init.js, the auth helpers) itself and may
+// regenerate or drop them when a version is cloned. Nothing here uploads them, so they are not ours to verify.
+const isFirebaseReserved = (file) => file.path.startsWith("/__/");
 export function verifyFileChanges(before, after, plan, uploads) {
+  before = before.filter((f) => !isFirebaseReserved(f));
+  after = after.filter((f) => !isFirebaseReserved(f));
   const actual = new Map(after.map((f) => [f.path, f]));
   for (const old of before) {
     if (plan.removed.some((v) => old.path.startsWith(`/${v}/`))) {

@@ -374,6 +374,24 @@ test("post-upload verification fails on changed root, omitted upload or survivin
   );
   verifyFileChanges(before, [before[0]], remove, new Map());
 });
+test("post-upload verification ignores Firebase's reserved /__/ files", () => {
+  const before = [
+    { path: "/index.html", hash: "root" },
+    { path: "/__/firebase/init.js", hash: "init" },
+  ];
+  const uploads = new Map([["/v3.0.0/index.html", "new"]]);
+  const publish = planChange({ ...base, action: "publish", version: "v3.0.0" });
+  const built = [before[0], { path: "/v3.0.0/index.html", hash: "new" }];
+  // Regenerated, dropped or newly added by Firebase on the clone: none of these is a failure.
+  verifyFileChanges(before, [...built, { path: "/__/firebase/init.js", hash: "regenerated" }], publish, uploads);
+  verifyFileChanges(before, built, publish, uploads);
+  verifyFileChanges([before[0]], [...built, { path: "/__/firebase/init.json", hash: "added" }], publish, uploads);
+  // The app's own files are still checked.
+  assert.throws(
+    () => verifyFileChanges(before, [{ path: "/index.html", hash: "bad" }, built[1]], publish, uploads),
+    /Preserved/,
+  );
+});
 import { parseBuildMetadata, matchesHostedHash } from "./build-metadata.mjs";
 import { gzipSync } from "node:zlib";
 import { createHash } from "node:crypto";
