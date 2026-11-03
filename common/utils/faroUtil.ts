@@ -32,6 +32,82 @@ const parseJson = (value: any, fallback: any = {}) => {
 }
 
 /**
+ * Query params allowed to survive into telemetry. An allowlist rather than a denylist: Shopify
+ * alone adds shop, host, hmac, timestamp, session and id_token, and OAuth adds code and state,
+ * so any list of things to strip will always lag what the platforms actually send.
+ */
+const SAFE_QUERY_PARAMS = new Set<string>(["tab", "view"]);
+
+/** A JWT anywhere in free text — an id_token or session token that reached a message or an attribute. */
+const JWT_PATTERN = /eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g;
+
+/** The part of a Faro transport item this hook touches, typed locally so the SDK stays a lazy import. */
+type ScrubbableItem = {
+  meta?: { page?: { url?: string } } & Record<string, any>;
+  payload?: Record<string, any>;
+}
+
+/**
+ * Drops every query param that is not explicitly allowed, and the fragment with them: implicit
+ * OAuth flows deliver tokens there. A value that is not a parseable absolute URL is cut at the
+ * first "?" instead, which is the safe reading of anything URL-shaped.
+ */
+const sanitiseUrl = (raw: string): string => {
+  try {
+    const url = new URL(raw);
+    Array.from(url.searchParams.keys()).forEach((key) => {
+      if(!SAFE_QUERY_PARAMS.has(key)) {url.searchParams.delete(key);}
+    })
+    url.hash = "";
+
+    return url.toString();
+  } catch {
+    return raw.split("?")[0];
+  }
+}
+
+const redactSecrets = (text: string): string => text.replace(JWT_PATTERN, "[redacted-jwt]");
+
+/**
+ * The only hook every signal passes through, including the ones the SDK raises on its own.
+ * RedactSensitiveDataHook runs in the logger's beforeHooks, so it covers faroLoggerHook and
+ * nothing else: an unhandled rejection or a navigation event is scrubbed here or not at all.
+ *
+ * page.url is replaced rather than mutated because Faro merges metas shallowly per top-level
+ * key, so the nested page object can be shared with the live meta rather than owned by this item.
+ */
+const scrubSecrets = (item: ScrubbableItem): ScrubbableItem => {
+  try {
+    const url = item?.meta?.page?.url;
+    if(url) {
+      item.meta = { ...item.meta, page: { ...item.meta!.page, url: sanitiseUrl(url) } };
+    }
+
+    const payload = item?.payload;
+    if(payload) {
+      if(typeof payload.message === "string") {payload.message = redactSecrets(payload.message);}
+      if(typeof payload.value === "string") {payload.value = redactSecrets(payload.value);}
+
+      // Event attributes carry URLs of their own — faro.navigation is the one that matters here.
+      const attributes = payload.attributes;
+      if(attributes) {
+        Object.keys(attributes).forEach((key) => {
+          const value = attributes[key];
+          if(typeof value === "string") {
+            attributes[key] = value.startsWith("http") ? sanitiseUrl(value) : redactSecrets(value);
+          }
+        })
+      }
+    }
+  } catch {
+    // Scrubbing runs inside the calling code path. A throw here would take that path down,
+    // and a signal that cannot be scrubbed is still better sent than crashing the app.
+  }
+
+  return item;
+}
+
+/**
  * Ambient context attached to every signal Faro sends — logs, exceptions and events alike.
  *
  * Registered with faro.metas.add() as a *getter*, which Faro re-evaluates on every capture.
@@ -138,7 +214,9 @@ const start = async (collectorUrl: string, options: FaroOptions) => {
       // Navigation and resource timing is roughly one event per resource loaded — the
       // highest-volume signal Faro emits, and not what these logs are for.
       ...getWebInstrumentations({ captureConsole: false, enablePerformanceInstrumentation: false })
-    ]
+    ],
+
+    beforeSend: scrubSecrets
   }) ?? sdk.faro;
 
   instance.metas.add(appContextMeta);

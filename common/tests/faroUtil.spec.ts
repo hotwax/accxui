@@ -147,6 +147,67 @@ describe("faroUtil", () => {
     });
   });
 
+  it("strips query params from page_url, keeping the path", async () => {
+    const { faroUtil } = await load();
+    await faroUtil.initialiseFaro({ collectorUrl: COLLECTOR });
+
+    const item = scrub({
+      meta: { page: { url: "https://company.hotwax.io/orders?shop=demo.myshopify.com&id_token=abc&hmac=def" } }
+    });
+
+    expect(item.meta.page.url).toBe("https://company.hotwax.io/orders");
+  });
+
+  it("keeps the params it is told are safe, and drops the fragment", async () => {
+    const { faroUtil } = await load();
+    await faroUtil.initialiseFaro({ collectorUrl: COLLECTOR });
+
+    const item = scrub({
+      meta: { page: { url: "https://company.hotwax.io/orders?tab=open&shop=demo.myshopify.com#access_token=xyz" } }
+    });
+
+    expect(item.meta.page.url).toBe("https://company.hotwax.io/orders?tab=open");
+  });
+
+  it("leaves a page_url that carries no query string alone", async () => {
+    const { faroUtil } = await load();
+    await faroUtil.initialiseFaro({ collectorUrl: COLLECTOR });
+
+    const item = scrub({ meta: { page: { url: "https://company.hotwax.io/orders" } } });
+
+    expect(item.meta.page.url).toBe("https://company.hotwax.io/orders");
+  });
+
+  it("redacts a JWT that reached a message", async () => {
+    const { faroUtil } = await load();
+    await faroUtil.initialiseFaro({ collectorUrl: COLLECTOR });
+
+    const token = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dBjftJeZ4CVPmB92K27uhbUJU1p1r";
+    const item = scrub({ payload: { message: "Auth failed for " + token } });
+
+    expect(item.payload.message).toBe("Auth failed for [redacted-jwt]");
+  });
+
+  it("sanitises URLs that arrive as event attributes", async () => {
+    const { faroUtil } = await load();
+    await faroUtil.initialiseFaro({ collectorUrl: COLLECTOR });
+
+    const item = scrub({
+      payload: { attributes: { to: "https://company.hotwax.io/settings?id_token=abc", trigger: "router" } }
+    });
+
+    expect(item.payload.attributes.to).toBe("https://company.hotwax.io/settings");
+    expect(item.payload.attributes.trigger).toBe("router");
+  });
+
+  it("passes a malformed item through rather than throwing into the caller", async () => {
+    const { faroUtil } = await load();
+    await faroUtil.initialiseFaro({ collectorUrl: COLLECTOR });
+
+    expect(() => scrub({})).not.toThrow();
+    expect(() => scrub({ meta: { page: {} } })).not.toThrow();
+  });
+
   const COLLECTOR = "https://faro-uat.hotwax.io/collect";
 
   /**
@@ -164,5 +225,10 @@ describe("faroUtil", () => {
   /** The meta Faro would attach to the next signal. */
   function meta() {
     return metasAdd.mock.calls[0][0]() as { user: Record<string, any> };
+  }
+
+  /** Runs a transport item through the beforeSend hook Faro was started with. */
+  function scrub(item: any) {
+    return initializeFaro.mock.calls[0][0].beforeSend(item);
   }
 });
