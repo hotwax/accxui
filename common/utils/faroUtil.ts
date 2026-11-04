@@ -1,4 +1,4 @@
-import type { Faro, LogLevel } from "@grafana/faro-web-sdk";
+import type { Faro, LogLevel, TransportItem } from "@grafana/faro-web-sdk";
 import type { LogEvent, LoggerHook, LogLevel as VueLogLevel } from "vue-logger-plugin";
 import { accxuiConfig } from "../core/configRegistry";
 import { commonUtil } from "./commonUtil";
@@ -29,6 +29,147 @@ const parseJson = (value: any, fallback: any = {}) => {
   } catch {
     return fallback;
   }
+}
+
+/**
+ * Query params removed from any URL before it is sent. A denylist, so params that carry real
+ * debugging value — orderId, facilityId, a filter — survive untouched.
+ */
+const SENSITIVE_PARAMS = new Set<string>([
+  "api_key", "token", "jwttoken", "shop", "code", "hmac",
+  "timestamp", "client_id", "state", "scope", "redirect_uri"
+]);
+
+/**
+ * The variants nobody remembers to list: id_token, access_token, refresh_token, clientSecret,
+ * apiKey. Matched on the param name, so a value that merely contains the word is left alone.
+ */
+const SENSITIVE_PARAM_PATTERN = /token|secret|password|signature|hmac|api[-_]?key/i;
+
+/** A JWT anywhere in free text — a token that reached a message or an attribute rather than a URL. */
+const JWT_PATTERN = /eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g;
+
+const isSensitiveParam = (name: string): boolean =>
+  SENSITIVE_PARAMS.has(name.toLowerCase()) || SENSITIVE_PARAM_PATTERN.test(name);
+
+/** The param name of a raw "name=value" pair, decoded where it can be. */
+const paramName = (pair: string): string => {
+  const name = pair.split("=")[0];
+
+  try {
+    return decodeURIComponent(name);
+  } catch {
+    return name;
+  }
+}
+
+/**
+ * Drops the sensitive pairs from a raw query or fragment string. Surviving pairs are passed
+ * through byte for byte rather than re-encoded, so nothing changes except what was removed.
+ */
+const filterParams = (raw: string): { value: string, removed: boolean } => {
+  let removed = false;
+
+  const kept = raw.split("&").filter((pair) => {
+    if(!pair) {
+      return false;
+    }
+    if(isSensitiveParam(paramName(pair))) {
+      removed = true;
+
+      return false;
+    }
+
+    return true;
+  })
+
+  return { value: kept.join("&"), removed };
+}
+
+/**
+ * Removes the named params from a URL's query string, and from its fragment when that carries
+ * params too — implicit OAuth flows deliver access_token there.
+ *
+ * Works on every URL shape: absolute, root-relative, "./orders?code=1", a bare "orders?hmac=x",
+ * and a query-only "?token=abc". Nothing is parsed as a URL, so no origin is invented and no
+ * path is normalised — the part before the "?" is copied through untouched and only the params
+ * are rewritten. If no sensitive param is present the original string is returned as it came in.
+ */
+const sanitiseUrl = (raw: string): string => {
+  const queryAt = raw.indexOf("?");
+  const hashAt = raw.indexOf("#");
+
+  if(queryAt === -1 && hashAt === -1) {
+    return raw;
+  }
+
+  // Prose, not a URL. A real URL carries no raw whitespace, and "Request failed? check the
+  // proxy" would otherwise be treated as a path plus a query.
+  if(/\s/.test(raw)) {
+    return raw;
+  }
+
+  const splitAt = queryAt === -1 ? hashAt : (hashAt === -1 ? queryAt : Math.min(queryAt, hashAt));
+  const prefix = raw.slice(0, splitAt);
+  const hasQuery = queryAt !== -1 && (hashAt === -1 || queryAt < hashAt);
+
+  const query = hasQuery ? raw.slice(queryAt + 1, hashAt === -1 ? undefined : hashAt) : "";
+  const fragment = hashAt === -1 ? "" : raw.slice(hashAt + 1);
+
+  const filteredQuery = hasQuery ? filterParams(query) : { value: "", removed: false };
+  // A fragment without "=" is a route, not a param list. Leave it alone.
+  const filteredFragment = fragment.includes("=") ? filterParams(fragment) : { value: fragment, removed: false };
+
+  if(!filteredQuery.removed && !filteredFragment.removed) {
+    return raw;
+  }
+
+  return prefix
+    + (filteredQuery.value ? "?" + filteredQuery.value : "")
+    + (filteredFragment.value ? "#" + filteredFragment.value : "");
+}
+
+const redactSecrets = (text: string): string => text.replace(JWT_PATTERN, "[redacted-jwt]");
+
+/**
+ * The only hook every signal passes through, including the ones the SDK raises on its own.
+ * RedactSensitiveDataHook runs in the logger's beforeHooks, so it covers faroLoggerHook and
+ * nothing else: an unhandled rejection or a navigation event is scrubbed here or not at all.
+ *
+ * page.url is replaced rather than mutated because Faro merges metas shallowly per top-level
+ * key, so the nested page object can be shared with the live meta rather than owned by this item.
+ */
+const scrubSecrets = (item: TransportItem): TransportItem => {
+  try {
+    const url = item?.meta?.page?.url;
+    if(url) {
+      item.meta = { ...item.meta, page: { ...item.meta!.page, url: sanitiseUrl(url) } };
+    }
+
+    const payload = item?.payload as Record<string, any> | undefined;
+    if(payload) {
+      if(typeof payload.message === "string") {payload.message = redactSecrets(payload.message);}
+      if(typeof payload.value === "string") {payload.value = redactSecrets(payload.value);}
+
+      // Event attributes carry URLs of their own — faro.navigation is the one that matters here.
+      const attributes = payload.attributes;
+      if(attributes) {
+        Object.keys(attributes).forEach((key) => {
+          const value = attributes[key];
+          if(typeof value === "string") {
+            // Both passes, unconditionally: sanitiseUrl returns anything that is not an
+            // absolute or root-relative URL untouched, so there is nothing to detect first.
+            attributes[key] = redactSecrets(sanitiseUrl(value));
+          }
+        })
+      }
+    }
+  } catch {
+    // Scrubbing runs inside the calling code path. A throw here would take that path down,
+    // and a signal that cannot be scrubbed is still better sent than crashing the app.
+  }
+
+  return item;
 }
 
 /**
@@ -138,7 +279,9 @@ const start = async (collectorUrl: string, options: FaroOptions) => {
       // Navigation and resource timing is roughly one event per resource loaded — the
       // highest-volume signal Faro emits, and not what these logs are for.
       ...getWebInstrumentations({ captureConsole: false, enablePerformanceInstrumentation: false })
-    ]
+    ],
+
+    beforeSend: scrubSecrets
   }) ?? sdk.faro;
 
   instance.metas.add(appContextMeta);
