@@ -1,4 +1,4 @@
-import type { Faro, LogLevel } from "@grafana/faro-web-sdk";
+import type { Faro, LogLevel, TransportItem } from "@grafana/faro-web-sdk";
 import type { LogEvent, LoggerHook, LogLevel as VueLogLevel } from "vue-logger-plugin";
 import { accxuiConfig } from "../core/configRegistry";
 import { commonUtil } from "./commonUtil";
@@ -48,12 +48,6 @@ const SENSITIVE_PARAM_PATTERN = /token|secret|password|signature|hmac|api[-_]?ke
 
 /** A JWT anywhere in free text — a token that reached a message or an attribute rather than a URL. */
 const JWT_PATTERN = /eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g;
-
-/** The part of a Faro transport item this hook touches, typed locally so the SDK stays a lazy import. */
-type ScrubbableItem = {
-  meta?: { page?: { url?: string } } & Record<string, any>;
-  payload?: Record<string, any>;
-}
 
 const isSensitiveParam = (name: string): boolean =>
   SENSITIVE_PARAMS.has(name.toLowerCase()) || SENSITIVE_PARAM_PATTERN.test(name);
@@ -145,14 +139,14 @@ const redactSecrets = (text: string): string => text.replace(JWT_PATTERN, "[reda
  * page.url is replaced rather than mutated because Faro merges metas shallowly per top-level
  * key, so the nested page object can be shared with the live meta rather than owned by this item.
  */
-const scrubSecrets = (item: ScrubbableItem): ScrubbableItem => {
+const scrubSecrets = (item: TransportItem): TransportItem => {
   try {
     const url = item?.meta?.page?.url;
     if(url) {
       item.meta = { ...item.meta, page: { ...item.meta!.page, url: sanitiseUrl(url) } };
     }
 
-    const payload = item?.payload;
+    const payload = item?.payload as Record<string, any> | undefined;
     if(payload) {
       if(typeof payload.message === "string") {payload.message = redactSecrets(payload.message);}
       if(typeof payload.value === "string") {payload.value = redactSecrets(payload.value);}
