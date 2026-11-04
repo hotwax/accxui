@@ -147,35 +147,91 @@ describe("faroUtil", () => {
     });
   });
 
-  it("strips query params from page_url, keeping the path", async () => {
+  it("removes the named params from page_url and keeps the rest", async () => {
     const { faroUtil } = await load();
     await faroUtil.initialiseFaro({ collectorUrl: COLLECTOR });
 
     const item = scrub({
-      meta: { page: { url: "https://company.hotwax.io/orders?shop=demo.myshopify.com&id_token=abc&hmac=def" } }
+      meta: { page: { url: "https://company.hotwax.io/orders?orderId=8831f2&shop=demo.myshopify.com&hmac=def" } }
     });
 
-    expect(item.meta.page.url).toBe("https://company.hotwax.io/orders");
+    expect(item.meta.page.url).toBe("https://company.hotwax.io/orders?orderId=8831f2");
   });
 
-  it("keeps the params it is told are safe, and drops the fragment", async () => {
+  it("keeps params that carry debugging value", async () => {
+    const { faroUtil } = await load();
+    await faroUtil.initialiseFaro({ collectorUrl: COLLECTOR });
+
+    const url = "https://company.hotwax.io/orders?facilityId=STORE_1&status=open&page=2";
+    const item = scrub({ meta: { page: { url } } });
+
+    // No secrets present, so the URL comes back exactly as it went in.
+    expect(item.meta.page.url).toBe(url);
+  });
+
+  it("catches token variants that are not in the list by name", async () => {
     const { faroUtil } = await load();
     await faroUtil.initialiseFaro({ collectorUrl: COLLECTOR });
 
     const item = scrub({
-      meta: { page: { url: "https://company.hotwax.io/orders?tab=open&shop=demo.myshopify.com#access_token=xyz" } }
+      meta: { page: { url: "https://company.hotwax.io/?id_token=a&access_token=b&clientSecret=c&apiKey=d&orderId=1" } }
     });
 
-    expect(item.meta.page.url).toBe("https://company.hotwax.io/orders?tab=open");
+    expect(item.meta.page.url).toBe("https://company.hotwax.io/?orderId=1");
   });
 
-  it("leaves a page_url that carries no query string alone", async () => {
+  it("filters the fragment without discarding what else is in it", async () => {
     const { faroUtil } = await load();
     await faroUtil.initialiseFaro({ collectorUrl: COLLECTOR });
 
-    const item = scrub({ meta: { page: { url: "https://company.hotwax.io/orders" } } });
+    const item = scrub({
+      meta: { page: { url: "https://company.hotwax.io/orders#access_token=xyz&view=list" } }
+    });
 
-    expect(item.meta.page.url).toBe("https://company.hotwax.io/orders");
+    expect(item.meta.page.url).toBe("https://company.hotwax.io/orders#view=list");
+  });
+
+  it("strips secrets from every relative URL shape, leaving the path exactly as it was", async () => {
+    const { faroUtil } = await load();
+    await faroUtil.initialiseFaro({ collectorUrl: COLLECTOR });
+
+    const attributes = {
+      rootRelative: "/settings?token=abc&tab=general",
+      dotRelative: "./orders?code=1&status=open",
+      bare: "orders?hmac=x&orderId=9",
+      queryOnly: "?jwtToken=zz&page=2",
+      parent: "../admin?api_key=k&q=1",
+      onlySecret: "/x?token=only"
+    };
+
+    const item = scrub({ payload: { attributes } });
+
+    // No origin invented, no path normalised: "./" and "../" survive as written.
+    expect(item.payload.attributes.rootRelative).toBe("/settings?tab=general");
+    expect(item.payload.attributes.dotRelative).toBe("./orders?status=open");
+    expect(item.payload.attributes.bare).toBe("orders?orderId=9");
+    expect(item.payload.attributes.queryOnly).toBe("?page=2");
+    expect(item.payload.attributes.parent).toBe("../admin?q=1");
+    // Nothing left to keep, so the "?" goes with it.
+    expect(item.payload.attributes.onlySecret).toBe("/x");
+  });
+
+  it("passes surviving params through byte for byte rather than re-encoding them", async () => {
+    const { faroUtil } = await load();
+    await faroUtil.initialiseFaro({ collectorUrl: COLLECTOR });
+
+    const item = scrub({ payload: { attributes: { to: "/orders?filter=a%2Fb&token=x" } } });
+
+    expect(item.payload.attributes.to).toBe("/orders?filter=a%2Fb");
+  });
+
+  it("leaves text that is not a URL alone, even when it contains a question mark", async () => {
+    const { faroUtil } = await load();
+    await faroUtil.initialiseFaro({ collectorUrl: COLLECTOR });
+
+    const item = scrub({ payload: { attributes: { reason: "Request failed? check the proxy" } } });
+
+    expect(item.payload.attributes.reason).toBe("Request failed? check the proxy");
   });
 
   it("redacts a JWT that reached a message", async () => {
@@ -186,18 +242,6 @@ describe("faroUtil", () => {
     const item = scrub({ payload: { message: "Auth failed for " + token } });
 
     expect(item.payload.message).toBe("Auth failed for [redacted-jwt]");
-  });
-
-  it("sanitises URLs that arrive as event attributes", async () => {
-    const { faroUtil } = await load();
-    await faroUtil.initialiseFaro({ collectorUrl: COLLECTOR });
-
-    const item = scrub({
-      payload: { attributes: { to: "https://company.hotwax.io/settings?id_token=abc", trigger: "router" } }
-    });
-
-    expect(item.payload.attributes.to).toBe("https://company.hotwax.io/settings");
-    expect(item.payload.attributes.trigger).toBe("router");
   });
 
   it("passes a malformed item through rather than throwing into the caller", async () => {
