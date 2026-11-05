@@ -49,7 +49,7 @@ VITE_FIREBASE_VAPID_KEY=""
 
 A new app uses its own app id and enum type (both must exist on the backend, with one enum per
 notification kind). Keep `VITE_FIREBASE_CONFIG` valid JSON with an empty `apiKey` locally:
-`firebaseUtil` parses it and skips setup when `apiKey` is empty. Never commit real values.
+BOPIS's setup store parses it and skips setup when `apiKey` is empty. Never commit real values.
 
 **Service worker:** copy `apps/bopis/public/firebase-messaging-sw.js` as is, changing only the
 `bopis-` tag prefix and the icon path. The deploy step replaces the whole line starting
@@ -91,11 +91,12 @@ the filter returns nothing.
 
 ## How BOPIS wires it (copy this)
 
-Read `apps/bopis/src/utils/firebaseUtil.ts`; it is the reference. The rules it encodes:
+Read `apps/bopis/src/store/notificationSetup.ts` and `apps/bopis/src/utils/firebaseUtil.ts`; they are the reference. The rules they encode:
 
 | File | What it does |
 |---|---|
-| `src/utils/firebaseUtil.ts` | the whole client side, below |
+| `src/store/notificationSetup.ts` | `useNotificationSetupStore`: token registration, Firebase listeners, the Enable chain, the device checks and the resume token check. A store because `postLogin` needs it too and it calls the API |
+| `src/utils/firebaseUtil.ts` | browser-only helpers, no API and no stores: the permission request, `canInitialiseWithoutPrompting`, the push worker (`ensurePushWorker`, `waitForActivation`), the platform check and the locally recorded token |
 | `src/store/user.ts` | `postLogin`: mint the device id once (`setFirebaseDeviceId(generateDeviceId())` when empty); read **this device's** subscriptions; register only if there are any **and** permission is already `granted`. `preLogout`: remove the token. `postLogout`: `clearNotificationState()` |
 | `src/main.ts` | passes `postLogin`, `preLogout`, `postLogout` to `initialiseConfig` (**accxui-auth**) |
 | `src/App.vue` | on load (`postLogin` doesn't run on a reload): the same as login: mint the id if missing, read this device's subscriptions, register only when already granted |
