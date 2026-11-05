@@ -91,11 +91,12 @@ the filter returns nothing.
 
 ## How BOPIS wires it (copy this)
 
-Read `apps/bopis/src/store/notificationSetup.ts` and `apps/bopis/src/utils/firebaseUtil.ts`; they are the reference. The rules they encode:
+Read `apps/bopis/src/store/notificationSetup.ts`, `apps/bopis/src/composables/useNotificationDeviceSetup.ts` and `apps/bopis/src/utils/firebaseUtil.ts`; they are the reference. The rules they encode:
 
 | File | What it does |
 |---|---|
-| `src/store/notificationSetup.ts` | `useNotificationSetupStore`: token registration, Firebase listeners, the Enable chain, the device checks and the resume token check. A store because `postLogin` needs it too and it calls the API |
+| `src/store/notificationSetup.ts` | `useNotificationSetupStore`: token registration (`registerToken`), `initialiseFirebaseMessaging` with its listeners, the resume token check, and `lastInitialiseError`. A store because `postLogin` needs it too, and a store can't call a composable |
+| `src/composables/useNotificationDeviceSetup.ts` | what only the screens use: the Enable chain (`setUpNotificationsOnThisDevice`), `getNotificationHealthIssue` and `isDeviceSetUp`. Calls the store to register |
 | `src/utils/firebaseUtil.ts` | browser-only helpers, no API and no stores: the permission request, `canInitialiseWithoutPrompting`, the push worker (`ensurePushWorker`, `waitForActivation`), the platform check and the locally recorded token |
 | `src/store/user.ts` | `postLogin`: mint the device id once (`setFirebaseDeviceId(generateDeviceId())` when empty); read **this device's** subscriptions; register only if there are any **and** permission is already `granted`. `preLogout`: remove the token. `postLogout`: `clearNotificationState()` |
 | `src/main.ts` | passes `postLogin`, `preLogout`, `postLogout` to `initialiseConfig` (**accxui-auth**) |
