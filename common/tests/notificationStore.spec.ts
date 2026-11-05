@@ -118,3 +118,29 @@ describe("reading preferences", () => {
     expect(lastCall().params.deviceId).toBe("DEVICE-B");
   });
 });
+
+describe("logout and reload", () => {
+  it("keeps the device id on logout: the backend keeps this device's subscriptions, and the next login re-registers the token under the same id to get them back", () => {
+    const store = useNotificationStore();
+    store.setFirebaseDeviceId("DEVICE-A");
+    store.clearNotificationState();
+    expect(store.getFirebaseDeviceId).toBe("DEVICE-A");
+  });
+
+  it("does not persist isFirebaseInitialised: after a reload the Firebase listeners are gone and setup has to run again", async () => {
+    const { default: piniaPluginPersistedstate } = await import("pinia-plugin-persistedstate");
+    const { createApp } = await import("vue");
+    localStorage.clear();
+    const pinia = createPinia().use(piniaPluginPersistedstate);
+    createApp({}).use(pinia);
+    setActivePinia(pinia);
+    const store = useNotificationStore();
+    store.isFirebaseInitialised = true;
+    store.setFirebaseDeviceId("DEVICE-A");
+    await Promise.resolve();
+
+    const saved = JSON.parse(localStorage.getItem("notification") || "{}");
+    expect(saved.firebaseDeviceId).toBe("DEVICE-A");
+    expect(saved).not.toHaveProperty("isFirebaseInitialised");
+  });
+});

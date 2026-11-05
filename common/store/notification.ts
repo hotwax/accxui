@@ -202,5 +202,8 @@ export const useNotificationStore = defineStore("notification", {
       this.isFirebaseInitialised = false;
     }
   },
-  persist: true
+  // isFirebaseInitialised describes this page, not the session: the Firebase listeners it guards are
+  // gone after a reload. Persisting it made every reload skip setup, so foreground messages stopped
+  // reaching the app and a device refused permission once could never register until logout.
+  persist: { omit: ["isFirebaseInitialised"] }
 });
