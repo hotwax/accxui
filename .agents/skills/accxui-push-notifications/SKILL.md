@@ -18,6 +18,13 @@ preference screen. BOPIS is the working reference (`apps/bopis`); Fulfillment wi
   enums of type `VITE_NOTIF_ENUM_TYPE_ID`.
 - The backend sends to topics. A **device** receives a topic once it has registered its FCM token
   (`POST firebase/token`) and the user has subscribed the topic for that device (`POST firebase/topic`).
+- Both backend tables are keyed by **device**: the token (`UserLoginFirebaseClient`: user, device,
+  app) and the subscriptions (`FirebaseNotificationTopicUser`: topic, user, device). `POST firebase/topic`
+  requires a `deviceId`. Registering a token subscribes it to the topics already saved for that device.
+- `DELETE firebase/token` disconnects the token and deletes its row but **keeps the device's
+  subscriptions**, so a device keeps one id for good: the next login re-registers under the same id
+  and the subscriptions come back. `POST firebase/token` returns early when a row exists for the
+  device, even if the token differs, so a changed token is registered by deleting the row first.
 - The app registers the device **only when the user has at least one subscription**, and removes the
   token on logout and when the last subscription is turned off.
 
@@ -73,8 +80,8 @@ usable.
 | `fetchAllNotificationPrefs(appId, userId, deviceId?)` | the user's subscribed topics into `allNotificationPrefs` |
 | `fetchNotificationPreferences(enumTypeId, appId, userId, topicNameFor, deviceId?)` | the kinds into `notificationPrefs`: the enum rows (`enumId`, `description`, …) each with `isEnabled` = subscribed |
 | `subscribeTopic(topic, appId, deviceId?)` / `unsubscribeTopic(…)` | **resolve `true`/`false`, never reject**. "Already subscribed" counts as `true`. `deviceId` defaults to the stored one |
-| `isFirebaseInitialised` | set by the app once registration ran (BOPIS's guard); persisted, reset by `clearNotificationState()` |
-| `clearNotificationState()` | empties notifications and prefs, resets the flag; keeps `firebaseDeviceId` |
+| `isFirebaseInitialised` | set by the app once the backend accepted a token; **not persisted** (the Firebase listeners are gone after a reload, so a persisted `true` skipped setup), reset by `clearNotificationState()` |
+| `clearNotificationState()` | empties notifications and prefs, resets the flag; **keeps `firebaseDeviceId`** on purpose (see above) |
 
 Each state field has a `get…` getter (`getNotifications`, `getNotificationPrefs`,
 `getAllNotificationPrefs`, `getFirebaseDeviceId`, `getUnreadNotificationsStatus`) and a `set…`
@@ -84,153 +91,60 @@ the filter returns nothing.
 
 ## How BOPIS wires it (copy this)
 
+Read `apps/bopis/src/utils/firebaseUtil.ts`; it is the reference. The rules it encodes:
+
 | File | What it does |
 |---|---|
-| `src/utils/firebaseUtil.ts` | `initialiseFirebaseMessaging()`: one function around `initialiseFirebaseApp` |
-| `src/store/user.ts` | `postLogin`: load the user's subscriptions, register only if there are any. `preLogout`: remove the token. `postLogout`: `clearNotificationState()` |
+| `src/utils/firebaseUtil.ts` | the whole client side, below |
+| `src/store/user.ts` | `postLogin`: mint the device id once (`setFirebaseDeviceId(generateDeviceId())` when empty); read **this device's** subscriptions; register only if there are any **and** permission is already `granted`. `preLogout`: remove the token. `postLogout`: `clearNotificationState()` |
 | `src/main.ts` | passes `postLogin`, `preLogout`, `postLogout` to `initialiseConfig` (**accxui-auth**) |
-| `src/App.vue` | on load, when authenticated and the user has subscriptions, registers again (`postLogin` doesn't run on a reload) |
-| `src/views/Settings.vue` | one toggle per notification kind for the current facility |
-| `src/components/NotificationPreferenceModal.vue` | the same kinds as a form, saved together; opened from the Notifications page |
+| `src/App.vue` | on load (`postLogin` doesn't run on a reload): the same as login: mint the id if missing, read this device's subscriptions, register only when already granted |
+| `src/views/Settings.vue` | one toggle per kind, read for this device; an **Enable** item on the card whenever `getNotificationHealthIssue()` reports something missing |
+| `src/components/NotificationPreferenceModal.vue` | the same kinds as a form; asks permission from the Save tap, registers the device if it isn't yet, subscribes with this device's id |
 | `src/views/Notifications.vue` | lists `getNotifications` (`notification.data.title` / `.body`, `time`) |
 | `src/views/Orders.vue` | the bell: `setUnreadNotificationsStatus(false)`, then `/notifications` |
 | `public/firebase-messaging-sw.js` | the service worker (below) |
 | `.env.example` | the four `VITE_*` names |
 
-Imports used below: `firebaseMessaging`, `useNotificationStore`, `commonUtil`, `emitter`,
-`translate`, `useAuth` from `@common`; `firebaseUtil` from `@/utils/firebaseUtil`; `DateTime` from
-`luxon`. `currentFacility` and `userProfile` come from the app's own stores.
+**Permission only from a tap.** `Notification.requestPermission()` outside a user gesture is refused
+by iOS and Firefox, which leave permission at `default` with nothing visibly wrong. So:
+- Login and app mount call `initialiseFirebaseMessaging` only when `canInitialiseWithoutPrompting()`
+  (permission already `granted`).
+- Asking happens in a tap, **before that handler's first `await`**:
+  `requestNotificationPermissionFromGesture()` in the Settings toggle and the modal's Save, and
+  `setUpNotificationsOnThisDevice()` behind Settings' Enable button, which calls
+  `Notification.requestPermission()` synchronously and then runs the chain.
 
-### Registering the device
+**`setUpNotificationsOnThisDevice()`**: permission → config → `isSupported()` →
+`ensurePushWorker()` (registers `/firebase-messaging-sw.js` at the SDK's scope and waits for
+`activated`, since `getToken` subscribes before the worker is active and fails with `AbortError`) →
+`initialiseFirebaseMessaging` → `isDeviceSetUp()`. It stops at the first step that
+fails and returns `failedStep`, which Settings turns into a toast.
 
-```ts
-// src/utils/firebaseUtil.ts
-import { firebaseMessaging, useNotificationStore } from "@common";
-import { DateTime } from "luxon";
+**`initialiseFirebaseMessaging()`** returns whether the backend accepted the token:
+- registers the token with `api()` directly and checks `commonUtil.hasError`, because
+  `storeClientRegistrationToken` swallows failures; the accepted token is kept in localStorage so
+  `isDeviceSetUp` / `getNotificationHealthIssue` judge on facts;
+- **deletes the device's row before posting** whenever the token differs from the one the backend
+  confirmed (or none is recorded): `POST firebase/token` returns early on an existing row and keeps
+  the old token. It aborts, without posting, unless the delete succeeded or the row was missing;
+- attaches a resume check (`visibilitychange` / `focus`, at most once a minute) that asks
+  `getToken` again and re-registers a rotated token, only while this session's device is registered;
+- sets `isFirebaseInitialised` **only** when a token was accepted;
+- only the listener from the latest call delivers, so calling it again never doubles notifications;
+- subscribes nothing itself: storing the token subscribes it to the topics already saved for this
+  device. A user switches notifications on per device; a new device does not inherit another's.
 
-const initialiseFirebaseMessaging = async () => {
-  const notificationStore = useNotificationStore();
-  if (notificationStore.isFirebaseInitialised) return;
-
-  const appFirebaseConfig = JSON.parse(import.meta.env.VITE_FIREBASE_CONFIG as any);
-  const appFirebaseVapidKey = import.meta.env.VITE_FIREBASE_VAPID_KEY;
-
-  if (appFirebaseConfig && appFirebaseConfig.apiKey) {
-    await firebaseMessaging.initialiseFirebaseApp(
-      appFirebaseConfig,
-      appFirebaseVapidKey,
-      async (token: string) => {
-        await notificationStore.storeClientRegistrationToken(token, firebaseMessaging.generateDeviceId(notificationStore.getFirebaseDeviceId), import.meta.env.VITE_NOTIF_APP_ID);
-      },
-      (notification: any) => {
-        notificationStore.addNotification({ ...notification.notification, isForeground: notification.isForeground, time: DateTime.now().toMillis() });
-      }
-    );
-    notificationStore.isFirebaseInitialised = true;
-  }
-};
-
-export const firebaseUtil = { initialiseFirebaseMessaging };
-```
-
-An app whose build runs the shared `dbConfig` lint (Company, Order Manager) rejects a store call in
-`src/utils`; there, put the same function in a user-store action instead. BOPIS's and Fulfillment's builds don't lint.
-
-### Login, reload, logout
-
-```ts
-// src/store/user.ts, inside postLogin after the profile and facilities are loaded
-const notificationStore = useNotificationStore();
-await notificationStore.fetchAllNotificationPrefs(import.meta.env.VITE_NOTIF_APP_ID as any, this.current.userId);
-// Register the device token only when there are notification preferences already set
-if (notificationStore.getAllNotificationPrefs?.length) {
-  await firebaseUtil.initialiseFirebaseMessaging();
-}
-
-// preLogout: the session is still valid here
-const notificationStore = useNotificationStore();
-if (notificationStore.getFirebaseDeviceId) {
-  await notificationStore.removeClientRegistrationToken(notificationStore.getFirebaseDeviceId, import.meta.env.VITE_NOTIF_APP_ID as any);
-}
-
-// postLogout
-useNotificationStore().clearNotificationState();
-```
-
-```ts
-// src/App.vue, onMounted
-const allNotificationPrefs = computed(() => useNotificationStore().getAllNotificationPrefs);
-if (isAuthenticated.value && allNotificationPrefs.value?.length) {
-  await firebaseUtil.initialiseFirebaseMessaging();
-}
-```
-
-### Preferences
-
-Load the kinds for the current facility whenever the screen opens or the facility changes (the
-modal and the Settings page both change them):
-
-```ts
-await useNotificationStore().fetchNotificationPreferences(
-  import.meta.env.VITE_NOTIF_ENUM_TYPE_ID,
-  import.meta.env.VITE_NOTIF_APP_ID,
-  userProfile.value?.userId,
-  (enumId: string) => firebaseMessaging.generateTopicName(commonUtil.getOMSInstanceName(), currentFacility.value?.facilityId, enumId),
-);
-// → getNotificationPrefs: the enums, each with isEnabled
-```
-
-One toggle (Settings):
-
-```ts
-async function updateNotificationPref(enumId: string) {
-  let isToggledOn = false;
-  const notificationStore = useNotificationStore();
-  try {
-    if (!firebaseMessaging.isFcmConfigured(import.meta.env.VITE_FIREBASE_CONFIG)) {
-      commonUtil.showToast(translate("Notification preferences not updated. Please try again."));
-      return;
-    }
-    emitter.emit("presentLoader", { backdropDismiss: false });
-    const topicName = firebaseMessaging.generateTopicName(commonUtil.getOMSInstanceName(), currentFacility.value?.facilityId, enumId);
-    const pref = notificationPrefs.value.find((p: any) => p.enumId === enumId);
-    pref.isEnabled
-      ? await notificationStore.unsubscribeTopic(topicName, import.meta.env.VITE_NOTIF_APP_ID)
-      : await notificationStore.subscribeTopic(topicName, import.meta.env.VITE_NOTIF_APP_ID);
-    isToggledOn = !pref.isEnabled;
-    pref.isEnabled = !pref.isEnabled;
-    notificationStore.setNotificationPrefs(notificationPrefs.value);
-    commonUtil.showToast(translate("Notification preferences updated."));
-  } catch (error) {
-    commonUtil.showToast(translate("Notification preferences not updated. Please try again."));
-  } finally {
-    emitter.emit("dismissLoader");
-  }
-
-  // First subscription on this device → register it; last one off → remove the token.
-  if (!allNotificationPrefs.value.length && isToggledOn) {
-    await firebaseUtil.initialiseFirebaseMessaging();
-  } else if (allNotificationPrefs.value.length == 1 && !isToggledOn) {
-    await notificationStore.removeClientRegistrationToken(firebaseDeviceId.value, import.meta.env.VITE_NOTIF_APP_ID);
-  }
-  await notificationStore.fetchAllNotificationPrefs(import.meta.env.VITE_NOTIF_APP_ID, userProfile.value?.userId);
-}
-```
-
-Settings template: one `ion-toggle` per `notificationPrefs` entry, label `pref.description`,
-`:checked="pref.isEnabled"`, `@click.prevent="updateNotificationPref(pref.enumId)"`, shown when
-`isFcmConfigured` is true.
+**Toggles** pass `getFirebaseDeviceId` to `subscribeTopic` / `unsubscribeTopic` /
+`fetchNotificationPreferences` / `fetchAllNotificationPrefs`, and treat a `false` from
+subscribe/unsubscribe as a failure: show the error toast, leave the switch, and skip the
+register / remove-token step (a refused subscribe read as "last one off" would de-register the device).
+The first switch on for this device registers it when permission is granted; the last one off
+removes the token.
 
 Notifications page: `ion-list` over `getNotifications`, each item `notification.data.title`,
 `notification.data.body` and the relative `notification.time`; a button opens the preferences modal.
 The bell elsewhere calls `setUnreadNotificationsStatus(false)` and routes to `/notifications`.
-
-Several kinds saved at once (the modal): collect the enums to subscribe and to unsubscribe, then
-send them together with `subscribeTopic` / `unsubscribeTopic` for each, built with the same
-`generateTopicName`.
-
-`subscribeTopic` / `unsubscribeTopic` resolve `true` when the backend confirmed the change and
-`false` when it didn't (they don't throw); read the value if a screen needs to tell the two apart.
 
 ## Service worker rules
 
@@ -250,7 +164,11 @@ send them together with `subscribeTopic` / `unsubscribeTopic` for each, built wi
 | Mistake | Result | Fix |
 |---|---|---|
 | Registering the device for every user at login | permission prompts and tokens for users with no subscriptions | only when `getAllNotificationPrefs` is non-empty |
-| Calling `Notification.requestPermission()` yourself before init | iOS refuses out of a user gesture | let `initialiseFirebaseApp` ask, only when not granted |
+| Initialising from login or app mount while permission is `default` | the prompt is refused outside a gesture and permission can stay stuck | `canInitialiseWithoutPrompting()` there; ask from a tap, before its first `await` |
+| Setting `isFirebaseInitialised` whatever the result | a device refused once never registers until logout | set it only when the backend accepted the token |
+| Subscribing without this device's id, or ignoring a `false` | the backend refuses it and the switch reads on with nothing saved | mint the id at login, pass it, treat `false` as failure |
+| Posting a changed token without deleting the row | the backend keeps the old token and the device receives nothing | delete, then post (`registerToken`) |
+| Clearing `firebaseDeviceId` on logout | the next login registers a new id with no subscriptions | keep the id |
 | Removing the token in `postLogout` | the session is gone by then, the DELETE fails | `preLogout` |
 | No `App.vue` call | after a reload the device isn't set up until the next login | register again when authenticated with subscriptions |
 | A push handler that shows nothing for some payloads | Safari revokes the subscription | always `showNotification` |
