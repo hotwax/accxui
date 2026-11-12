@@ -25,6 +25,7 @@ vi.mock("../utils/commonUtil", () => ({
 }));
 vi.mock("../db/sync/channels", () => ({
   createTokenPublisher: () => ({ publish: vi.fn(), close: vi.fn() }),
+  pollingTokenChannel: (omsInstance: string) => `token:${omsInstance}`,
 }));
 
 import Dexie from "dexie";
