@@ -268,38 +268,66 @@ export function useAuth() {
   // cleared first: it belongs to whichever OMS was verified last, and keeping it after a
   // failed check would send the next login to that other instance.
   const fetchLoginOptions = async () => {
-    clearBackendMode();
     loginOption.value = {}
     cookieHelper().remove("maarg")
     try {
       let resp;
-      let isMoquiOms = commonUtil.isMoqui();
+      let isMoquiOms: boolean;
 
-      if(isMoquiOms) {
-        // App is built strictly for Moqui — no OFBiz endpoint to try first.
+      const currentOms = (cookieHelper().get("oms") as string || "").trim().toLowerCase();
+      const hasSavedMode = (): boolean | null => {
+        try {
+          const raw = sessionStorage.getItem(backendStorageKey) || localStorage.getItem(backendStorageKey);
+          const saved = raw ? JSON.parse(raw) : null;
+          if (currentOms && saved?.oms === currentOms && typeof saved?.isMoqui === "boolean") {
+            return saved.isMoqui;
+          }
+        } catch { /* Storage unavailable */ }
+        return null;
+      };
+
+      const savedMode = hasSavedMode();
+
+      if (commonUtil.isMoqui() || currentOms.includes("maarg") || savedMode === true) {
+        isMoquiOms = true;
         resp = await api({
           url: "admin/checkLoginOptions",
           method: "GET",
           baseURL: commonUtil.getOmsURL(true)
         });
+        if (commonUtil.hasError(resp)) throw new Error("Moqui check failed");
+      } else if (savedMode === false) {
+        isMoquiOms = false;
+        resp = await api({
+          url: "checkLoginOptions",
+          method: "GET",
+          baseURL: commonUtil.getOmsURL(false)
+        });
+        if (commonUtil.hasError(resp) || resp.data?._ERROR_MESSAGE_) throw new Error("OFBiz check failed");
       } else {
-        try {
-          // Try the entered OMS as an OFBiz instance first (default when VITE_OMS_TYPE is unset).
-          resp = await api({
-            url: "checkLoginOptions",
-            method: "GET",
-            baseURL: commonUtil.getOmsURL(false)
-          });
-          if(commonUtil.hasError(resp)) throw new Error(resp.data._ERROR_MESSAGE_);
-        } catch (ofbizError) {
-          //If OFBiz checkLoginOptions faild considering that this is the Moqui only setup and making call to moqui checkLoginOptions
-          isMoquiOms = true;
-          resp = await api({
-            url: "admin/checkLoginOptions",
-            method: "GET",
-            baseURL: commonUtil.getOmsURL(true)
-          });
-        }
+        // Unknown backend: probe both OFBiz and Moqui in parallel.
+        // Whichever valid 200 response fulfills first wins.
+        const ofbizProbe = Promise.resolve().then(() => api({
+          url: "checkLoginOptions",
+          method: "GET",
+          baseURL: commonUtil.getOmsURL(false)
+        })).then(res => {
+          if (!res || !res.data || commonUtil.hasError(res) || res.data?._ERROR_MESSAGE_) throw new Error("OFBiz check failed");
+          return { resp: res, isMoqui: false };
+        });
+
+        const moquiProbe = Promise.resolve().then(() => api({
+          url: "admin/checkLoginOptions",
+          method: "GET",
+          baseURL: commonUtil.getOmsURL(true)
+        })).then(res => {
+          if (!res || !res.data || commonUtil.hasError(res) || res.data?._ERROR_MESSAGE_) throw new Error("Moqui check failed");
+          return { resp: res, isMoqui: true };
+        });
+
+        const winner = await Promise.any([ofbizProbe, moquiProbe]);
+        resp = winner.resp;
+        isMoquiOms = winner.isMoqui;
       }
 
       if(!commonUtil.hasError(resp)) {
@@ -327,7 +355,8 @@ export function useAuth() {
         return true
       }
     } catch (error) {
-      logger.error(error)
+      clearBackendMode();
+      logger.error(error);
     }
     return false
   };
