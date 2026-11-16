@@ -18,12 +18,20 @@ describe('configRegistry & unregisterLegacyServiceWorkers', () => {
     }
   })
 
-  it('unregisters all service workers when getRegistrations returns active workers', async () => {
+  it('unregisters legacy PWA service workers within the current app scope', async () => {
     const unregister1 = vi.fn().mockResolvedValue(true)
     const unregister2 = vi.fn().mockResolvedValue(true)
     const fakeRegistrations = [
-      { unregister: unregister1 },
-      { unregister: unregister2 }
+      {
+        scope: window.location.origin + '/',
+        active: { scriptURL: window.location.origin + '/sw.js' },
+        unregister: unregister1
+      },
+      {
+        scope: window.location.origin + '/',
+        active: { scriptURL: window.location.origin + '/service-worker.js' },
+        unregister: unregister2
+      }
     ]
 
     const getRegistrations = vi.fn().mockResolvedValue(fakeRegistrations)
@@ -41,9 +49,78 @@ describe('configRegistry & unregisterLegacyServiceWorkers', () => {
     expect(unregister2).toHaveBeenCalledTimes(1)
   })
 
+  it('preserves Firebase Messaging push workers during cleanup', async () => {
+    const pwaUnregister = vi.fn().mockResolvedValue(true)
+    const fcmUnregister = vi.fn().mockResolvedValue(true)
+    const fcmScopeUnregister = vi.fn().mockResolvedValue(true)
+
+    const fakeRegistrations = [
+      {
+        scope: window.location.origin + '/',
+        active: { scriptURL: window.location.origin + '/sw.js' },
+        unregister: pwaUnregister
+      },
+      {
+        scope: window.location.origin + '/',
+        active: { scriptURL: window.location.origin + '/firebase-messaging-sw.js' },
+        unregister: fcmUnregister
+      },
+      {
+        scope: window.location.origin + '/firebase-cloud-messaging-push-scope',
+        active: { scriptURL: window.location.origin + '/push-worker.js' },
+        unregister: fcmScopeUnregister
+      }
+    ]
+
+    const getRegistrations = vi.fn().mockResolvedValue(fakeRegistrations)
+
+    Object.defineProperty(navigator, 'serviceWorker', {
+      value: { getRegistrations },
+      configurable: true,
+      writable: true
+    })
+
+    await unregisterLegacyServiceWorkers()
+
+    expect(pwaUnregister).toHaveBeenCalledTimes(1)
+    expect(fcmUnregister).not.toHaveBeenCalled()
+    expect(fcmScopeUnregister).not.toHaveBeenCalled()
+  })
+
+  it('preserves service workers from other path-scoped applications on the same origin', async () => {
+    const otherAppUnregister = vi.fn().mockResolvedValue(true)
+
+    // Current window is at origin root or whatever jsdom defaults to (e.g. http://localhost:3000/)
+    const fakeRegistrations = [
+      {
+        scope: window.location.origin + '/other-app/',
+        active: { scriptURL: window.location.origin + '/other-app/sw.js' },
+        unregister: otherAppUnregister
+      }
+    ]
+
+    const getRegistrations = vi.fn().mockResolvedValue(fakeRegistrations)
+
+    Object.defineProperty(navigator, 'serviceWorker', {
+      value: { getRegistrations },
+      configurable: true,
+      writable: true
+    })
+
+    await unregisterLegacyServiceWorkers('/my-app/')
+
+    expect(otherAppUnregister).not.toHaveBeenCalled()
+  })
+
   it('runs unregisterLegacyServiceWorkers during initialiseConfig', async () => {
     const unregister = vi.fn().mockResolvedValue(true)
-    const getRegistrations = vi.fn().mockResolvedValue([{ unregister }])
+    const getRegistrations = vi.fn().mockResolvedValue([
+      {
+        scope: window.location.origin + '/',
+        active: { scriptURL: window.location.origin + '/sw.js' },
+        unregister
+      }
+    ])
 
     Object.defineProperty(navigator, 'serviceWorker', {
       value: { getRegistrations },
