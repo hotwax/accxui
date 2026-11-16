@@ -63,31 +63,55 @@ export async function discoverDefault(state, target) {
   const entry = html.match(/<script[^>]*type="module"[^>]*src="([^"]+)"/)?.[1];
   if (!entry?.startsWith("/assets/"))
     return { defaultVersion: null, configuredEnvironment: null, source: null };
-  const code = await verifiedFile(state, target, entry);
-  let version = parseBuildMetadata(code);
-  const config =
-    code.match(/"environmentTypeId"\s*:\s*"(AppEnv\w+)"/)?.[1] || null;
-  if (!version) {
-    // Only chunks referenced by the active entry, never unrelated retained old assets.
-    const chunks = [
-      ...new Set(
-        [
-          ...code.matchAll(/["'](?:\.\/)?(assets\/Settings[^"']+\.js)["']/g),
-        ].map((m) => "/" + m[1]),
-      ),
-    ]
-      .filter((p) => !p.includes("legacy"))
-      .slice(0, 3);
-    for (const file of chunks) {
-      try {
-        version = parseBuildMetadata(await verifiedFile(state, target, file));
-        if (version) break;
-      } catch {}
+  // Walk only the chunks reachable from the active root entry, never unrelated
+  // retained old assets. Module-federation builds (e.g. fulfillment) start from
+  // a small bootstrap that imports the real bundle a few hops later.
+  let config = null;
+  const queue = [entry];
+  const seen = new Set(queue);
+  for (let i = 0; i < queue.length && i < MAX_ENTRY_SCRIPTS; i++) {
+    let code;
+    try {
+      code = await verifiedFile(state, target, queue[i]);
+    } catch (e) {
+      if (i === 0) throw e;
+      continue;
     }
+    config ||=
+      code.match(/"environmentTypeId"\s*:\s*"(AppEnv\w+)"/)?.[1] || null;
+    const version = parseBuildMetadata(code);
+    if (version)
+      return {
+        defaultVersion: version,
+        configuredEnvironment: config,
+        source: "Compiled build metadata",
+      };
+    for (const next of entryScriptImports(code, queue[i]))
+      if (!seen.has(next)) {
+        seen.add(next);
+        queue.push(next);
+      }
   }
-  return {
-    defaultVersion: version,
-    configuredEnvironment: config,
-    source: version ? "Compiled build metadata" : null,
-  };
+  return { defaultVersion: null, configuredEnvironment: config, source: null };
+}
+const MAX_ENTRY_SCRIPTS = 12;
+// Root-level /assets/*.js files a script loads, in the order worth checking:
+// Settings chunks (which carry build metadata in non-federated builds), then
+// dynamic imports (federation bootstrap -> app bundle), then static imports.
+export function entryScriptImports(code, from) {
+  const base = new URL(from, "https://hosting.invalid");
+  const resolve = (spec) => new URL(spec, base).pathname;
+  const collect = (re) => [...code.matchAll(re)].map((m) => resolve(m[1]));
+  const settings = [
+    ...code.matchAll(/["'](?:\.\/)?(assets\/Settings[^"']+\.js)["']/g),
+  ].map((m) => "/" + m[1]);
+  const dynamic = collect(
+    /(?:\bimport|__mfImport)\s*\(\s*["'](\.{1,2}\/[^"'\s]+\.js)["']/g,
+  );
+  const fixed = collect(
+    /(?:\bfrom|\bimport)\s*["'](\.{1,2}\/[^"'\s]+\.js)["']/g,
+  );
+  return [...new Set([...settings, ...dynamic, ...fixed])].filter(
+    (p) => /^\/assets\/[^/]+\.js$/.test(p) && !p.includes("legacy"),
+  );
 }
