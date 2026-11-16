@@ -417,6 +417,65 @@ test("public asset content must match the Hosting manifest", () => {
   assert.equal(matchesHostedHash(bytes, digest), true);
   assert.equal(matchesHostedHash(Buffer.from("different"), digest), false);
 });
+import { discoverDefault, entryScriptImports } from "./build-metadata.mjs";
+test("Default discovery follows a module-federation bootstrap to the app bundle", async () => {
+  // Shape of the live uat-fulfillment root build (v4.2.3).
+  const files = {
+    "/index.html":
+      '<script type="module" crossorigin src="/assets/mf-entry-bootstrap-0-a.js"></script>',
+    "/assets/mf-entry-bootstrap-0-a.js":
+      'const __mfImport=(s)=>import(s);(async()=>{const h=await __mfImport("./hostInit-b.js")})().then(()=>__mfImport("./index-c.js"));',
+    "/assets/hostInit-b.js":
+      'import{x}from"./loadShare-d.js";import("../remoteEntry.js");import("./localSharedImportMap-e.js");',
+    "/assets/loadShare-d.js": "export const x=1;",
+    "/assets/localSharedImportMap-e.js": "export default {};",
+    "/assets/index-c.js":
+      'import"./loadShare-d.js";import"./virtualExposes-f.js";n(()=>import("./index-g.js"),[],import.meta.url);',
+    "/assets/virtualExposes-f.js": "export default {};",
+    "/assets/index-g.js":
+      'const c={"environmentTypeId":"AppEnvUAT"};JSON.parse(\'{"version":"4.2.3","branch":"","tag":"v4.2.3","revision":"b539f46c","builtTime":1}\')',
+    // A retained version's bundle must never be read for the root Default.
+    "/v4.1.0/assets/index-z.js":
+      '{"version":"4.1.0","branch":"","tag":"v4.1.0","revision":"x","builtTime":1}',
+  };
+  const state = {
+    files: Object.entries(files).map(([path, body]) => ({
+      path,
+      hash: createHash("sha256").update(body).digest("hex"),
+    })),
+  };
+  const fetched = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    const path = new URL(url).pathname;
+    fetched.push(path);
+    return path in files
+      ? new Response(files[path])
+      : new Response("<html>", { status: 200 });
+  };
+  try {
+    assert.deepEqual(
+      await discoverDefault(state, { origin: "https://site.web.app" }),
+      {
+        defaultVersion: "v4.2.3",
+        configuredEnvironment: "AppEnvUAT",
+        source: "Compiled build metadata",
+      },
+    );
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+  assert.ok(!fetched.some((p) => p.startsWith("/v4.1.0/")));
+  assert.ok(!fetched.includes("/remoteEntry.js"));
+});
+test("entry imports stay inside root assets and check dynamic imports first", () =>
+  assert.deepEqual(
+    entryScriptImports(
+      'import"./a.js";import("./b.js");import("../remoteEntry.js");import"./legacy-c.js";"assets/Settings-d.js"',
+      "/assets/entry.js",
+    ),
+    ["/assets/Settings-d.js", "/assets/b.js", "/assets/a.js"],
+  ));
 test("rebuild replaces obsolete hashed assets only inside rebuilt version directories", () => {
   const before = [
     { path: "/index.html", hash: "root" },
