@@ -5,7 +5,6 @@ import { translate } from "../core/i18n";
 // Capacitor Plugins import removed for compatibility
 import { saveAs } from 'file-saver';
 import Papa from 'papaparse';
-import Encoding from 'encoding-japanese';
 import { CronExpressionParser as cronParser } from "cron-parser";
 import cronstrue from "cronstrue"
 import { useEmbeddedAppStore } from "../store/embeddedApp";
@@ -555,7 +554,12 @@ const downloadCsv = (csv: any, fileName: any) => {
   return blob;
 };
 
-const jsonToCsv = (file: any, options: JsonToCsvOption = {}) => {
+// Shift-JIS output needs encoding-japanese (~290 kB), which loads only when that encoding is asked
+// for, so it stays out of every app's startup bundle. That one case therefore resolves
+// asynchronously; every other encoding still returns the Blob synchronously.
+function jsonToCsv(file: any, options: JsonToCsvOption & { encode: { default: "shift-jis" } }): Promise<Blob>;
+function jsonToCsv(file: any, options?: JsonToCsvOption): Blob;
+function jsonToCsv(file: any, options: JsonToCsvOption = {}): Blob | Promise<Blob> {
   const csv = Papa.unparse(file, {
     ...options.parse
   });
@@ -565,20 +569,22 @@ const jsonToCsv = (file: any, options: JsonToCsvOption = {}) => {
     ...options.encode
   } as any;
 
-  let buffer: Uint8Array;
-  let blob: Blob;
+  const finish = (blob: Blob) => {
+    if (options.download) {
+      saveAs(blob, options.name ? options.name : "default.csv");
+    }
+    return blob;
+  }
+
   if (encoding.default === 'shift-jis') {
-    buffer = new Uint8Array(Encoding.convert(Encoding.stringToCode(csv), 'SJIS'));
-    blob = new Blob([buffer as any], { type: `application/csv;charset=${encoding.default}` });
-
-  } else {
-    blob = new Blob([csv], { type: `application/csv;charset=${encoding.default}` });
+    return import('encoding-japanese').then((module: any) => {
+      const Encoding = module.default ?? module;
+      const buffer = new Uint8Array(Encoding.convert(Encoding.stringToCode(csv), 'SJIS'));
+      return finish(new Blob([buffer as any], { type: `application/csv;charset=${encoding.default}` }));
+    });
   }
 
-  if (options.download) {
-    saveAs(blob, options.name ? options.name : "default.csv");
-  }
-  return blob;
+  return finish(new Blob([csv], { type: `application/csv;charset=${encoding.default}` }));
 }
 
 const copyToClipboard = async (value: string, text?: string) => {

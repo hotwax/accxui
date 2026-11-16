@@ -1,6 +1,4 @@
 import logger from "../core/logger";
-import { initializeApp } from "firebase/app";
-import { getMessaging, getToken, onMessage, isSupported } from "firebase/messaging";
 import { DateTime } from "luxon";
 
 /**
@@ -19,6 +17,13 @@ const initialiseFirebaseApp = async (
   onTokenReceived: (token: string) => Promise<void>,
   onMessageReceived: (payload: any) => void
 ): Promise<FirebaseInitialiseResult> => {
+  // Firebase loads only when an app turns on push notifications. Importing it at module level kept
+  // it in the startup bundle of every app that imports @common, push or not.
+  const [{ initializeApp }, { getMessaging, getToken, onMessage, isSupported }] = await Promise.all([
+    import("firebase/app"),
+    import("firebase/messaging")
+  ]);
+
   if (!await isSupported()) {
     logger.error("Notifications not supported");
     return { status: "unsupported" };

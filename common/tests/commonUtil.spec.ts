@@ -153,3 +153,30 @@ describe("commonUtil.getErrorMessage", () => {
     expect(msg(undefined)).toBe("");
   });
 });
+
+describe("commonUtil.jsonToCsv", () => {
+  const rows = [{ name: "テスト", qty: 1 }];
+
+  it("returns the Blob synchronously for the default encoding", () => {
+    const blob = commonUtil.jsonToCsv(rows);
+
+    expect(blob).toBeInstanceOf(Blob);
+    expect(blob.type).toBe("application/csv;charset=utf-8");
+  });
+
+  it("resolves a Shift-JIS Blob, loading the encoder only for that encoding", async () => {
+    const result = commonUtil.jsonToCsv(rows, { encode: { default: "shift-jis" } });
+    expect(result).toBeInstanceOf(Promise);
+
+    const blob = await result;
+    const bytes = await new Promise<Uint8Array>((resolve) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(new Uint8Array(reader.result as ArrayBuffer));
+      reader.readAsArrayBuffer(blob);
+    });
+    expect(blob.type).toBe("application/csv;charset=shift-jis");
+    // "name,qty\r\n" (10 bytes), then テスト as 2 bytes per character in Shift-JIS (3 in UTF-8), then ",1"
+    expect(bytes.length).toBe(18);
+    expect([bytes[10], bytes[11]]).toEqual([0x83, 0x65]); // テ
+  });
+});
