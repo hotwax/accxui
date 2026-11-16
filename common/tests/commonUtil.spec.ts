@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { commonUtil } from "../utils/commonUtil";
+import { beforeEach, describe, expect, expectTypeOf, it, vi } from "vitest";
+import { commonUtil, type JsonToCsvOption } from "../utils/commonUtil";
 
 describe("commonUtil local instance URLs", () => {
   beforeEach(() => {
@@ -178,5 +178,16 @@ describe("commonUtil.jsonToCsv", () => {
     // "name,qty\r\n" (10 bytes), then テスト as 2 bytes per character in Shift-JIS (3 in UTF-8), then ",1"
     expect(bytes.length).toBe(18);
     expect([bytes[10], bytes[11]]).toEqual([0x83, 0x65]); // テ
+  });
+
+  it("types the result as Blob | Promise<Blob> when the encoding is only known at runtime", async () => {
+    const options: JsonToCsvOption = { encode: { default: "shift-jis" } };
+    const result = commonUtil.jsonToCsv(rows, options);
+
+    expectTypeOf(result).toEqualTypeOf<Blob | Promise<Blob>>();
+    expectTypeOf(commonUtil.jsonToCsv(rows, { parse: {}, download: false })).toEqualTypeOf<Blob>();
+    expectTypeOf(commonUtil.jsonToCsv(rows, { encode: { default: "shift-jis" } })).toEqualTypeOf<Promise<Blob>>();
+    expect(result).toBeInstanceOf(Promise);
+    expect(await result).toBeInstanceOf(Blob);
   });
 });

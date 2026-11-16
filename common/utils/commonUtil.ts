@@ -556,9 +556,12 @@ const downloadCsv = (csv: any, fileName: any) => {
 
 // Shift-JIS output needs encoding-japanese (~290 kB), which loads only when that encoding is asked
 // for, so it stays out of every app's startup bundle. That one case therefore resolves
-// asynchronously; every other encoding still returns the Blob synchronously.
+// asynchronously; every other encoding still returns the Blob synchronously. When the encoding isn't
+// known at compile time (built at runtime, or options typed as JsonToCsvOption), the caller gets
+// Blob | Promise<Blob> and must handle both.
 function jsonToCsv(file: any, options: JsonToCsvOption & { encode: { default: "shift-jis" } }): Promise<Blob>;
-function jsonToCsv(file: any, options?: JsonToCsvOption): Blob;
+function jsonToCsv(file: any, options?: JsonToCsvOption & { encode?: { default?: "utf-8" } | null }): Blob;
+function jsonToCsv(file: any, options?: JsonToCsvOption): Blob | Promise<Blob>;
 function jsonToCsv(file: any, options: JsonToCsvOption = {}): Blob | Promise<Blob> {
   const csv = Papa.unparse(file, {
     ...options.parse
