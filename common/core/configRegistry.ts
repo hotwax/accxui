@@ -26,6 +26,23 @@ export const accxuiConfig = ref<Config>({
   router: ref(null)
 });
 
+export function unregisterLegacyServiceWorkers() {
+  if (
+    typeof window !== 'undefined' &&
+    'serviceWorker' in navigator &&
+    typeof navigator.serviceWorker?.getRegistrations === 'function'
+  ) {
+    return navigator.serviceWorker.getRegistrations().then((registrations) => {
+      for (const registration of registrations) {
+        registration.unregister();
+      }
+    }).catch(() => {
+      // Ignore background unregistration failures
+    });
+  }
+}
+
 export const initialiseConfig = (params: any) => {
   accxuiConfig.value = params
+  unregisterLegacyServiceWorkers()
 }

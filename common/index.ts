@@ -30,7 +30,7 @@ import { createDxpI18n, i18n, translate } from './core/i18n'
 import { firebaseMessaging } from './core/firebaseMessaging'
 import { useNotificationStore } from './store/notification'
 import { useEmbeddedAppStore } from './store/embeddedApp'
-import { initialiseConfig } from './core/configRegistry'
+import { initialiseConfig, unregisterLegacyServiceWorkers } from './core/configRegistry'
 import { onSessionCleared, clearSessionScopedState } from './core/sessionScope'
 import { useAuth, isMoquiOmsRef } from './composables/useAuth'
 
@@ -53,6 +53,7 @@ export {
   imagePreview,
   segmentHeight,
   initialiseConfig,
+  unregisterLegacyServiceWorkers,
   onSessionCleared,
   clearSessionScopedState,
   logger,
