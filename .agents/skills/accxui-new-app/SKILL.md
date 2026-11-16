@@ -98,7 +98,7 @@ export default defineConfig(({ mode }) => {
     base: appBuild ? `/${appBuild}/` : "/",
     build: { outDir: appBuild ? `dist/${appBuild}` : "dist" },
     plugins: [
-      commonEnvPlugin(),                 // root VITE_* (dev login, aliases) while serving; one luxon copy on build
+      commonEnvPlugin(),                 // root VITE_* (dev login, aliases) while serving only
       vue(),
       legacy(),
       localApiServerDiscoveryPlugin(),   // offers local OMS servers on the login page

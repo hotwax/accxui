@@ -49,8 +49,6 @@ One pnpm workspace: the framework lives in the accxui root (`common/`, root `pac
   serving**, only where the app's own value is empty. Never put credentials in an app's `.env` or
   `.env.local` (a production build reads them into the bundle), and never list a production instance in
   `VITE_ALIAS`.
-- On `vite build`, `commonEnvPlugin` also points bare `luxon` at luxon's ES build: cron-parser is
-  CommonJS and its `require("luxon")` would otherwise add luxon's Node build as a second copy.
 - Never commit `.env` or `.env.local`.
 
 ## Running locally
