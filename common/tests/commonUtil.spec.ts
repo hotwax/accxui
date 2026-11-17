@@ -191,3 +191,20 @@ describe("commonUtil.jsonToCsv", () => {
     expect(await result).toBeInstanceOf(Blob);
   });
 });
+
+describe("commonUtil.getRelativeTime", () => {
+  it.each([undefined, null, "", NaN, Infinity, "1700000000000"])("returns an empty string for %s", (value) => {
+    expect(commonUtil.getRelativeTime(value)).toBe("");
+  });
+
+  it("describes a valid timestamp relative to now", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-15T12:00:00Z"));
+    try {
+      expect(commonUtil.getRelativeTime(Date.now() + 2 * 60 * 60 * 1000)).toBe("in 2 hours");
+      expect(commonUtil.getRelativeTime(Date.now() - 3 * 24 * 60 * 60 * 1000)).toBe("3 days ago");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

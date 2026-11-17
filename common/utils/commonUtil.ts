@@ -886,6 +886,8 @@ function getDateAndTimeShort(time: any) {
 }
 
 function getRelativeTime(endTime: any) {
+  // A missing or non-numeric timestamp (e.g. a rule group with no schedule) has no relative time
+  if (typeof endTime !== "number" || !Number.isFinite(endTime)) return "";
   const timeDiff = DateTime.fromMillis(endTime).diff(DateTime.local());
   return DateTime.local().plus(timeDiff).toRelative();
 }
