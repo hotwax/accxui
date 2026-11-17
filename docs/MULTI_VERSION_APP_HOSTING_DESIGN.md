@@ -69,7 +69,9 @@ tenant should be on.
 - **Auth cookies** (`token`, `oms`, `expirationTime`, `userId`, `maarg`, via [`cookieHelper.ts`](../common/helpers/cookieHelper.ts))
   are `path=/`, `domain=hotwax.io` — domain-wide, so session state carries across version paths.
 - **Service worker**: `vite-plugin-pwa` with `registerType: 'autoUpdate'` and `selfDestroying: true`
-  (self-unregistering shim; no active per-version SW scope today).
+  (self-unregistering shim; no active per-version SW scope today). Apps that opt into the update prompt
+  (`appUpdatePwaOptions` + `useAppUpdate`) register a detect-only `sw.js` per base instead: scope `/` for
+  the root, `/vX.Y.Z/` for each version, with no fetch handler, so nothing is cached under either.
 - **Client-side storage is origin-scoped**, so the root bootstrap and every version bundle share the
   same cookies and `localStorage` — which is exactly how the persisted `appVersion` survives the
   bootstrap → versioned-bundle redirect.
