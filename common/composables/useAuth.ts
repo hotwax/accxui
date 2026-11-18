@@ -10,6 +10,7 @@ import emitter from "../core/emitter";
 import { accxuiConfig } from "../core/configRegistry";
 import { clearSessionScopedState } from "../core/sessionScope";
 import { getCanonicalPath } from "../utils/appVersionUtil";
+import { isServiceUnavailable, isServiceUnavailableError } from "../core/serviceAvailability";
 
 interface LoginOption {
   loginAuthType?: string,
@@ -167,7 +168,13 @@ export function useAuth() {
       // before `hasError()` can inspect the body - surface that message here instead.
       const serverError = commonUtil.getErrorMessage(err);
       logger.error("Failed to login", serverError);
-      commonUtil.showToast(`${translate("Failed to login.")} ${serverError}`);
+      // An app's postLogin often rewraps the axios error, so the last response decides: a server
+      // that could not answer is an outage to wait out, not a credential to re-enter.
+      if(isServiceUnavailableError(err) || isServiceUnavailable()) {
+        commonUtil.showToast(translate("Service temporarily unavailable. Please try again shortly."));
+      } else {
+        commonUtil.showToast(`${translate("Failed to login.")} ${serverError}`);
+      }
 
       return Promise.reject(new Error(serverError));
     }

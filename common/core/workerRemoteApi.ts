@@ -35,6 +35,16 @@ function isEmptyBodyError(err: unknown): boolean {
   return /unexpected end of (json )?input/i.test(String((err as Error).message ?? ""));
 }
 
+/** `Retry-After` in milliseconds: either delay-seconds or an HTTP date. Undefined when absent or unreadable. */
+export function parseRetryAfter(value: string | null | undefined): number | undefined {
+  if (!value) return undefined;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds)) return Math.max(0, seconds * 1000);
+  const at = Date.parse(value);
+
+  return Number.isNaN(at) ? undefined : Math.max(0, at - Date.now());
+}
+
 export default async function workerRemoteApi(customConfig: {
   url: string;
   method?: string;
@@ -82,20 +92,34 @@ export default async function workerRemoteApi(customConfig: {
     fetchOptions.body = JSON.stringify(data);
   }
 
-  const response = await fetch(fullUrl, fetchOptions);
+  let response: Response;
+  try {
+    response = await fetch(fullUrl, fetchOptions);
+  } catch (err: any) {
+    // No response at all (offline, DNS, connection reset): flagged so the sync harness backs off
+    // instead of mistaking it for a bug in the domain, which would also surface as a TypeError.
+    if (err && typeof err === "object") err.networkError = true;
+    throw err;
+  }
 
   let result: any = null;
   try {
     result = await response.json();
   } catch (err) {
-    if (!isEmptyBodyError(err)) throw err;
+    // A failed response whose body is not JSON (a gateway's HTML error page) still fails with its status.
+    if (!isEmptyBodyError(err) && response.ok) throw err;
     result = null;
   }
 
   if (!response.ok) {
-    // A parsed error body is thrown as-is: callers classify auth failures by sniffing its
-    // message, and wrapping it would break that. Only a bodyless failure becomes an Error.
-    throw result ?? new Error(`Request failed with status ${response.status}`);
+    // A parsed error body is thrown as-is, so callers keep reading Moqui's `errorCode` / `errors`
+    // from it; only a bodyless failure becomes an Error. Either way it carries the HTTP status, which
+    // is what the sync harness classifies by (a 503 that says "not authorized" is still a 503).
+    const error = result && typeof result === "object" ? result : new Error(`Request failed with status ${response.status}`);
+    error.status = response.status;
+    const retryAfterMs = parseRetryAfter(response.headers?.get?.("Retry-After"));
+    if (retryAfterMs !== undefined) error.retryAfterMs = retryAfterMs;
+    throw error;
   }
   return result;
 }

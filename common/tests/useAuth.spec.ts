@@ -27,6 +27,7 @@ vi.mock("../utils/commonUtil", async (importOriginal) => {
 const { useAuth } = await import("../composables/useAuth");
 const { accxuiConfig } = await import("../core/configRegistry");
 const { commonUtil } = await import("../utils/commonUtil");
+const { markServiceAvailable, markServiceUnavailable } = await import("../core/serviceAvailability");
 
 describe("logout reads the server's logout response", () => {
   const replace = vi.fn();
@@ -158,6 +159,36 @@ describe("login displays and logs extracted server error", () => {
     await expect(useAuth().login("user", "pass")).rejects.toBeInstanceOf(Error);
     expect(commonUtil.showToast).toHaveBeenCalledWith(expect.stringContaining("Failed to login."));
     expect(logger.error).toHaveBeenCalledWith("Failed to login", "");
+  });
+});
+
+describe("login during an outage", () => {
+  const postLogin = accxuiConfig.value.postLogin;
+
+  beforeEach(() => {
+    api.mockReset();
+    vi.mocked(commonUtil.showToast).mockClear();
+    useAuth().clearAuth();
+  });
+  afterEach(() => {
+    accxuiConfig.value.postLogin = postLogin;
+    markServiceAvailable();
+  });
+
+  it("says the service is unavailable when postLogin fails on a server fault", async () => {
+    accxuiConfig.value.postLogin = () => Promise.reject({ config: {}, response: { status: 500, data: {} } });
+
+    await expect(useAuth().login(undefined, undefined, "token", "")).rejects.toBeInstanceOf(Error);
+    expect(commonUtil.showToast).toHaveBeenCalledWith("Service temporarily unavailable. Please try again shortly.");
+  });
+
+  // Apps rewrap the axios error in postLogin (`new Error(error)`), so the last response decides.
+  it("says so too when the app rewrapped the error, from the last response", async () => {
+    markServiceUnavailable();
+    accxuiConfig.value.postLogin = () => Promise.reject(new Error("Error: Request failed with status code 500"));
+
+    await expect(useAuth().login(undefined, undefined, "token", "")).rejects.toBeInstanceOf(Error);
+    expect(commonUtil.showToast).toHaveBeenCalledWith("Service temporarily unavailable. Please try again shortly.");
   });
 });
 

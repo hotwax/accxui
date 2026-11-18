@@ -71,6 +71,40 @@ const DEFAULT_BASE_TICK_MS = 5_000;
  * and retrying every tick hammered an endpoint that kept failing (a 403, a gateway page).
  */
 export const RETRY_WITHOUT_INTERVAL_MS = 30_000;
+/**
+ * Backoff for a domain whose last pass failed because the server or the network was unavailable
+ * (a 5xx, 408, 429 or no response): 1 s, 2 s, 4 s … per consecutive failure, with jitter, capped
+ * here. A `Retry-After` from the server wins when it asks for longer.
+ */
+export const UNAVAILABLE_BASE_BACKOFF_MS = 1_000;
+export const UNAVAILABLE_MAX_BACKOFF_MS = 60_000;
+
+type ErrorKind = "auth" | "unavailable" | "error";
+
+/**
+ * Classify a failed request by its HTTP status, never by its message: a server fault that happens
+ * to say "not authorized" (Maarg's "Error finding UserAccount" on a broken connection) is not an
+ * expired session. `workerRemoteApi` sets `status` on whatever it throws, and `networkError` when the
+ * fetch got no response at all.
+ */
+export function classifyError(err: any): { kind: ErrorKind; isAuth: boolean; message: string } {
+  const message = err?.message ?? err?.errors ?? (typeof err === "string" ? err : JSON.stringify(err ?? ""));
+  const status = Number(err?.status ?? err?.statusCode ?? err?.response?.status ?? err?.errorCode);
+  let kind: ErrorKind = "error";
+  if (status === 401) kind = "auth";
+  else if (status >= 500 || status === 408 || status === 429) kind = "unavailable";
+  else if (err?.networkError === true) kind = "unavailable";
+
+  return { kind, isAuth: kind === "auth", message: String(message) };
+}
+
+/** The wait before retrying after the `failures`-th consecutive unavailable pass. */
+export function unavailableBackoffMs(failures: number, retryAfterMs?: number, random = Math.random): number {
+  const exponential = Math.min(UNAVAILABLE_MAX_BACKOFF_MS, UNAVAILABLE_BASE_BACKOFF_MS * 2 ** Math.max(0, failures - 1));
+  const jittered = exponential / 2 + random() * (exponential / 2);
+
+  return Math.max(jittered, Math.min(retryAfterMs ?? 0, UNAVAILABLE_MAX_BACKOFF_MS));
+}
 
 export function createSyncHarness(getDb: (omsInstance: string) => BaseDB): SyncHarness {
   /** Every database access goes through the instance's client. */
@@ -110,6 +144,8 @@ export function createSyncHarness(getDb: (omsInstance: string) => BaseDB): SyncH
   const lastRunAt: Record<string, number> = {};
   /** When a domain with no interval, by activation key, may next be retried after a failed pass. */
   const retryAt: Record<string, number> = {};
+  /** Consecutive unavailable passes, by activation key, so the backoff grows until one completes. */
+  const unavailableFailures: Record<string, number> = {};
   /** Due by its clock, and not waiting out a failure. Only scheduled runs wait; forced ones do not. */
   function dueNow(entries: ActiveDomain[], now: number): ActiveDomain[] {
     return dueDomains(entries, lastRunAt, now, (entry) => effectiveInterval(entry, getSyncDomain(entry.name)))
@@ -117,7 +153,7 @@ export function createSyncHarness(getDb: (omsInstance: string) => BaseDB): SyncH
   }
   /** Forget the run and retry clocks of every activation key not in `keep` (all of them when omitted). */
   function dropClocks(keep?: Set<string>): void {
-    for (const clock of [lastRunAt, retryAt]) {
+    for (const clock of [lastRunAt, retryAt, unavailableFailures]) {
       for (const key of Object.keys(clock)) {
         if (!keep?.has(key)) delete clock[key];
       }
@@ -143,14 +179,6 @@ export function createSyncHarness(getDb: (omsInstance: string) => BaseDB): SyncH
   const post = (msg: Record<string, unknown>) => {
     if (typeof self !== "undefined") self.postMessage(msg);
   };
-
-  function classifyError(err: any): { isAuth: boolean; message: string } {
-    const message = err?.message ?? (typeof err === "string" ? err : JSON.stringify(err ?? ""));
-    const status = err?.status ?? err?.statusCode ?? err?.response?.status;
-    const isAuth = status === 401 || /unauthor|not authorized|invalid.*token|\b401\b/i.test(message);
-
-    return { isAuth, message };
-  }
 
   function runExclusiveDomainOperation<T>(
     domain: string,
@@ -206,6 +234,7 @@ export function createSyncHarness(getDb: (omsInstance: string) => BaseDB): SyncH
       const interval = effectiveInterval(entry, domain);
       const completed = force || interval !== undefined || await clientFor(ctx.omsInstance).syncedThisLogin(entry.name);
       const at = Date.now();
+      delete unavailableFailures[clockKey];
       if (completed) {
         lastRunAt[clockKey] = at;
         delete retryAt[clockKey];
@@ -224,12 +253,27 @@ export function createSyncHarness(getDb: (omsInstance: string) => BaseDB): SyncH
     } catch (err) {
       // A domain with an interval waits that interval before retrying; one without waits
       // RETRY_WITHOUT_INTERVAL_MS, and stays due until a pass completes.
-      if (effectiveInterval(entry, domain) !== undefined) lastRunAt[clockKey] = Date.now();
-      else retryAt[clockKey] = Date.now() + RETRY_WITHOUT_INTERVAL_MS;
-      const { isAuth, message } = classifyError(err);
+      const failedAt = Date.now();
+      if (effectiveInterval(entry, domain) !== undefined) lastRunAt[clockKey] = failedAt;
+      else retryAt[clockKey] = failedAt + RETRY_WITHOUT_INTERVAL_MS;
+      const { kind, isAuth, message } = classifyError(err);
+      if (kind === "unavailable") {
+        // The server is down, not the request wrong: back off further on each failure, so a polled
+        // domain does not hit a recovering backend every interval.
+        const failures = (unavailableFailures[clockKey] ?? 0) + 1;
+        unavailableFailures[clockKey] = failures;
+        const backoffUntil = failedAt + unavailableBackoffMs(failures, (err as any)?.retryAfterMs);
+        retryAt[clockKey] = Math.max(retryAt[clockKey] ?? 0, backoffUntil);
+      } else {
+        delete unavailableFailures[clockKey];
+      }
       // `details` lets a domain that partly succeeded say which part failed (structured-cloneable data only).
       const details = (err as any)?.details;
-      post({ type: isAuth ? "auth-error" : "sync-error", domain: entry.name, message, ...(details ? { details } : {}) });
+      post({
+        type: isAuth ? "auth-error" : "sync-error", domain: entry.name, message,
+        ...(kind === "unavailable" ? { unavailable: true } : {}),
+        ...(details ? { details } : {}),
+      });
       if (propagateError) throw err;
 
       return 0;
@@ -431,12 +475,13 @@ export function createSyncHarness(getDb: (omsInstance: string) => BaseDB): SyncH
 
       return written as number;
     } catch (err) {
-      const { isAuth, message } = classifyError(err);
+      const { kind, isAuth, message } = classifyError(err);
       post({
         type: isAuth ? "auth-error" : "sync-error",
         domain: request.domain,
         scope,
         message,
+        ...(kind === "unavailable" ? { unavailable: true } : {}),
       });
       throw err;
     }

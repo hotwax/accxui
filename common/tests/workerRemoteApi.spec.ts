@@ -86,9 +86,9 @@ describe("workerRemoteApi empty body handling", () => {
     ).rejects.toThrow(/502/);
   });
 
-  // The existing contract: a failure WITH a parsed body throws that body, because callers
-  // classify auth errors by sniffing its message. Do not turn this into an Error.
-  it("still throws the parsed body for a failed response that has one", async () => {
+  // A failure WITH a parsed body throws that body, because callers read Moqui's `errorCode` /
+  // `errors` from it. Do not turn this into an Error.
+  it("still throws the parsed body for a failed response that has one, with its status", async () => {
     fetchMock.mockResolvedValue({
       ok: false,
       status: 401,
@@ -97,7 +97,41 @@ describe("workerRemoteApi empty body handling", () => {
 
     await expect(
       workerRemoteApi({ baseURL: "https://x.test/rest/s1/", url: "oms/facilities" }),
-    ).rejects.toEqual({ errors: "User is not authorized" });
+    ).rejects.toEqual({ errors: "User is not authorized", status: 401 });
+  });
+
+  // The sync harness classifies by status: a 503 whose body says "not authorized" is not a 401.
+  it("carries the status and Retry-After on a server error", async () => {
+    fetchMock.mockResolvedValue({
+      ok: false,
+      status: 503,
+      headers: new Headers({ "Retry-After": "7" }),
+      json: async () => ({ errors: "Error finding UserAccount" }),
+    });
+
+    await expect(
+      workerRemoteApi({ baseURL: "https://x.test/rest/s1/", url: "oms/facilities" }),
+    ).rejects.toEqual({ errors: "Error finding UserAccount", status: 503, retryAfterMs: 7000 });
+  });
+
+  it("fails with the status when an error body is not JSON (a gateway's HTML page)", async () => {
+    fetchMock.mockResolvedValue({
+      ok: false,
+      status: 502,
+      json: async () => { throw new SyntaxError("Unexpected token < in JSON at position 0"); },
+    });
+
+    await expect(
+      workerRemoteApi({ baseURL: "https://x.test/rest/s1/", url: "oms/facilities" }),
+    ).rejects.toMatchObject({ status: 502 });
+  });
+
+  it("flags a fetch that got no response as a network error", async () => {
+    fetchMock.mockRejectedValue(new TypeError("Failed to fetch"));
+
+    await expect(
+      workerRemoteApi({ baseURL: "https://x.test/rest/s1/", url: "oms/facilities" }),
+    ).rejects.toMatchObject({ networkError: true });
   });
 
   it("rethrows a genuine parse error, which is not the same as an empty body", async () => {
