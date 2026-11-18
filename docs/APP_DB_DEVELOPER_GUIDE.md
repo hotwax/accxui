@@ -970,12 +970,22 @@ re-emit the emptied tables until they unmount.
 
 **A login in another tab or app.** The session (`token`, `oms`, `maarg`) lives in cookies shared by
 every tab and HotWax app on the domain, so a login elsewhere replaces it without running this tab's
-`postLogin`. The worker keeps the instance it started on, so the sync service checks before every
-token push: if the cookies now name another instance, it stops the sync rather than hand the worker a
-token that instance's server rejects (`The Claim 'iss' value doesn't match the required issuer`). It
-stays stopped (no later refresh restarts it) and calls `setupAppDbSync({ ..., onInstanceChanged })`
-with `{ from, to }`, where the app can ask the user to reload or log in again. A token rotated on the
-same instance is still pushed as before.
+`postLogin`. Two checks catch it:
+
+- `useSessionChangeAlert()` from `@common`, called once in `App.vue` (every app, with or without an
+  app db), watches the `oms`, `maarg` and `userId` cookies against what this tab signed in with: on every
+  cookie change where the browser has `cookieStore`, every 5 seconds otherwise, and when the tab comes
+  back into view. A BroadcastChannel can't do this: it only reaches tabs of the same origin, and the login
+  may happen in another app. On a change it emits `sessionChanged` and shows a reload alert that can't
+  be dismissed ("Signed in to another instance", or "Session changed" for another user or Maarg).
+- The sync service checks before every token push, so the worker is never handed a token the old
+  instance's server rejects (`The Claim 'iss' value doesn't match the required issuer`) even without the
+  watcher.
+
+Both emit the same `sessionChanged` event (`SESSION_CHANGED` from `@common`, payload `{ field, from, to }`),
+so there is one path to listen on. The sync stops on it (`setupAppDbSync` listens) and stays stopped: no
+later refresh restarts it, and `refreshAfterMutation()` rejects instead of resolving 0. A token rotated on
+the same instance is still pushed as before. Nothing is wired in `src/db`.
 
 The worker registers its own resolver (step 3b) because the APP's hand-written domains reach the
 database through `appDb.entity(...)`, which resolves the instance per call. An APP whose domains are

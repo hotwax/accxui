@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const harnessStub = vi.hoisted(() => ({
   start: vi.fn(async () => {}),
@@ -32,6 +32,18 @@ vi.mock("../db/sync/channels", () => ({
 
 import Dexie from "dexie";
 import { createSyncService } from "../db/sync/syncService";
+import emitter from "../core/emitter";
+import { SESSION_CHANGED } from "../core/sessionChange";
+
+/** A spy on the framework's SESSION_CHANGED event, removed after each test. */
+const sessionListeners: Array<(...args: any[]) => void> = [];
+const listenForSessionChange = () => {
+  const heard = vi.fn();
+  emitter.on(SESSION_CHANGED, heard);
+  sessionListeners.push(heard);
+  return heard;
+};
+afterEach(() => { sessionListeners.splice(0).forEach((heard) => emitter.off(SESSION_CHANGED, heard)); });
 
 let deletedDatabases: string[] = [];
 import { __resetDbVersionChecks } from "../db/storage/baseDb";
@@ -143,8 +155,8 @@ describe("createSyncService", () => {
   // A login in another tab or app rewrites the shared cookies; this tab's postLogin never runs, so
   // its worker would keep the old instance's URL and get the new instance's token (issuer mismatch).
   it("stops instead of pushing a token when the session moved to another instance", async () => {
-    const onInstanceChanged = vi.fn();
-    const service = createSyncService({ workerUrl: "/w.js", tokenWatchMs: 1_000, onInstanceChanged });
+    const heard = listenForSessionChange();
+    const service = createSyncService({ workerUrl: "/w.js", tokenWatchMs: 1_000 });
     vi.useFakeTimers();
     await service.start();
 
@@ -153,15 +165,15 @@ describe("createSyncService", () => {
 
     expect(published).toEqual([]);
     expect(terminate).toHaveBeenCalledTimes(1);
-    expect(onInstanceChanged).toHaveBeenCalledWith({ from: "demo", to: "other" });
+    expect(heard).toHaveBeenCalledWith({ field: "oms", from: "demo", to: "other" });
     vi.advanceTimersByTime(5_000);
-    expect(onInstanceChanged).toHaveBeenCalledTimes(1);
+    expect(heard).toHaveBeenCalledTimes(1);
     vi.useRealTimers();
   });
 
   it("checks the instance on an auth-error too, before pushing the token", async () => {
-    const onInstanceChanged = vi.fn();
-    const service = createSyncService({ workerUrl: "/w.js", onInstanceChanged });
+    const heard = listenForSessionChange();
+    const service = createSyncService({ workerUrl: "/w.js" });
     await service.start();
 
     Object.assign(session, { token: "other-tok", maarg: "https://other.test/", oms: "other" });
@@ -169,7 +181,7 @@ describe("createSyncService", () => {
 
     expect(published).toEqual([]);
     expect(terminate).toHaveBeenCalledTimes(1);
-    expect(onInstanceChanged).toHaveBeenCalledWith({ from: "demo", to: "other" });
+    expect(heard).toHaveBeenCalledWith({ field: "oms", from: "demo", to: "other" });
   });
 
   // After a switch the service stays stopped; a refetch must fail rather than report 0 rows as success.
@@ -183,15 +195,15 @@ describe("createSyncService", () => {
   });
 
   it("does not treat a cleared session (logout elsewhere) as a switch", async () => {
-    const onInstanceChanged = vi.fn();
-    const service = createSyncService({ workerUrl: "/w.js", tokenWatchMs: 1_000, onInstanceChanged });
+    const heard = listenForSessionChange();
+    const service = createSyncService({ workerUrl: "/w.js", tokenWatchMs: 1_000 });
     vi.useFakeTimers();
     await service.start();
 
     Object.assign(session, { token: "", maarg: "", oms: "" });
     vi.advanceTimersByTime(1_000);
 
-    expect(onInstanceChanged).not.toHaveBeenCalled();
+    expect(heard).not.toHaveBeenCalled();
     expect(terminate).not.toHaveBeenCalled();
     vi.useRealTimers();
     service.stop();

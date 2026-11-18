@@ -10,19 +10,14 @@ import {
 } from "./syncService";
 import { type ActiveDomain, activationKey } from "./syncRegistry";
 import { CacheReconciliationError, cacheScopeKey } from "./reconciliation";
+import emitter from "../../core/emitter";
+import { SESSION_CHANGED } from "../../core/sessionChange";
 
 export interface AppDbSyncConfig {
   db: AppDb;
   getWorkerUrl?: () => URL;
   createSyncService?: typeof defaultCreateSyncService;
   onStatus?: (status: Record<string, any>) => void;
-  /**
-   * The sync stopped itself because the session cookies now name another OMS instance: a login in
-   * another tab or app replaced them, and this tab's `postLogin` never ran to restart the worker.
-   * The tab's state still belongs to `from`; prompt a reload or a logout. Sync stays stopped until
-   * the next `stopAppDbSync()` / `startAppDbSync()` pair (a login in this tab).
-   */
-  onInstanceChanged?: (change: { from: string; to: string }) => void;
 }
 
 export interface AppDbSync {
@@ -64,6 +59,8 @@ export const bootstrapState = reactive<{
 
 /** The app's sync, registered by `setupAppDbSync`, for framework composables (`useProductMaster`). */
 let activeAppDbSync: AppDbSync | null = null;
+/** Removes the session-change listener of the last `setupAppDbSync`. */
+let offSessionChange: (() => void) | null = null;
 
 /** The sync `setupAppDbSync` set up for this app; throws before it has run. */
 export function getAppDbSync(): AppDbSync {
@@ -258,12 +255,6 @@ export function setupAppDbSync(config: AppDbSyncConfig): AppDbSync {
         }
         config.onStatus?.(status);
       },
-      onInstanceChanged: (change) => {
-        if (generation !== startGeneration || service !== attemptService) return;
-        // `service` and `starting` stay as they are on purpose: clearing them would let the next
-        // `whenReady()` (a refreshAfterMutation) start a worker on the other instance in this tab.
-        config.onInstanceChanged?.(change);
-      },
     }) as SyncService;
     service = attemptService;
     // A screen that activated before the service existed (a deep link lands before App.vue starts
@@ -384,5 +375,16 @@ export function setupAppDbSync(config: AppDbSyncConfig): AppDbSync {
     syncNow,
   };
   activeAppDbSync = appDbSync;
+
+  // This tab's session was replaced (another instance, Maarg or user), reported by either detector: the
+  // cookie watcher in `useSessionChangeAlert`, or the sync service itself (already stopped then, so this
+  // stop() is a no-op). `service` and `starting` stay as they are on purpose: clearing them would let
+  // the next `whenReady()` (a refreshAfterMutation) start a worker on the new session in this tab.
+  // One listener per app: a second setup (tests) replaces the first.
+  offSessionChange?.();
+  const onSessionChange = () => { service?.stop(); };
+  emitter.on(SESSION_CHANGED, onSessionChange);
+  offSessionChange = () => emitter.off(SESSION_CHANGED, onSessionChange);
+
   return appDbSync;
 }

@@ -573,10 +573,9 @@ export const {
   db: appDb,
   getWorkerUrl: () => new URL(workerUrl, import.meta.url),
   createSyncService,
-  // Optional: the sync stopped because a login in another tab or app moved the shared session
-  // cookies to another OMS instance. Prompt a reload or re-login; sync stays stopped until then.
-  onInstanceChanged: ({ from, to }) => { /* … */ },
 });
+// A login elsewhere that replaces the session stops this sync on its own (the framework's
+// SESSION_CHANGED event); the reload prompt is useSessionChangeAlert() in App.vue.
 ```
 
 Every other file imports sync functions from `@/db/appDbSync`, never from `@common/db/sync/*`. The worker

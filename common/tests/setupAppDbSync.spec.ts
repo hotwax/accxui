@@ -33,6 +33,8 @@ import { cacheScopeKey } from "../db/sync/reconciliation";
 import { createSyncService, __resetErrorState, serviceState } from "../db/sync/syncService";
 import type { AppDb } from "../db/model/defineAppDb";
 import { dbClient } from "../db/storage/dbClient";
+import emitter from "../core/emitter";
+import { SESSION_CHANGED } from "../core/sessionChange";
 
 /** An `AppDb` over a fake handle; `client()` is a real dbClient over it, as `defineAppDb` builds. */
 const appDbOver = (raw: () => any) => ({ raw, client: () => dbClient(raw) }) as unknown as AppDb;
@@ -645,54 +647,34 @@ describe("domain sets cross to the worker as plain data", () => {
   });
 });
 
-describe("instance change", () => {
+describe("session change", () => {
   beforeEach(() => {
     __resetErrorState();
     workerStub.onmessage = null;
   });
 
-  /** A factory that keeps the options it was given, so a test can fire the service's callback. */
-  const capturingFactory = () => {
-    const given: Array<Parameters<typeof createSyncService>[0]> = [];
-    const factory = vi.fn((opts: Parameters<typeof createSyncService>[0]) => {
-      given.push(opts);
-      return createSyncService(opts);
-    });
-    return { factory, given };
-  };
-
-  it("hands the app the service's instance change", async () => {
-    const { factory, given } = capturingFactory();
-    const onInstanceChanged = vi.fn();
-    const sync = setupAppDbSync({ db: fakeAppDb(), createSyncService: factory, onInstanceChanged });
+  // Either detector (the cookie watcher in useSessionChangeAlert, or the sync service itself) emits it.
+  it("stops the worker on SESSION_CHANGED; refreshes then fail without starting a new worker", async () => {
+    const factory = vi.fn(createSyncService);
+    const sync = setupAppDbSync({ db: fakeAppDb(), createSyncService: factory });
     await sync.startAppDbSync();
 
-    given[0].onInstanceChanged!({ from: "demo", to: "other" });
+    emitter.emit(SESSION_CHANGED, { field: "userId", from: "u1", to: "u2" });
 
-    expect(onInstanceChanged).toHaveBeenCalledWith({ from: "demo", to: "other" });
-  });
-
-  it("does not restart the worker on the next refresh after the service stopped itself", async () => {
-    const { factory, given } = capturingFactory();
-    const sync = setupAppDbSync({ db: fakeAppDb(), createSyncService: factory, onInstanceChanged: vi.fn() });
-    await sync.startAppDbSync();
-
-    sync.syncService()!.stop();
-    given[0].onInstanceChanged!({ from: "demo", to: "other" });
-    await sync.refreshAfterMutation("enum", { enumId: "X" }).catch(() => undefined);
-
+    await expect(sync.refreshAfterMutation("enum", { enumId: "X" })).rejects.toThrow();
     expect(factory).toHaveBeenCalledTimes(1);
   });
 
-  it("ignores a change reported by a service a later stop replaced", async () => {
-    const { factory, given } = capturingFactory();
-    const onInstanceChanged = vi.fn();
-    const sync = setupAppDbSync({ db: fakeAppDb(), createSyncService: factory, onInstanceChanged });
+  it("syncs again after a login in this tab (stop, then start)", async () => {
+    const factory = vi.fn(createSyncService);
+    const sync = setupAppDbSync({ db: fakeAppDb(), createSyncService: factory });
     await sync.startAppDbSync();
+    emitter.emit(SESSION_CHANGED, { field: "oms", from: "demo", to: "other" });
+
     await sync.stopAppDbSync();
+    await sync.startAppDbSync();
 
-    given[0].onInstanceChanged!({ from: "demo", to: "other" });
-
-    expect(onInstanceChanged).not.toHaveBeenCalled();
+    expect(factory).toHaveBeenCalledTimes(2);
+    await expect(sync.refreshAfterMutation("enum", { enumId: "X" })).resolves.toBe(1);
   });
 });

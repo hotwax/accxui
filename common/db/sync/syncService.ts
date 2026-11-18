@@ -20,6 +20,8 @@ import { reactive, toRaw } from "vue";
 import type { Remote } from "comlink";
 import { commonUtil } from "../../utils/commonUtil";
 import { WorkerFactory } from "../../core/workerFactory";
+import emitter from "../../core/emitter";
+import { SESSION_CHANGED, type SessionChange } from "../../core/sessionChange";
 import { createTokenPublisher } from "./channels";
 import type { ActiveDomain } from "./syncRegistry";
 import type { CatalogItem, SyncHarness } from "./pollingWorkerHarness";
@@ -48,12 +50,6 @@ export interface SyncServiceOptions {
   db?: DbClient | BaseDB;
   /** App-local token-change watcher cadence (default 15s). */
   tokenWatchMs?: number;
-  /**
-   * Called after the service stopped itself because the session now belongs to another OMS
-   * instance (a login in another tab or app rewrote the shared `token` / `oms` / `maarg` cookies).
-   * Wire it to a reload or logout prompt; the tab's own state still belongs to `from`.
-   */
-  onInstanceChanged?: (change: { from: string; to: string }) => void;
 }
 
 export interface SyncService {
@@ -267,10 +263,12 @@ export function createSyncService(opts: SyncServiceOptions): SyncService {
 
   function pushTokenIfChanged() {
     if (instanceChanged()) {
-      const change = { from: startedOmsInstance, to: commonUtil.getOMSInstanceName() };
+      const change: SessionChange = { field: "oms", from: startedOmsInstance, to: commonUtil.getOMSInstanceName() };
       // Stop rather than restart: this tab's stores, permissions and db still belong to `from`.
       stop();
-      opts.onInstanceChanged?.(change);
+      // The same event the cookie watcher emits: useSessionChangeAlert shows the reload alert. A stopped
+      // service can't get here (stop() clears what it started on), so no stale service emits it.
+      emitter.emit(SESSION_CHANGED, change);
       return;
     }
     const current = commonUtil.getToken() || "";
