@@ -32,9 +32,9 @@ const onUpdated = (registration: ServiceWorkerRegistration) => {
   updateAvailable.value = true;
 };
 
-// Activates the waiting worker, then reloads once it controls this tab. The worker caches nothing,
-// so the reload revalidates index.html and loads the new build whatever its max-age. Other tabs are
-// not reloaded: they keep their own toast, and their Update just reloads.
+// Activates the waiting worker, then reloads once it is active. The worker caches nothing, so the
+// reload revalidates index.html and loads the new build whatever its max-age. Other tabs are not
+// reloaded: they keep their own toast, and their Update just reloads.
 const applyUpdate = () => {
   const waiting = waitingRegistration?.waiting;
 
@@ -43,7 +43,13 @@ const applyUpdate = () => {
 
     return;
   }
-  navigator.serviceWorker.addEventListener("controllerchange", () => window.location.reload(), { once: true });
+  // The worker's own state, not controllerchange: a tab no worker controls (the first visit, or a
+  // hard refresh) never gets controllerchange, because the worker does not claim clients.
+  waiting.addEventListener("statechange", () => {
+    if(waiting.state === "activated") {
+      window.location.reload();
+    }
+  });
   waiting.postMessage({ type: "SKIP_WAITING" });
 };
 

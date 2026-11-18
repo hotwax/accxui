@@ -152,7 +152,18 @@ describe('useAppUpdate', () => {
     expect(registration.update).toHaveBeenCalledTimes(1);
   });
 
-  it('activates the waiting worker on Update and reloads once it controls the tab', async () => {
+  // The worker moves to "activating", then "activated"; only the second one reloads.
+  const activate = (waiting: Worker) => {
+    const onStateChange = waiting.addEventListener.mock.calls.find(([name]) => name === 'statechange')[1];
+
+    waiting.state = 'activating';
+    onStateChange();
+    expect(reload).not.toHaveBeenCalled();
+    waiting.state = 'activated';
+    onStateChange();
+  };
+
+  it('activates the waiting worker on Update and reloads once it is active', async () => {
     const waiting = worker();
 
     registration.waiting = waiting;
@@ -163,7 +174,22 @@ describe('useAppUpdate', () => {
     applyUpdate();
     expect(waiting.postMessage).toHaveBeenCalledWith({ type: 'SKIP_WAITING' });
     expect(reload).not.toHaveBeenCalled();
-    swListeners.controllerchange();
+    activate(waiting);
+    expect(reload).toHaveBeenCalledTimes(1);
+  });
+
+  it('reloads a tab no worker controls too (first visit, hard refresh), which gets no controllerchange', async () => {
+    controller = null;
+    const waiting = worker();
+
+    registration.waiting = waiting;
+    const { startAppUpdateWatch, applyUpdate } = await loadComposable();
+
+    startAppUpdateWatch();
+    hooks().cached(registration);
+    applyUpdate();
+    expect(swListeners.controllerchange).toBeUndefined();
+    activate(waiting);
     expect(reload).toHaveBeenCalledTimes(1);
   });
 
