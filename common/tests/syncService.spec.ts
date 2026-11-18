@@ -12,19 +12,22 @@ const harnessStub = vi.hoisted(() => ({
 }));
 const terminate = vi.hoisted(() => vi.fn());
 const workerStub = vi.hoisted(() => ({ onmessage: null as any }));
+// The session cookies, as commonUtil reads them; a test changes them to mimic a login elsewhere.
+const session = vi.hoisted(() => ({ token: "tok", maarg: "https://x.test/", oms: "demo" }));
+const published = vi.hoisted(() => [] as string[]);
 
 vi.mock("../core/workerFactory", () => ({
   WorkerFactory: { createWorker: () => ({ api: harnessStub, terminate, worker: workerStub }) },
 }));
 vi.mock("../utils/commonUtil", () => ({
   commonUtil: {
-    getToken: () => "tok",
-    getMaargURL: () => "https://x.test/",
-    getOMSInstanceName: () => "demo",
+    getToken: () => session.token,
+    getMaargURL: () => session.maarg,
+    getOMSInstanceName: () => session.oms,
   },
 }));
 vi.mock("../db/sync/channels", () => ({
-  createTokenPublisher: () => ({ publish: vi.fn(), close: vi.fn() }),
+  createTokenPublisher: () => ({ publish: vi.fn((token: string) => { published.push(token); }), close: vi.fn() }),
 }));
 
 import Dexie from "dexie";
@@ -76,6 +79,8 @@ describe("createSyncService", () => {
     deletedDatabases = [];
     vi.spyOn(Dexie, "delete").mockImplementation(async (name: string) => { deletedDatabases.push(name); });
     workerStub.onmessage = null;
+    Object.assign(session, { token: "tok", maarg: "https://x.test/", oms: "demo" });
+    published.length = 0;
   });
 
   it("starts the worker with the current token, url and instance", async () => {
@@ -118,6 +123,67 @@ describe("createSyncService", () => {
     workerStub.onmessage!({ data: { type: "auth-error", message: "401" } } as MessageEvent);
 
     expect(onAuthError).toHaveBeenCalledWith("401");
+    service.stop();
+  });
+
+  it("pushes a rotated token of the same instance to the worker", async () => {
+    const service = createSyncService({ workerUrl: "/w.js", tokenWatchMs: 1_000 });
+    vi.useFakeTimers();
+    await service.start();
+
+    session.token = "rotated";
+    vi.advanceTimersByTime(1_000);
+
+    expect(published).toEqual(["rotated"]);
+    expect(terminate).not.toHaveBeenCalled();
+    vi.useRealTimers();
+    service.stop();
+  });
+
+  // A login in another tab or app rewrites the shared cookies; this tab's postLogin never runs, so
+  // its worker would keep the old instance's URL and get the new instance's token (issuer mismatch).
+  it("stops instead of pushing a token when the session moved to another instance", async () => {
+    const onInstanceChanged = vi.fn();
+    const service = createSyncService({ workerUrl: "/w.js", tokenWatchMs: 1_000, onInstanceChanged });
+    vi.useFakeTimers();
+    await service.start();
+
+    Object.assign(session, { token: "other-tok", maarg: "https://other.test/", oms: "other" });
+    vi.advanceTimersByTime(1_000);
+
+    expect(published).toEqual([]);
+    expect(terminate).toHaveBeenCalledTimes(1);
+    expect(onInstanceChanged).toHaveBeenCalledWith({ from: "demo", to: "other" });
+    vi.advanceTimersByTime(5_000);
+    expect(onInstanceChanged).toHaveBeenCalledTimes(1);
+    vi.useRealTimers();
+  });
+
+  it("checks the instance on an auth-error too, before pushing the token", async () => {
+    const onInstanceChanged = vi.fn();
+    const service = createSyncService({ workerUrl: "/w.js", onInstanceChanged });
+    await service.start();
+
+    Object.assign(session, { token: "other-tok", maarg: "https://other.test/", oms: "other" });
+    workerStub.onmessage!({ data: { type: "auth-error", message: "iss mismatch" } } as MessageEvent);
+
+    expect(published).toEqual([]);
+    expect(terminate).toHaveBeenCalledTimes(1);
+    expect(onInstanceChanged).toHaveBeenCalledWith({ from: "demo", to: "other" });
+  });
+
+  it("does not treat a cleared session (logout elsewhere) as a switch", async () => {
+    const onInstanceChanged = vi.fn();
+    const service = createSyncService({ workerUrl: "/w.js", tokenWatchMs: 1_000, onInstanceChanged });
+    vi.useFakeTimers();
+    await service.start();
+
+    Object.assign(session, { token: "", maarg: "", oms: "" });
+    vi.advanceTimersByTime(1_000);
+
+    expect(onInstanceChanged).not.toHaveBeenCalled();
+    expect(terminate).not.toHaveBeenCalled();
+    vi.useRealTimers();
     service.stop();
   });
 

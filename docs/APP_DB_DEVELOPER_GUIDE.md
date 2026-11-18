@@ -968,6 +968,15 @@ clearing every sync marker but keeping the `schemaVersion` record, so the next l
 the database. It closes no live reads: those belong to the components that opened them, and simply
 re-emit the emptied tables until they unmount.
 
+**A login in another tab or app.** The session (`token`, `oms`, `maarg`) lives in cookies shared by
+every tab and HotWax app on the domain, so a login elsewhere replaces it without running this tab's
+`postLogin`. The worker keeps the instance it started on, so the sync service checks before every
+token push: if the cookies now name another instance, it stops the sync rather than hand the worker a
+token that instance's server rejects (`The Claim 'iss' value doesn't match the required issuer`). It
+stays stopped (no later refresh restarts it) and calls `setupAppDbSync({ ..., onInstanceChanged })`
+with `{ from, to }`, where the app can ask the user to reload or log in again. A token rotated on the
+same instance is still pushed as before.
+
 The worker registers its own resolver (step 3b) because the APP's hand-written domains reach the
 database through `appDb.entity(...)`, which resolves the instance per call. An APP whose domains are
 all factory-built can pass `appDb.get(omsInstance)` straight through without it.

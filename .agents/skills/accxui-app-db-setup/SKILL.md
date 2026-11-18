@@ -573,6 +573,9 @@ export const {
   db: appDb,
   getWorkerUrl: () => new URL(workerUrl, import.meta.url),
   createSyncService,
+  // Optional: the sync stopped because a login in another tab or app moved the shared session
+  // cookies to another OMS instance. Prompt a reload or re-login; sync stays stopped until then.
+  onInstanceChanged: ({ from, to }) => { /* … */ },
 });
 ```
 

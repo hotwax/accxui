@@ -16,6 +16,13 @@ export interface AppDbSyncConfig {
   getWorkerUrl?: () => URL;
   createSyncService?: typeof defaultCreateSyncService;
   onStatus?: (status: Record<string, any>) => void;
+  /**
+   * The sync stopped itself because the session cookies now name another OMS instance: a login in
+   * another tab or app replaced them, and this tab's `postLogin` never ran to restart the worker.
+   * The tab's state still belongs to `from`; prompt a reload or a logout. Sync stays stopped until
+   * the next `stopAppDbSync()` / `startAppDbSync()` pair (a login in this tab).
+   */
+  onInstanceChanged?: (change: { from: string; to: string }) => void;
 }
 
 export interface AppDbSync {
@@ -250,6 +257,12 @@ export function setupAppDbSync(config: AppDbSyncConfig): AppDbSync {
           recordSyncError(domain, String(status.message ?? "failed"), scope);
         }
         config.onStatus?.(status);
+      },
+      onInstanceChanged: (change) => {
+        if (generation !== startGeneration || service !== attemptService) return;
+        // `service` and `starting` stay as they are on purpose: clearing them would let the next
+        // `whenReady()` (a refreshAfterMutation) start a worker on the other instance in this tab.
+        config.onInstanceChanged?.(change);
       },
     }) as SyncService;
     service = attemptService;

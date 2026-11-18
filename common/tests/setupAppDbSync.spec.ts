@@ -644,3 +644,55 @@ describe("domain sets cross to the worker as plain data", () => {
     await sync.stopAppDbSync();
   });
 });
+
+describe("instance change", () => {
+  beforeEach(() => {
+    __resetErrorState();
+    workerStub.onmessage = null;
+  });
+
+  /** A factory that keeps the options it was given, so a test can fire the service's callback. */
+  const capturingFactory = () => {
+    const given: Array<Parameters<typeof createSyncService>[0]> = [];
+    const factory = vi.fn((opts: Parameters<typeof createSyncService>[0]) => {
+      given.push(opts);
+      return createSyncService(opts);
+    });
+    return { factory, given };
+  };
+
+  it("hands the app the service's instance change", async () => {
+    const { factory, given } = capturingFactory();
+    const onInstanceChanged = vi.fn();
+    const sync = setupAppDbSync({ db: fakeAppDb(), createSyncService: factory, onInstanceChanged });
+    await sync.startAppDbSync();
+
+    given[0].onInstanceChanged!({ from: "demo", to: "other" });
+
+    expect(onInstanceChanged).toHaveBeenCalledWith({ from: "demo", to: "other" });
+  });
+
+  it("does not restart the worker on the next refresh after the service stopped itself", async () => {
+    const { factory, given } = capturingFactory();
+    const sync = setupAppDbSync({ db: fakeAppDb(), createSyncService: factory, onInstanceChanged: vi.fn() });
+    await sync.startAppDbSync();
+
+    sync.syncService()!.stop();
+    given[0].onInstanceChanged!({ from: "demo", to: "other" });
+    await sync.refreshAfterMutation("enum", { enumId: "X" }).catch(() => undefined);
+
+    expect(factory).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores a change reported by a service a later stop replaced", async () => {
+    const { factory, given } = capturingFactory();
+    const onInstanceChanged = vi.fn();
+    const sync = setupAppDbSync({ db: fakeAppDb(), createSyncService: factory, onInstanceChanged });
+    await sync.startAppDbSync();
+    await sync.stopAppDbSync();
+
+    given[0].onInstanceChanged!({ from: "demo", to: "other" });
+
+    expect(onInstanceChanged).not.toHaveBeenCalled();
+  });
+});

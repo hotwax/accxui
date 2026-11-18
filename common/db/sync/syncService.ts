@@ -48,6 +48,12 @@ export interface SyncServiceOptions {
   db?: DbClient | BaseDB;
   /** App-local token-change watcher cadence (default 15s). */
   tokenWatchMs?: number;
+  /**
+   * Called after the service stopped itself because the session now belongs to another OMS
+   * instance (a login in another tab or app rewrote the shared `token` / `oms` / `maarg` cookies).
+   * Wire it to a reload or logout prompt; the tab's own state still belongs to `from`.
+   */
+  onInstanceChanged?: (change: { from: string; to: string }) => void;
 }
 
 export interface SyncService {
@@ -238,7 +244,35 @@ export function createSyncService(opts: SyncServiceOptions): SyncService {
     return { promise, resolve };
   }
 
+  /**
+   * The Maarg URL the worker was started with. The worker holds it for its whole life and only the
+   * token is pushed afterwards, so a token of another instance must never reach it.
+   */
+  let startedMaargUrl = "";
+  let startedOmsInstance = "";
+
+  /**
+   * True when the session cookies now name another instance than the worker syncs. The cookies are
+   * shared by every tab and app on the domain, so a login elsewhere changes them under this tab
+   * without running its `postLogin`, which is what would restart the worker on the new instance.
+   */
+  function instanceChanged(): boolean {
+    if (!startedMaargUrl) return false;
+    const maargUrl = commonUtil.getMaargURL();
+    // No session at all is a logout, not a switch: the auth-error path handles that.
+    const omsInstance = commonUtil.getOMSInstanceName();
+    if (!maargUrl || !omsInstance) return false;
+    return maargUrl !== startedMaargUrl || omsInstance !== startedOmsInstance;
+  }
+
   function pushTokenIfChanged() {
+    if (instanceChanged()) {
+      const change = { from: startedOmsInstance, to: commonUtil.getOMSInstanceName() };
+      // Stop rather than restart: this tab's stores, permissions and db still belong to `from`.
+      stop();
+      opts.onInstanceChanged?.(change);
+      return;
+    }
     const current = commonUtil.getToken() || "";
     if (current && current !== lastToken) {
       lastToken = current;
@@ -314,10 +348,12 @@ export function createSyncService(opts: SyncServiceOptions): SyncService {
       // Before start(): the worker handles calls in order, so its first pass already covers them.
       if (viewDomains) await api.setDomains(viewDomains);
 
+      startedMaargUrl = commonUtil.getMaargURL();
+      startedOmsInstance = commonUtil.getOMSInstanceName();
       const started = api.start({
-        maargUrl: commonUtil.getMaargURL(),
+        maargUrl: startedMaargUrl,
         token: lastToken,
-        omsInstance: commonUtil.getOMSInstanceName(),
+        omsInstance: startedOmsInstance,
         baseTickMs: opts.baseTickMs,
         domains: opts.domains,
       });
@@ -346,6 +382,8 @@ export function createSyncService(opts: SyncServiceOptions): SyncService {
     starting = null;
     if (tokenWatch) { clearInterval(tokenWatch); tokenWatch = null; }
     if (publisher) { publisher.close(); publisher = null; }
+    startedMaargUrl = "";
+    startedOmsInstance = "";
     if (terminate) { terminate(); terminate = null; } // kills the worker + its timer
     harness = null;
     // Release anyone waiting on the old worker; they find no harness and fail fast.
