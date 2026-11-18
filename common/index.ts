@@ -82,6 +82,8 @@ export {
 export * from './db';
 export type { LogRecord, LogStoreOptions } from './core/logStore';
 export type { FaroOptions } from './utils/faroUtil';
+export { useAppUpdate } from './composables/useAppUpdate';
+export type { AppUpdateOptions } from './composables/useAppUpdate';
 export { useIosKeyboardScroll } from './composables/useIosKeyboardScroll';
 export type { IosKeyboardScrollOptions } from './composables/useIosKeyboardScroll';
 export { supportsIosKeyboardScroll } from './utils/keyboardScroll';
