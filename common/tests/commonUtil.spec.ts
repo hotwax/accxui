@@ -192,6 +192,64 @@ describe("commonUtil.jsonToCsv", () => {
   });
 });
 
+// Each test loads a fresh commonUtil, so the cached encoder from one test doesn't leak into the next.
+describe("commonUtil.preloadShiftJisEncoder", () => {
+  const rows = [{ name: "テスト", qty: 1 }];
+  const saveAs = vi.fn();
+
+  const freshCommonUtil = async () => {
+    vi.resetModules();
+    vi.doMock("file-saver", () => ({ saveAs }));
+    return (await import("../utils/commonUtil")).commonUtil;
+  };
+
+  beforeEach(() => saveAs.mockReset());
+
+  it("saves a Shift-JIS download synchronously once the encoder is preloaded", async () => {
+    const util = await freshCommonUtil();
+    await util.preloadShiftJisEncoder();
+
+    const result = util.jsonToCsv(rows, { encode: { default: "shift-jis" }, download: true, name: "orders.csv" });
+
+    // Called before any await: still inside the user's tap
+    expect(saveAs).toHaveBeenCalledTimes(1);
+    expect(saveAs.mock.calls[0][1]).toBe("orders.csv");
+    expect(result).toBeInstanceOf(Promise);
+    expect(await result).toBe(saveAs.mock.calls[0][0]);
+  });
+
+  it("still saves without a preload, after the encoder has loaded", async () => {
+    const util = await freshCommonUtil();
+
+    const result = util.jsonToCsv(rows, { encode: { default: "shift-jis" }, download: true });
+
+    expect(saveAs).not.toHaveBeenCalled();
+    const blob = await result;
+    expect(saveAs).toHaveBeenCalledWith(blob, "default.csv");
+    expect(blob.type).toBe("application/csv;charset=shift-jis");
+  });
+
+  it("keeps the encoder cached across repeated and concurrent preloads", async () => {
+    const util = await freshCommonUtil();
+    await Promise.all([util.preloadShiftJisEncoder(), util.preloadShiftJisEncoder()]);
+    await util.preloadShiftJisEncoder();
+
+    util.jsonToCsv(rows, { encode: { default: "shift-jis" }, download: true });
+    expect(saveAs).toHaveBeenCalledTimes(1);
+  });
+
+  it("never rejects, so pages can call it without awaiting", async () => {
+    vi.resetModules();
+    vi.doMock("file-saver", () => ({ saveAs }));
+    vi.doMock("encoding-japanese", () => { throw new Error("chunk failed to load"); });
+    const util = (await import("../utils/commonUtil")).commonUtil;
+
+    await expect(util.preloadShiftJisEncoder()).resolves.toBeUndefined();
+    await expect(util.jsonToCsv(rows, { encode: { default: "shift-jis" } })).rejects.toThrow();
+    vi.doUnmock("encoding-japanese");
+  });
+});
+
 describe("commonUtil.getRelativeTime", () => {
   it.each([undefined, null, "", NaN, Infinity, "1700000000000"])("returns an empty string for %s", (value) => {
     expect(commonUtil.getRelativeTime(value)).toBe("");
