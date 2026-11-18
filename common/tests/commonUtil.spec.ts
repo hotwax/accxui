@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { commonUtil } from "../utils/commonUtil";
+import { beforeEach, describe, expect, expectTypeOf, it, vi } from "vitest";
+import { commonUtil, type JsonToCsvOption } from "../utils/commonUtil";
 
 describe("commonUtil local instance URLs", () => {
   beforeEach(() => {
@@ -151,6 +151,102 @@ describe("commonUtil.getErrorMessage", () => {
     expect(msg({ response: {} })).toBe("");
     expect(msg(null)).toBe("");
     expect(msg(undefined)).toBe("");
+  });
+});
+
+describe("commonUtil.jsonToCsv", () => {
+  const rows = [{ name: "テスト", qty: 1 }];
+
+  it("returns the Blob synchronously for the default encoding", () => {
+    const blob = commonUtil.jsonToCsv(rows);
+
+    expect(blob).toBeInstanceOf(Blob);
+    expect(blob.type).toBe("application/csv;charset=utf-8");
+  });
+
+  it("resolves a Shift-JIS Blob, loading the encoder only for that encoding", async () => {
+    const result = commonUtil.jsonToCsv(rows, { encode: { default: "shift-jis" } });
+    expect(result).toBeInstanceOf(Promise);
+
+    const blob = await result;
+    const bytes = await new Promise<Uint8Array>((resolve) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(new Uint8Array(reader.result as ArrayBuffer));
+      reader.readAsArrayBuffer(blob);
+    });
+    expect(blob.type).toBe("application/csv;charset=shift-jis");
+    // "name,qty\r\n" (10 bytes), then テスト as 2 bytes per character in Shift-JIS (3 in UTF-8), then ",1"
+    expect(bytes.length).toBe(18);
+    expect([bytes[10], bytes[11]]).toEqual([0x83, 0x65]); // テ
+  });
+
+  it("types the result as Blob | Promise<Blob> when the encoding is only known at runtime", async () => {
+    const options: JsonToCsvOption = { encode: { default: "shift-jis" } };
+    const result = commonUtil.jsonToCsv(rows, options);
+
+    expectTypeOf(result).toEqualTypeOf<Blob | Promise<Blob>>();
+    expectTypeOf(commonUtil.jsonToCsv(rows, { parse: {}, download: false })).toEqualTypeOf<Blob>();
+    expectTypeOf(commonUtil.jsonToCsv(rows, { encode: { default: "shift-jis" } })).toEqualTypeOf<Promise<Blob>>();
+    expect(result).toBeInstanceOf(Promise);
+    expect(await result).toBeInstanceOf(Blob);
+  });
+});
+
+// Each test loads a fresh commonUtil, so the cached encoder from one test doesn't leak into the next.
+describe("commonUtil.preloadShiftJisEncoder", () => {
+  const rows = [{ name: "テスト", qty: 1 }];
+  const saveAs = vi.fn();
+
+  const freshCommonUtil = async () => {
+    vi.resetModules();
+    vi.doMock("file-saver", () => ({ saveAs }));
+    return (await import("../utils/commonUtil")).commonUtil;
+  };
+
+  beforeEach(() => saveAs.mockReset());
+
+  it("saves a Shift-JIS download synchronously once the encoder is preloaded", async () => {
+    const util = await freshCommonUtil();
+    await util.preloadShiftJisEncoder();
+
+    const result = util.jsonToCsv(rows, { encode: { default: "shift-jis" }, download: true, name: "orders.csv" });
+
+    // Called before any await: still inside the user's tap
+    expect(saveAs).toHaveBeenCalledTimes(1);
+    expect(saveAs.mock.calls[0][1]).toBe("orders.csv");
+    expect(result).toBeInstanceOf(Promise);
+    expect(await result).toBe(saveAs.mock.calls[0][0]);
+  });
+
+  it("still saves without a preload, after the encoder has loaded", async () => {
+    const util = await freshCommonUtil();
+
+    const result = util.jsonToCsv(rows, { encode: { default: "shift-jis" }, download: true });
+
+    expect(saveAs).not.toHaveBeenCalled();
+    const blob = await result;
+    expect(saveAs).toHaveBeenCalledWith(blob, "default.csv");
+    expect(blob.type).toBe("application/csv;charset=shift-jis");
+  });
+
+  it("keeps the encoder cached across repeated and concurrent preloads", async () => {
+    const util = await freshCommonUtil();
+    await Promise.all([util.preloadShiftJisEncoder(), util.preloadShiftJisEncoder()]);
+    await util.preloadShiftJisEncoder();
+
+    util.jsonToCsv(rows, { encode: { default: "shift-jis" }, download: true });
+    expect(saveAs).toHaveBeenCalledTimes(1);
+  });
+
+  it("never rejects, so pages can call it without awaiting", async () => {
+    vi.resetModules();
+    vi.doMock("file-saver", () => ({ saveAs }));
+    vi.doMock("encoding-japanese", () => { throw new Error("chunk failed to load"); });
+    const util = (await import("../utils/commonUtil")).commonUtil;
+
+    await expect(util.preloadShiftJisEncoder()).resolves.toBeUndefined();
+    await expect(util.jsonToCsv(rows, { encode: { default: "shift-jis" } })).rejects.toThrow();
+    vi.doUnmock("encoding-japanese");
   });
 });
 
