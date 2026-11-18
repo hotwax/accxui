@@ -20,6 +20,8 @@ import { reactive, toRaw } from "vue";
 import type { Remote } from "comlink";
 import { commonUtil } from "../../utils/commonUtil";
 import { WorkerFactory } from "../../core/workerFactory";
+import emitter from "../../core/emitter";
+import { SESSION_CHANGED, type SessionChange } from "../../core/sessionChange";
 import { createTokenPublisher } from "./channels";
 import type { ActiveDomain } from "./syncRegistry";
 import type { CatalogItem, SyncHarness } from "./pollingWorkerHarness";
@@ -238,7 +240,37 @@ export function createSyncService(opts: SyncServiceOptions): SyncService {
     return { promise, resolve };
   }
 
+  /**
+   * The Maarg URL the worker was started with. The worker holds it for its whole life and only the
+   * token is pushed afterwards, so a token of another instance must never reach it.
+   */
+  let startedMaargUrl = "";
+  let startedOmsInstance = "";
+
+  /**
+   * True when the session cookies now name another instance than the worker syncs. The cookies are
+   * shared by every tab and app on the domain, so a login elsewhere changes them under this tab
+   * without running its `postLogin`, which is what would restart the worker on the new instance.
+   */
+  function instanceChanged(): boolean {
+    if (!startedMaargUrl) return false;
+    const maargUrl = commonUtil.getMaargURL();
+    // No session at all is a logout, not a switch: the auth-error path handles that.
+    const omsInstance = commonUtil.getOMSInstanceName();
+    if (!maargUrl || !omsInstance) return false;
+    return maargUrl !== startedMaargUrl || omsInstance !== startedOmsInstance;
+  }
+
   function pushTokenIfChanged() {
+    if (instanceChanged()) {
+      const change: SessionChange = { field: "oms", from: startedOmsInstance, to: commonUtil.getOMSInstanceName() };
+      // Stop rather than restart: this tab's stores, permissions and db still belong to `from`.
+      stop();
+      // The same event the cookie watcher emits: useSessionChangeAlert shows the reload alert. A stopped
+      // service can't get here (stop() clears what it started on), so no stale service emits it.
+      emitter.emit(SESSION_CHANGED, change);
+      return;
+    }
     const current = commonUtil.getToken() || "";
     if (current && current !== lastToken) {
       lastToken = current;
@@ -314,10 +346,12 @@ export function createSyncService(opts: SyncServiceOptions): SyncService {
       // Before start(): the worker handles calls in order, so its first pass already covers them.
       if (viewDomains) await api.setDomains(viewDomains);
 
+      startedMaargUrl = commonUtil.getMaargURL();
+      startedOmsInstance = commonUtil.getOMSInstanceName();
       const started = api.start({
-        maargUrl: commonUtil.getMaargURL(),
+        maargUrl: startedMaargUrl,
         token: lastToken,
-        omsInstance: commonUtil.getOMSInstanceName(),
+        omsInstance: startedOmsInstance,
         baseTickMs: opts.baseTickMs,
         domains: opts.domains,
       });
@@ -346,6 +380,8 @@ export function createSyncService(opts: SyncServiceOptions): SyncService {
     starting = null;
     if (tokenWatch) { clearInterval(tokenWatch); tokenWatch = null; }
     if (publisher) { publisher.close(); publisher = null; }
+    startedMaargUrl = "";
+    startedOmsInstance = "";
     if (terminate) { terminate(); terminate = null; } // kills the worker + its timer
     harness = null;
     // Release anyone waiting on the old worker; they find no harness and fail fast.
@@ -373,7 +409,11 @@ export function createSyncService(opts: SyncServiceOptions): SyncService {
       if (harness) await harness.syncAll();
     },
     syncDomainNow: async (domain) => (harness ? harness.syncDomainNow(domain) : 0),
-    refetchOne: async (domain, pk) => (harness ? harness.refetchOne({ domain, pk }) : 0),
+    refetchOne: async (domain, pk) => {
+      // No worker (stopped, e.g. on an instance switch): nothing was fetched, so this must not look like success.
+      if (!harness) throw new Error("Sync is stopped; reload to sync again.");
+      return harness.refetchOne({ domain, pk });
+    },
     whenOpen: () => opened.promise,
     catalog: async () => (harness ? harness.catalog() : []),
     registeredDomains: async () => (harness ? harness.domains() : []),

@@ -33,6 +33,8 @@ import { cacheScopeKey } from "../db/sync/reconciliation";
 import { createSyncService, __resetErrorState, serviceState } from "../db/sync/syncService";
 import type { AppDb } from "../db/model/defineAppDb";
 import { dbClient } from "../db/storage/dbClient";
+import emitter from "../core/emitter";
+import { SESSION_CHANGED } from "../core/sessionChange";
 
 /** An `AppDb` over a fake handle; `client()` is a real dbClient over it, as `defineAppDb` builds. */
 const appDbOver = (raw: () => any) => ({ raw, client: () => dbClient(raw) }) as unknown as AppDb;
@@ -642,5 +644,37 @@ describe("domain sets cross to the worker as plain data", () => {
       { name: "inventoryEvent", args: { shopId: "S", filters: { statusId: ["A", "B"] } } },
     ]);
     await sync.stopAppDbSync();
+  });
+});
+
+describe("session change", () => {
+  beforeEach(() => {
+    __resetErrorState();
+    workerStub.onmessage = null;
+  });
+
+  // Either detector (the cookie watcher in useSessionChangeAlert, or the sync service itself) emits it.
+  it("stops the worker on SESSION_CHANGED; refreshes then fail without starting a new worker", async () => {
+    const factory = vi.fn(createSyncService);
+    const sync = setupAppDbSync({ db: fakeAppDb(), createSyncService: factory });
+    await sync.startAppDbSync();
+
+    emitter.emit(SESSION_CHANGED, { field: "userId", from: "u1", to: "u2" });
+
+    await expect(sync.refreshAfterMutation("enum", { enumId: "X" })).rejects.toThrow();
+    expect(factory).toHaveBeenCalledTimes(1);
+  });
+
+  it("syncs again after a login in this tab (stop, then start)", async () => {
+    const factory = vi.fn(createSyncService);
+    const sync = setupAppDbSync({ db: fakeAppDb(), createSyncService: factory });
+    await sync.startAppDbSync();
+    emitter.emit(SESSION_CHANGED, { field: "oms", from: "demo", to: "other" });
+
+    await sync.stopAppDbSync();
+    await sync.startAppDbSync();
+
+    expect(factory).toHaveBeenCalledTimes(2);
+    await expect(sync.refreshAfterMutation("enum", { enumId: "X" })).resolves.toBe(1);
   });
 });

@@ -10,6 +10,8 @@ import {
 } from "./syncService";
 import { type ActiveDomain, activationKey } from "./syncRegistry";
 import { CacheReconciliationError, cacheScopeKey } from "./reconciliation";
+import emitter from "../../core/emitter";
+import { SESSION_CHANGED } from "../../core/sessionChange";
 
 export interface AppDbSyncConfig {
   db: AppDb;
@@ -57,6 +59,8 @@ export const bootstrapState = reactive<{
 
 /** The app's sync, registered by `setupAppDbSync`, for framework composables (`useProductMaster`). */
 let activeAppDbSync: AppDbSync | null = null;
+/** Removes the session-change listener of the last `setupAppDbSync`. */
+let offSessionChange: (() => void) | null = null;
 
 /** The sync `setupAppDbSync` set up for this app; throws before it has run. */
 export function getAppDbSync(): AppDbSync {
@@ -371,5 +375,16 @@ export function setupAppDbSync(config: AppDbSyncConfig): AppDbSync {
     syncNow,
   };
   activeAppDbSync = appDbSync;
+
+  // This tab's session was replaced (another instance, Maarg or user), reported by either detector: the
+  // cookie watcher in `useSessionChangeAlert`, or the sync service itself (already stopped then, so this
+  // stop() is a no-op). `service` and `starting` stay as they are on purpose: clearing them would let
+  // the next `whenReady()` (a refreshAfterMutation) start a worker on the new session in this tab.
+  // One listener per app: a second setup (tests) replaces the first.
+  offSessionChange?.();
+  const onSessionChange = () => { service?.stop(); };
+  emitter.on(SESSION_CHANGED, onSessionChange);
+  offSessionChange = () => emitter.off(SESSION_CHANGED, onSessionChange);
+
   return appDbSync;
 }

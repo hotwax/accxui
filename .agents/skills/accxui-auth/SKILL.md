@@ -133,6 +133,22 @@ A failed call (thrown, or an error body) keeps the stored version; only a never-
 version": root. Each hosted build needs this framework code for the refresh to work from it; an older
 `/vX.Y.Z/` build only re-resolves on the Login page.
 
+## A login elsewhere (another instance)
+
+The session cookies are shared by every tab and HotWax app on the domain, so a login to another OMS
+instance anywhere replaces this tab's session without running its `postLogin`. `useSessionChangeAlert()`
+from `@common`, called once in `App.vue`, watches the session cookies against what this tab signed in
+with: `oms` against `accxuiConfig.oms`, `userId` against `current.userId` (both set by this tab's own
+login), and `maarg` against its value when the tab was first seen signed in (never compared on the Login
+page). It reports only a change from a session the tab was seen holding: a page that loads with another
+session's cookies isn't authenticated and goes to Login. On a change it emits `sessionChanged` (the app
+db sync stops on it) and shows a reload alert that can't be dismissed. Embedded apps keep a per-tab session
+and are skipped; a cleared `userId` is a logout, handled by the 401 / `INVALID_APP_CONTEXT` path. Its
+strings ("Signed in to another instance", "This browser is now signed in to {instance} from another tab or
+app. Reload to continue.", "Session changed", "This browser is now signed in to a different session from
+another tab or app. Reload to continue.", "Reload") go in each app's English file, and Order Manager's
+`en-US.json` and `es-ES.json`.
+
 ## Session-scoped state
 
 - **App state:** reset it in `postLogout` (`store.$reset()`, stop sync, clear caches).
