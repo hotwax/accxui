@@ -14,7 +14,7 @@
 import { expose } from "comlink";
 import type { BaseDB } from "../storage/baseDb";
 import { dbClient } from "../storage/dbClient";
-import { DB_SYNC_CHANNEL, subscribeToken } from "./channels";
+import { DB_SYNC_CHANNEL, pollingTokenChannel, subscribeToken } from "./channels";
 import { cacheScopeKey } from "./reconciliation";
 import type { SyncContext, SyncDomain } from "../types";
 import {
@@ -136,9 +136,11 @@ export function createSyncHarness(getDb: (omsInstance: string) => BaseDB): SyncH
 
   const syncChannel = typeof BroadcastChannel !== "undefined" ? new BroadcastChannel(DB_SYNC_CHANNEL) : null;
 
-  // Token stays fresh via push from the main thread — held, never frozen at start(). Called here
-  // (not at module scope) so each harness instance owns its own subscription.
-  subscribeToken((next) => { ctx = { ...ctx, token: next }; });
+  // Token stays fresh via push from the main thread — held, never frozen at start(). The
+  // subscription is made in start(), on the channel of the instance this worker syncs: on a channel
+  // shared by every tab, a tab of another instance would replace this worker's token with one that
+  // instance's server rejects (issuer mismatch).
+  let unsubscribeToken: (() => void) | null = null;
 
   const post = (msg: Record<string, unknown>) => {
     if (typeof self !== "undefined") self.postMessage(msg);
@@ -344,6 +346,11 @@ export function createSyncHarness(getDb: (omsInstance: string) => BaseDB): SyncH
   async function start(payload: HarnessStartPayload): Promise<void> {
     stop();
     ctx = { maargUrl: payload.maargUrl, token: payload.token, omsInstance: payload.omsInstance, now: Date.now() };
+    unsubscribeToken?.();
+    unsubscribeToken = subscribeToken(
+      (next) => { ctx = { ...ctx, token: next }; },
+      pollingTokenChannel(payload.omsInstance),
+    );
     baseDomains = payload.domains ?? getAllSyncDomains()
       .filter((d) => d.syncClass === "B")
       .map((d) => ({ name: d.name }));

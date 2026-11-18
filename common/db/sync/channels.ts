@@ -21,6 +21,20 @@ export const DB_SYNC_CHANNEL = "hotwax-db-sync";
  */
 export const POLLING_TOKEN_CHANNEL = "accxui:polling-auth-token";
 
+/**
+ * The token channel of ONE OMS instance.
+ *
+ * A BroadcastChannel is shared by every tab of the origin, and one browser can hold tabs of
+ * the same app on different instances. On a single shared channel the worker of tab A adopts the
+ * token tab B publishes for another instance, and every request it then makes is rejected with
+ * "The Claim 'iss' value doesn't match the required issuer" (a token's issuer is its instance).
+ * Publisher and worker therefore name the channel by instance, so a worker only ever hears tokens
+ * of the instance it syncs.
+ */
+export function pollingTokenChannel(omsInstance: string): string {
+  return `${POLLING_TOKEN_CHANNEL}:${omsInstance}`;
+}
+
 export interface TokenMessage {
   token: string;
 }

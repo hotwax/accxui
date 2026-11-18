@@ -20,7 +20,7 @@ import { reactive, toRaw } from "vue";
 import type { Remote } from "comlink";
 import { commonUtil } from "../../utils/commonUtil";
 import { WorkerFactory } from "../../core/workerFactory";
-import { createTokenPublisher } from "./channels";
+import { createTokenPublisher, pollingTokenChannel } from "./channels";
 import type { ActiveDomain } from "./syncRegistry";
 import type { CatalogItem, SyncHarness } from "./pollingWorkerHarness";
 import type { BaseDB } from "../storage/baseDb";
@@ -308,7 +308,7 @@ export function createSyncService(opts: SyncServiceOptions): SyncService {
       terminate = term;
       worker.onmessage = (event: MessageEvent) => handleMessage(generation, event);
 
-      publisher = createTokenPublisher();
+      publisher = createTokenPublisher(pollingTokenChannel(commonUtil.getOMSInstanceName()));
       lastToken = commonUtil.getToken() || "";
 
       // Before start(): the worker handles calls in order, so its first pass already covers them.
