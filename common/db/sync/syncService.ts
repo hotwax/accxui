@@ -411,7 +411,11 @@ export function createSyncService(opts: SyncServiceOptions): SyncService {
       if (harness) await harness.syncAll();
     },
     syncDomainNow: async (domain) => (harness ? harness.syncDomainNow(domain) : 0),
-    refetchOne: async (domain, pk) => (harness ? harness.refetchOne({ domain, pk }) : 0),
+    refetchOne: async (domain, pk) => {
+      // No worker (stopped, e.g. on an instance switch): nothing was fetched, so this must not look like success.
+      if (!harness) throw new Error("Sync is stopped; reload to sync again.");
+      return harness.refetchOne({ domain, pk });
+    },
     whenOpen: () => opened.promise,
     catalog: async () => (harness ? harness.catalog() : []),
     registeredDomains: async () => (harness ? harness.domains() : []),

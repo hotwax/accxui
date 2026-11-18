@@ -172,6 +172,16 @@ describe("createSyncService", () => {
     expect(onInstanceChanged).toHaveBeenCalledWith({ from: "demo", to: "other" });
   });
 
+  // After a switch the service stays stopped; a refetch must fail rather than report 0 rows as success.
+  it("rejects a refetch once the service has stopped", async () => {
+    const service = createSyncService({ workerUrl: "/w.js" });
+    await service.start();
+    service.stop();
+
+    await expect(service.refetchOne("d", { id: "1" })).rejects.toThrow("Sync is stopped");
+    expect(harnessStub.refetchOne).not.toHaveBeenCalled();
+  });
+
   it("does not treat a cleared session (logout elsewhere) as a switch", async () => {
     const onInstanceChanged = vi.fn();
     const service = createSyncService({ workerUrl: "/w.js", tokenWatchMs: 1_000, onInstanceChanged });
