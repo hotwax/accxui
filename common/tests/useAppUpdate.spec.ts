@@ -5,10 +5,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushPromises } from '@vue/test-utils';
 import { appUpdatePwaOptions } from '../vite/appUpdatePwa';
 
-const mocks = vi.hoisted(() => ({ register: vi.fn(), create: vi.fn(), present: vi.fn() }));
+const mocks = vi.hoisted(() => ({ register: vi.fn(), showToast: vi.fn(), present: vi.fn() }));
 
 vi.mock('register-service-worker', () => ({ register: mocks.register }));
-vi.mock('@ionic/vue', () => ({ toastController: { create: mocks.create } }));
+vi.mock('../utils/commonUtil', () => ({ commonUtil: { showToast: mocks.showToast } }));
 vi.mock('../core/i18n', () => ({ translate: (key: string) => key }));
 vi.mock('../core/logger', () => ({ default: { error: vi.fn() } }));
 
@@ -46,7 +46,8 @@ beforeEach(() => {
   });
   reload = vi.fn();
   vi.stubGlobal('location', { reload });
-  mocks.create.mockResolvedValue({ present: mocks.present });
+  // manualDismiss: showToast hands the toast back unpresented
+  mocks.showToast.mockResolvedValue({ present: mocks.present });
 });
 
 afterEach(() => {
@@ -90,9 +91,17 @@ describe('useAppUpdate', () => {
     hooks().updated(registration);
     await flushPromises();
     expect(updateAvailable.value).toBe(true);
-    expect(mocks.create).toHaveBeenCalledTimes(1);
-    expect(mocks.create.mock.calls[0][0].message).toBe('New version available, click update to get latest version');
+    expect(mocks.showToast).toHaveBeenCalledTimes(1);
+    const [message, options] = mocks.showToast.mock.calls[0];
+
+    expect(message).toBe('New version available, click update to get latest version');
+    // Stays until the user acts, with the shared Dismiss button plus Update
+    expect(options).toMatchObject({ manualDismiss: true, canDismiss: true });
+    expect(options.buttons.map((button: { text: string }) => button.text)).toEqual(['Update']);
     expect(mocks.present).toHaveBeenCalled();
+    // Its Update applies the update (nothing waiting here, so a plain reload)
+    options.buttons[0].handler();
+    expect(reload).toHaveBeenCalledTimes(1);
   });
 
   it('leaves the prompt to the app when showToast is false', async () => {
@@ -102,7 +111,7 @@ describe('useAppUpdate', () => {
     hooks().updated(registration);
     await flushPromises();
     expect(updateAvailable.value).toBe(true);
-    expect(mocks.create).not.toHaveBeenCalled();
+    expect(mocks.showToast).not.toHaveBeenCalled();
   });
 
   it('catches a worker the page load found that is still installing at registration', async () => {

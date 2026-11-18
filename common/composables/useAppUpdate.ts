@@ -1,8 +1,8 @@
-import { toastController } from "@ionic/vue";
 import { register } from "register-service-worker";
 import { ref, watch } from "vue";
 import { translate } from "../core/i18n";
 import logger from "../core/logger";
+import { commonUtil } from "../utils/commonUtil";
 
 /*
  * Tells the user when a new build of the app is deployed, through the service worker lifecycle,
@@ -54,15 +54,13 @@ const applyUpdate = () => {
 };
 
 // Never reloads on its own: the user may have unsaved work open, so they pick the moment.
+// manualDismiss keeps it on screen until the user acts, and hands the toast back unpresented.
 const presentUpdateToast = async () => {
-  const toast = await toastController.create({
-    message: translate("New version available, click update to get latest version"),
-    position: "bottom",
-    buttons: [
-      { role: "cancel", text: translate("Dismiss") },
-      { text: translate("Update"), handler: () => applyUpdate() }
-    ]
-  });
+  const toast = await commonUtil.showToast(translate("New version available, click update to get latest version"), {
+    manualDismiss: true,
+    canDismiss: true,
+    buttons: [{ text: translate("Update"), handler: () => applyUpdate() }]
+  }) as { present: () => Promise<void> };
 
   await toast.present();
 };
