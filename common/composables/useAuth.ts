@@ -14,7 +14,8 @@ import { getCanonicalPath } from "../utils/appVersionUtil";
 interface LoginOption {
   loginAuthType?: string,
   maargInstanceUrl?: string,
-  loginAuthUrl?: string
+  loginAuthUrl?: string,
+  loginAuthFlows?: Array<any>
 }
 
 const loginOption = ref<LoginOption>({})
