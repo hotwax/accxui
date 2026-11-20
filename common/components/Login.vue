@@ -76,7 +76,7 @@
               </ion-chip>
             </div>
 
-            <ion-segment :disabled="isLoggingIn">
+            <ion-segment :disabled="isLoggingIn" :value="selectedSegment">
               <ion-segment-button value="login" content-id="login">
                 {{ "Login" }}
               </ion-segment-button>
@@ -104,8 +104,8 @@
               </ion-segment-content>
               <ion-segment-content id="sso" class="ion-margin-top">
                 <div class="ion-padding">
-                  <ion-button color="primary" expand="block" @click="isLoggingIn ? '' : redirectToSSO()">
-                    {{ translate("Login with HotWax SSO") }}
+                  <ion-button v-for="authFlow in loginAuthFlows" color="primary" expand="block" @click="isLoggingIn ? '' : redirectToSSO(authFlow)">
+                    {{ authFlow.authId }}
                     <ion-spinner v-if="isLoggingIn" slot="end" name="crescent" />
                     <ion-icon v-else slot="end" :icon="arrowForwardOutline" />
                   </ion-button>
@@ -207,7 +207,8 @@ const hasDiscoveredLocalApiServers = ref(false);
 const hasAttemptedDevAutoLogin = ref(typeof window !== "undefined" && window.sessionStorage?.getItem("skipDevAutoLogin") === "true");
 let router: any = ref();
 
-const loginAuthUrl = ref("");
+const loginAuthFlows = ref([] as Array<any>);
+const selectedSegment = ref("login");
 
 const goToLogin = () => {
   router.value.go(0);
@@ -401,17 +402,18 @@ const setOms = async () => {
   // as toggleOmsInput is called twice without this check, from fetchLoginOptions and
   // through setOms (here) again
   if (Object.keys(loginOption.value).length && loginOption.value.loginAuthType !== "BASIC") {
-    const url = new URL(loginOption.value.loginAuthUrl);
-    url.searchParams.append("relaystate", `${window.location.origin}/login`); // passing launchpad/login URL
-    loginAuthUrl.value = url.toString()
+    loginAuthFlows.value = loginOption.value.loginAuthFlows!
+    selectedSegment.value = "sso"
   }
   toggleOmsInput();
   isCheckingOms.value = false;
   return true;
 };
 
-const redirectToSSO = () => {
-  window.location.href = loginAuthUrl.value
+const redirectToSSO = (loginAuthUrl: string) => {
+  const url = new URL(loginAuthUrl);
+  url.searchParams.append("relaystate", `${window.location.origin}/login`); // passing launchpad/login URL
+  window.location.href = url
 }
 
 export interface DevServer {
