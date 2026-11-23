@@ -76,11 +76,12 @@
               </ion-chip>
             </div>
 
-            <ion-segment :disabled="isLoggingIn" :value="selectedSegment">
+            <ion-segment :disabled="isLoggingIn" v-model="selectedSegment">
               <ion-segment-button value="login" content-id="login">
                 {{ "Login" }}
               </ion-segment-button>
-              <ion-segment-button value="sso" content-id="sso">
+              <!-- Added conditional content-id, as ionic does not allow disabling the segment-button when a content-id is associated with it -->
+              <ion-segment-button value="sso" :content-id="loginAuthFlows.length ? 'sso' : ''" :disabled="!loginAuthFlows.length">
                 {{ "SSO" }}
               </ion-segment-button>
             </ion-segment>
@@ -105,7 +106,7 @@
               <ion-segment-content id="sso" class="ion-margin-top">
                 <div class="ion-padding">
                   <ion-button v-for="authFlow in loginAuthFlows" color="primary" expand="block" @click="isLoggingIn ? '' : redirectToSSO(authFlow)">
-                    {{ authFlow.authId }}
+                    {{ authFlow.description || authFlow.authFlowId }}
                     <ion-spinner v-if="isLoggingIn" slot="end" name="crescent" />
                     <ion-icon v-else slot="end" :icon="arrowForwardOutline" />
                   </ion-button>
@@ -374,6 +375,9 @@ const setOms = async () => {
     return false;
   }
 
+  loginAuthFlows.value = []
+  selectedSegment.value = "login"
+
   const instanceURL = instanceUrl.value.trim().toLowerCase();
   // An instance name or URL never contains whitespace, so reject it before it reaches a cookie.
   if (/\s/.test(instanceURL)) {
@@ -413,7 +417,7 @@ const setOms = async () => {
 const redirectToSSO = (loginAuthUrl: string) => {
   const url = new URL(loginAuthUrl);
   url.searchParams.append("relaystate", `${window.location.origin}/login`); // passing launchpad/login URL
-  window.location.href = url
+  window.location.href = String(url);
 }
 
 export interface DevServer {
