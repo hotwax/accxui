@@ -399,6 +399,10 @@ const getMaargURL = () => {
   return maargURL
 }
 
+// The Maarg host without the /rest/s1 path, for the pages served from its root (/fop/apps/pdf/...). Unlike getMaargBaseURL, a bare
+// instance name ("gorjana-maarg-uat") becomes a full URL, so it is not read as a path on the page's own host.
+const getMaargHostURL = () => getMaargURL().replace(/\/rest\/s1\/?$/, "")
+
 const getMaargBaseURL = () => {
   return getEmbeddedAppStoreSafe().maarg || cookieHelper().get("maarg")
 }
@@ -1055,6 +1059,7 @@ export const commonUtil = {
   getFeatures,
   getIdentificationId,
   getMaargBaseURL,
+  getMaargHostURL,
   getMaargURL,
   getNextExecutionTime,
   getOMSInstanceName,
