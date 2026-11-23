@@ -76,20 +76,43 @@
               </ion-chip>
             </div>
 
-            <ion-item lines="full">
-              <ion-input :label="translate('Username')" label-placement="fixed" name="username" v-model="username" id="username"  type="text" required />
-            </ion-item>
-            <ion-item lines="none">
-              <ion-input :label="translate('Password')" label-placement="fixed" name="password" v-model="password" id="password" type="password" required />
-            </ion-item>
+            <ion-segment :disabled="isLoggingIn" v-model="selectedSegment">
+              <ion-segment-button value="login" content-id="login">
+                {{ "Login" }}
+              </ion-segment-button>
+              <!-- Added conditional content-id, as ionic does not allow disabling the segment-button when a content-id is associated with it -->
+              <ion-segment-button value="sso" :content-id="loginAuthFlows.length ? 'sso' : ''" :disabled="!loginAuthFlows.length">
+                {{ "SSO" }}
+              </ion-segment-button>
+            </ion-segment>
 
-            <div class="ion-padding">
-              <ion-button color="primary" expand="block" @click="isLoggingIn ? '' : login()">
-                {{ translate("Login") }}
-                <ion-spinner v-if="isLoggingIn" slot="end" name="crescent" />
-                <ion-icon v-else slot="end" :icon="arrowForwardOutline" />
-              </ion-button>
-            </div>
+            <ion-segment-view>
+              <ion-segment-content id="login" class="ion-margin-top">
+                <ion-item lines="full">
+                  <ion-input :label="translate('Username')" label-placement="fixed" name="username" v-model="username" id="username"  type="text" required />
+                </ion-item>
+                <ion-item lines="none">
+                  <ion-input :label="translate('Password')" label-placement="fixed" name="password" v-model="password" id="password" type="password" required />
+                </ion-item>
+
+                <div class="ion-padding">
+                  <ion-button color="primary" expand="block" @click="isLoggingIn ? '' : login()">
+                    {{ translate("Login") }}
+                    <ion-spinner v-if="isLoggingIn" slot="end" name="crescent" />
+                    <ion-icon v-else slot="end" :icon="arrowForwardOutline" />
+                  </ion-button>
+                </div>
+              </ion-segment-content>
+              <ion-segment-content id="sso" class="ion-margin-top">
+                <div class="ion-padding">
+                  <ion-button v-for="authFlow in loginAuthFlows" color="primary" expand="block" @click="isLoggingIn ? '' : redirectToSSO(authFlow)">
+                    {{ authFlow.description || authFlow.authFlowId }}
+                    <ion-spinner v-if="isLoggingIn" slot="end" name="crescent" />
+                    <ion-icon v-else slot="end" :icon="arrowForwardOutline" />
+                  </ion-button>
+                </div>
+              </ion-segment-content>
+            </ion-segment-view>
 
             <ion-list v-if="canDevAutoLoginForCurrentOms">
               <ion-item
@@ -139,6 +162,10 @@ import {
   IonListHeader,
   IonNote,
   IonPage,
+  IonSegment,
+  IonSegmentButton,
+  IonSegmentContent,
+  IonSegmentView,
   IonSpinner,
   loadingController,
   modalController,
@@ -180,6 +207,9 @@ const localApiServers = ref<LocalApiServer[]>([]);
 const hasDiscoveredLocalApiServers = ref(false);
 const hasAttemptedDevAutoLogin = ref(typeof window !== "undefined" && window.sessionStorage?.getItem("skipDevAutoLogin") === "true");
 let router: any = ref();
+
+const loginAuthFlows = ref([] as Array<any>);
+const selectedSegment = ref("login");
 
 const goToLogin = () => {
   router.value.go(0);
@@ -345,6 +375,9 @@ const setOms = async () => {
     return false;
   }
 
+  loginAuthFlows.value = []
+  selectedSegment.value = "login"
+
   const instanceURL = instanceUrl.value.trim().toLowerCase();
   // An instance name or URL never contains whitespace, so reject it before it reaches a cookie.
   if (/\s/.test(instanceURL)) {
@@ -367,17 +400,25 @@ const setOms = async () => {
   }
   await fetchAppVersion();
 
+  console.log('loginOption.value', loginOption.value)
+
   // checking loginOption.length to know if fetchLoginOptions API returned data
   // as toggleOmsInput is called twice without this check, from fetchLoginOptions and
   // through setOms (here) again
   if (Object.keys(loginOption.value).length && loginOption.value.loginAuthType !== "BASIC") {
-    window.location.href = `${loginOption.value.loginAuthUrl}?relaystate=${window.location.origin}/login`;
-  } else {
-    toggleOmsInput();
+    loginAuthFlows.value = loginOption.value.loginAuthFlows!
+    selectedSegment.value = "sso"
   }
+  toggleOmsInput();
   isCheckingOms.value = false;
   return true;
 };
+
+const redirectToSSO = (loginAuthUrl: string) => {
+  const url = new URL(loginAuthUrl);
+  url.searchParams.append("relaystate", `${window.location.origin}/login`); // passing launchpad/login URL
+  window.location.href = String(url);
+}
 
 export interface DevServer {
   label: string;
