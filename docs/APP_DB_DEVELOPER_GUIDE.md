@@ -977,7 +977,9 @@ every tab and HotWax app on the domain, so a login elsewhere replaces it without
   cookie change where the browser has `cookieStore`, every 5 seconds otherwise, when the tab comes back
   into view, and after every navigation. A BroadcastChannel can't do this: it only reaches tabs of the same origin, and the login
   may happen in another app. On a change it emits `sessionChanged` and shows a reload alert that can't
-  be dismissed ("Signed in to another instance", or "Session changed" for another user or Maarg).
+  be dismissed ("Signed in to another instance", or "Session changed" for another user or Maarg). Its
+  Reload button clears the app's `localStorage` (saved Pinia stores and instance caches, which only logout
+  resets) before reloading, so the app starts from the cookies: Login signs in with them and runs `postLogin`.
 - The sync service checks before every token push, so the worker is never handed a token the old
   instance's server rejects (`The Claim 'iss' value doesn't match the required issuer`) even without the
   watcher.

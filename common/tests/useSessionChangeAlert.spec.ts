@@ -116,6 +116,25 @@ describe("useSessionChangeAlert", () => {
     emitter.off(SESSION_CHANGED, heard);
   });
 
+  // Saved Pinia stores are reset only by logout, which a reload never runs: Reload starts from the cookies.
+  it("clears this app's saved state before reloading", async () => {
+    const originalLocation = window.location;
+    const reload = vi.fn();
+    Object.defineProperty(window, "location", { configurable: true, value: { ...originalLocation, reload } });
+    localStorage.setItem("user", JSON.stringify({ oms: "adoc-ni", current: { userId: "u1" } }));
+    localStorage.setItem("composer", "{}");
+    wrapper = mountWatcher();
+
+    setCookie("oms", "adoc-hn");
+    tick();
+    await vi.waitFor(() => expect(alertStub.present).toHaveBeenCalled());
+    create.mock.calls[0][0].buttons[0].handler();
+
+    expect(localStorage.length).toBe(0);
+    expect(reload).toHaveBeenCalledTimes(1);
+    Object.defineProperty(window, "location", { configurable: true, value: originalLocation });
+  });
+
   it("checks at once when the tab comes back into focus", async () => {
     wrapper = mountWatcher();
 

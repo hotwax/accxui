@@ -77,6 +77,19 @@ export function useSessionChangeAlert() {
     if (change) emitter.emit(SESSION_CHANGED, change);
   }
 
+  /**
+   * Reload with nothing saved from the replaced session. localStorage holds this app's saved Pinia stores
+   * (the user store, and others such as filters or drafts) plus instance-bound caches, and only logout
+   * resets them, which a reload never runs. Cleared, the app starts from the cookies alone: no saved user,
+   * so it lands on Login, which signs in with the cookie session and runs postLogin for it. Each app is its
+   * own origin, so this clears only this app's keys; a tab of the same app on the new session keeps its
+   * in-memory state and saves it again on its next change. IndexedDB is not touched: it is per instance.
+   */
+  function reloadFresh() {
+    try { localStorage.clear(); } catch { /* storage unavailable: a plain reload still helps */ }
+    window.location.reload();
+  }
+
   async function showReloadAlert(change: SessionChange) {
     if (shown) return;
     shown = true;
@@ -91,7 +104,7 @@ export function useSessionChangeAlert() {
       backdropDismiss: false,
       buttons: [{
         text: translate("Reload"),
-        handler: () => { window.location.reload(); },
+        handler: reloadFresh,
         htmlAttributes: { "data-testid": "session-changed-reload-btn" },
       }],
       htmlAttributes: { "data-testid": "session-changed-alert" },
