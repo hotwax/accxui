@@ -23,8 +23,9 @@ const SESSION_COOKIES = ["oms", "maarg", "userId"];
  *     tab's own login sets together with the cookies (`isAuthenticated` compares the same pairs);
  *   - `maarg` against the value it had when this tab was first seen signed in, as nothing else holds
  *     it; taken again after this tab's own logout and login, and never compared on the Login page.
- * Checked on every cookie change where the browser has `cookieStore`, every few seconds otherwise, and
- * whenever the tab comes back into view.
+ * Checked on every cookie change where the browser has `cookieStore`, every few seconds otherwise,
+ * whenever the tab comes back into view, and after every navigation (leaving the Login page takes the
+ * new session's baseline at once, so a change right after this tab's own login isn't missed).
  *
  * On a change it emits `sessionChanged` (the app db sync stops on it) and shows a reload alert
  * that can't be dismissed. The same alert shows when the sync service detects a switch first.
@@ -33,6 +34,7 @@ const SESSION_COOKIES = ["oms", "maarg", "userId"];
 export function useSessionChangeAlert() {
   let shown = false;
   let pollTimer: ReturnType<typeof setInterval> | null = null;
+  let removeRouteHook: (() => void) | null = null;
   /** The `maarg` cookie this tab signed in with; null until the tab is first seen signed in. */
   let signedInMaarg: string | null = null;
   const cookieStore = (globalThis as any).cookieStore;
@@ -109,6 +111,8 @@ export function useSessionChangeAlert() {
     cookieStore?.removeEventListener?.("change", onCookieChange);
     document.removeEventListener("visibilitychange", onVisible);
     window.removeEventListener("focus", checkSession);
+    removeRouteHook?.();
+    removeRouteHook = null;
   }
 
   onMounted(() => {
@@ -118,6 +122,9 @@ export function useSessionChangeAlert() {
     pollTimer = setInterval(checkSession, POLL_MS); // also where cookieStore exists: it may miss a change
     document.addEventListener("visibilitychange", onVisible);
     window.addEventListener("focus", checkSession);
+    // vue-router sets currentRoute before afterEach runs, so this sees the route just entered.
+    const router = toRaw(accxuiConfig.value)?.router;
+    if (typeof router?.afterEach === "function") removeRouteHook = router.afterEach(() => checkSession());
   });
 
   onUnmounted(() => {

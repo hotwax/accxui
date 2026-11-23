@@ -31,6 +31,19 @@ const setSession = (oms: string, userId: string, maarg: string) => {
   setCookie("maarg", maarg);
 };
 const route = ref<{ name: string }>({ name: "Funnel" });
+/** A router double: the current route plus afterEach hooks, run by navigate() as vue-router would. */
+const routeHooks: Array<() => void> = [];
+const router = {
+  currentRoute: route,
+  afterEach: (hook: () => void) => {
+    routeHooks.push(hook);
+    return () => { routeHooks.splice(routeHooks.indexOf(hook), 1); };
+  },
+};
+const navigate = (name: string) => {
+  route.value = { name };
+  [...routeHooks].forEach((hook) => hook());
+};
 const mountWatcher = () => mount(defineComponent({
   setup() {
     useSessionChangeAlert();
@@ -48,7 +61,7 @@ describe("useSessionChangeAlert", () => {
     embedded.value = false;
     route.value = { name: "Funnel" };
     setSession("adoc-ni", "u1", "https://adoc-ni-maarg.test");
-    accxuiConfig.value = { ...accxuiConfig.value, oms: "adoc-ni", current: { userId: "u1" }, router: { currentRoute: route } };
+    accxuiConfig.value = { ...accxuiConfig.value, oms: "adoc-ni", current: { userId: "u1" }, router };
   });
 
   afterEach(() => {
@@ -156,6 +169,27 @@ describe("useSessionChangeAlert", () => {
     tick();
 
     expect(create).not.toHaveBeenCalled();
+  });
+
+  // Codex review: the baseline used to wait for the next 5-second check after the Login page, and a
+  // session replaced inside that window was never reported.
+  it("takes the new baseline on leaving the Login page, so a change right after is caught", async () => {
+    route.value = { name: "Login" };
+    wrapper = mountWatcher();
+
+    setSession("adoc-hn", "u2", "https://adoc-hn-maarg.test"); // this tab's own login
+    accxuiConfig.value = { ...accxuiConfig.value, oms: "adoc-hn", current: { userId: "u2" } };
+    navigate("Funnel");
+    setCookie("oms", "adoc-xx"); // replaced elsewhere before the next periodic check
+    tick();
+
+    await vi.waitFor(() => expect(create).toHaveBeenCalledTimes(1));
+  });
+
+  it("removes its route hook once unmounted", () => {
+    mountWatcher().unmount();
+
+    expect(routeHooks).toHaveLength(0);
   });
 
   // isAuthenticated is false for such a page and it goes to Login; an alert would come back after every Reload.

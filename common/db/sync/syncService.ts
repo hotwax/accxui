@@ -263,7 +263,12 @@ export function createSyncService(opts: SyncServiceOptions): SyncService {
 
   function pushTokenIfChanged() {
     if (instanceChanged()) {
-      const change: SessionChange = { field: "oms", from: startedOmsInstance, to: commonUtil.getOMSInstanceName() };
+      // A new instance is reported by name; the same instance on another Maarg as a Maarg change, so the
+      // alert doesn't claim "another instance" and name the one the user is already on.
+      const omsInstance = commonUtil.getOMSInstanceName();
+      const change: SessionChange = omsInstance !== startedOmsInstance
+        ? { field: "oms", from: startedOmsInstance, to: omsInstance }
+        : { field: "maarg", from: startedMaargUrl, to: commonUtil.getMaargURL() };
       // Stop rather than restart: this tab's stores, permissions and db still belong to `from`.
       stop();
       // The same event the cookie watcher emits: useSessionChangeAlert shows the reload alert. A stopped

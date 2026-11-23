@@ -171,6 +171,21 @@ describe("createSyncService", () => {
     vi.useRealTimers();
   });
 
+  // Codex review: a Maarg-only switch used to be reported as "oms" naming the same instance twice.
+  it("reports a switch of Maarg alone as a Maarg change", async () => {
+    const heard = listenForSessionChange();
+    const service = createSyncService({ workerUrl: "/w.js", tokenWatchMs: 1_000 });
+    vi.useFakeTimers();
+    await service.start();
+
+    session.maarg = "https://other.test/";
+    vi.advanceTimersByTime(1_000);
+
+    expect(published).toEqual([]);
+    expect(heard).toHaveBeenCalledWith({ field: "maarg", from: "https://x.test/", to: "https://other.test/" });
+    vi.useRealTimers();
+  });
+
   it("checks the instance on an auth-error too, before pushing the token", async () => {
     const heard = listenForSessionChange();
     const service = createSyncService({ workerUrl: "/w.js" });

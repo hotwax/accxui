@@ -974,8 +974,8 @@ every tab and HotWax app on the domain, so a login elsewhere replaces it without
 
 - `useSessionChangeAlert()` from `@common`, called once in `App.vue` (every app, with or without an
   app db), watches the `oms`, `maarg` and `userId` cookies against what this tab signed in with: on every
-  cookie change where the browser has `cookieStore`, every 5 seconds otherwise, and when the tab comes
-  back into view. A BroadcastChannel can't do this: it only reaches tabs of the same origin, and the login
+  cookie change where the browser has `cookieStore`, every 5 seconds otherwise, when the tab comes back
+  into view, and after every navigation. A BroadcastChannel can't do this: it only reaches tabs of the same origin, and the login
   may happen in another app. On a change it emits `sessionChanged` and shows a reload alert that can't
   be dismissed ("Signed in to another instance", or "Session changed" for another user or Maarg).
 - The sync service checks before every token push, so the worker is never handed a token the old
