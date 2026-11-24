@@ -184,7 +184,7 @@ onSessionCleared(() => cache.clear());
 | Starting per-session work only in `postLogin` | nothing runs after a page reload | also a `watch(isAuthenticated, …, { immediate: true })` in `App.vue` |
 | Starting the app db sync on `isAuthenticated` alone | a login rejected by `fetchPermissions()` leaves the sync worker running | gate it on the permissions status being `"success"` as well (above) |
 | Module-level cache in a shared composable with no reset | the next user sees the previous tenant's data | `onSessionCleared` |
-| Toasting `INVALID_APP_CONTEXT` | a second error over the logout | ignore it |
+| Toasting `INVALID_APP_CONTEXT` | a second error over the logout or the reload alert | ignore it |
 | Calling `logout()` again on a 401 handler | double teardown | the interceptor already does it |
 | Omitting fields in `initialiseConfig` | `oms` / `current` undefined, auth never true | pass every field |
 | An app composable also named `useAuth` (Company's `composables/useSecurity.ts` has one for `hasPermission` / `userProfile`) | the wrong one imported | `isAuthenticated`, `login`, `logout` come from `@common` |

@@ -80,6 +80,9 @@ store, v4 takes `persist: { pick: ["a", "b"] }`; Fulfillment's `util.ts` passes 
 - Embedded in Shopify (**accxui-shopify-embedded**): `/shopify-login`, `/shopify-app-install`, and an
   `authGuard(to, from, next)` that sends to `/shopify-login` when `commonUtil.isAppEmbedded()`.
 - Push notifications (**accxui-push-notifications**).
+- `App.vue` calls `useSessionChangeAlert()` from `@common`, like every app (**accxui-auth**): a login in
+  another tab or app that replaces the shared session cookies shows a reload alert. With no app db
+  there is no sync to stop; the alert is the only reaction.
 - Settings cards are **app-local copies** of the same components: `DxpAppVersionInfo`,
   `DxpFacilitySwitcher`, `DxpOmsInstanceNavigator`, `DxpProductIdentifier`, `DxpTimeZoneSwitcher`,
   `DxpLanguageSwitcher` (Fulfillment also `DxpProductStoreSelector`) in `src/components/`. They
