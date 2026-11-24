@@ -574,6 +574,8 @@ export const {
   getWorkerUrl: () => new URL(workerUrl, import.meta.url),
   createSyncService,
 });
+// A login elsewhere that replaces the session stops this sync on its own (the framework's
+// SESSION_CHANGED event); the reload prompt is useSessionChangeAlert() in App.vue.
 ```
 
 Every other file imports sync functions from `@/db/appDbSync`, never from `@common/db/sync/*`. The worker

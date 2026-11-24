@@ -5,7 +5,6 @@ import { translate } from "../core/i18n";
 // Capacitor Plugins import removed for compatibility
 import { saveAs } from 'file-saver';
 import Papa from 'papaparse';
-import Encoding from 'encoding-japanese';
 import { CronExpressionParser as cronParser } from "cron-parser";
 import cronstrue from "cronstrue"
 import { useEmbeddedAppStore } from "../store/embeddedApp";
@@ -555,7 +554,35 @@ const downloadCsv = (csv: any, fileName: any) => {
   return blob;
 };
 
-const jsonToCsv = (file: any, options: JsonToCsvOption = {}) => {
+// The Shift-JIS encoder (encoding-japanese, ~220 kB) loads on first use, then stays cached here.
+let shiftJisEncoder: any;
+let shiftJisEncoderLoad: Promise<void> | undefined;
+
+const loadShiftJisEncoder = (): Promise<void> => {
+  if (!shiftJisEncoderLoad) {
+    shiftJisEncoderLoad = import('encoding-japanese')
+      .then((module: any) => { shiftJisEncoder = module.default ?? module; })
+      // A failed load (offline, a deploy removed the chunk) is retried on the next call
+      .catch((error) => { shiftJisEncoderLoad = undefined; throw error; });
+  }
+  return shiftJisEncoderLoad;
+};
+
+// Call when a page that offers a Shift-JIS download opens (onIonViewWillEnter / onMounted), not in
+// the click handler. iOS only lets saveAs run inside the user's tap; with the encoder already loaded,
+// jsonToCsv encodes and saves synchronously within that tap. Safe to call without awaiting: it never
+// rejects, and a failed preload just leaves jsonToCsv to load the encoder itself.
+const preloadShiftJisEncoder = (): Promise<void> => loadShiftJisEncoder().catch(() => undefined);
+
+// Shift-JIS output needs encoding-japanese, which loads only when that encoding is asked for, so it
+// stays out of every app's startup bundle. That one case therefore returns a Promise; every other
+// encoding still returns the Blob synchronously. When the encoding isn't known at compile time
+// (built at runtime, or options typed as JsonToCsvOption), the caller gets Blob | Promise<Blob> and
+// must handle both. For a Shift-JIS download, call preloadShiftJisEncoder first (see above).
+function jsonToCsv(file: any, options: JsonToCsvOption & { encode: { default: "shift-jis" } }): Promise<Blob>;
+function jsonToCsv(file: any, options?: JsonToCsvOption & { encode?: { default?: "utf-8" } | null }): Blob;
+function jsonToCsv(file: any, options?: JsonToCsvOption): Blob | Promise<Blob>;
+function jsonToCsv(file: any, options: JsonToCsvOption = {}): Blob | Promise<Blob> {
   const csv = Papa.unparse(file, {
     ...options.parse
   });
@@ -565,20 +592,31 @@ const jsonToCsv = (file: any, options: JsonToCsvOption = {}) => {
     ...options.encode
   } as any;
 
-  let buffer: Uint8Array;
-  let blob: Blob;
+  const finish = (blob: Blob) => {
+    if (options.download) {
+      saveAs(blob, options.name ? options.name : "default.csv");
+    }
+    return blob;
+  }
+
   if (encoding.default === 'shift-jis') {
-    buffer = new Uint8Array(Encoding.convert(Encoding.stringToCode(csv), 'SJIS'));
-    blob = new Blob([buffer as any], { type: `application/csv;charset=${encoding.default}` });
-
-  } else {
-    blob = new Blob([csv], { type: `application/csv;charset=${encoding.default}` });
+    const encode = () => {
+      const buffer = new Uint8Array(shiftJisEncoder.convert(shiftJisEncoder.stringToCode(csv), 'SJIS'));
+      return finish(new Blob([buffer as any], { type: `application/csv;charset=${encoding.default}` }));
+    };
+    // Preloaded: encode and saveAs run now, still inside the user's tap
+    if (shiftJisEncoder) {
+      try {
+        return Promise.resolve(encode());
+      } catch (error) {
+        return Promise.reject(error);
+      }
+    }
+    // Not preloaded: saveAs runs after the encoder arrives, outside the tap (blocked on iOS)
+    return loadShiftJisEncoder().then(encode);
   }
 
-  if (options.download) {
-    saveAs(blob, options.name ? options.name : "default.csv");
-  }
-  return blob;
+  return finish(new Blob([csv], { type: `application/csv;charset=${encoding.default}` }));
 }
 
 const copyToClipboard = async (value: string, text?: string) => {
@@ -1043,6 +1081,7 @@ export const commonUtil = {
   isVersionGreaterOrEqual,
   jsonParse,
   jsonToCsv,
+  preloadShiftJisEncoder,
   parseBooleanSetting,
   parseCronExpression,
   parseCsv,

@@ -94,9 +94,14 @@ So: anything that needs the session (removing a push token, saving a draft to th
 
 **Automatic logouts:**
 - any API response `401` → `logout({ isUserUnauthorised: true })`;
-- an API call while `isAuthenticated` is false (another tab logged out or switched user, the cookie
-  expired) → `logout({ isUserUnauthorised: true, invalidAppContext: true })`, `clearAuth()`, and the
-  call rejects with `Error("INVALID_APP_CONTEXT")`. Don't toast that error; the logout handles it.
+- an API call while `isAuthenticated` is false rejects with `Error("INVALID_APP_CONTEXT")` and is never
+  sent. Don't toast that error. Then, depending on the cookies (`common/core/remoteApi.ts`):
+  - the session is gone (a logout elsewhere, or the cookie expired) → `logout({ isUserUnauthorised: true,
+    invalidAppContext: true })` and `clearAuth()`, as before;
+  - the cookies hold a live session that isn't this tab's (a login to another instance or as another user,
+    in another tab or app) → no logout and no `clearAuth()`: either would delete the other tab's cookies and
+    wipe the new instance's app db. It emits `SESSION_CHANGED` instead, and `useSessionChangeAlert` asks the
+    user to reload.
 
 ## Guards and reacting to auth
 
@@ -133,6 +138,23 @@ A failed call (thrown, or an error body) keeps the stored version; only a never-
 version": root. Each hosted build needs this framework code for the refresh to work from it; an older
 `/vX.Y.Z/` build only re-resolves on the Login page.
 
+## A login elsewhere (another instance)
+
+The session cookies are shared by every tab and HotWax app on the domain, so a login to another OMS
+instance anywhere replaces this tab's session without running its `postLogin`. `useSessionChangeAlert()`
+from `@common`, called once in `App.vue`, watches the session cookies against what this tab signed in
+with: `oms` against `accxuiConfig.oms`, `userId` against `current.userId` (both set by this tab's own
+login), and `maarg` against its value when the tab was first seen signed in (never compared on the Login
+page). It reports only a change from a session the tab was seen holding: a page that loads with another
+session's cookies isn't authenticated and goes to Login. On a change it emits `sessionChanged` (the app
+db sync stops on it) and shows a reload alert that can't be dismissed. Its Reload clears the app's `localStorage` (saved stores, which
+only logout resets) and reloads, so the app signs in again from the cookies and runs `postLogin`. Embedded apps keep a per-tab session
+and are skipped; a cleared `userId` is a logout, handled by the 401 / `INVALID_APP_CONTEXT` path. Its
+strings ("Signed in to another instance", "This browser is now signed in to {instance} from another tab or
+app. Reload to continue.", "Session changed", "This browser is now signed in to a different session from
+another tab or app. Reload to continue.", "Reload") go in each app's English file, and Order Manager's
+`en-US.json` and `es-ES.json`.
+
 ## Session-scoped state
 
 - **App state:** reset it in `postLogout` (`store.$reset()`, stop sync, clear caches).
@@ -162,7 +184,7 @@ onSessionCleared(() => cache.clear());
 | Starting per-session work only in `postLogin` | nothing runs after a page reload | also a `watch(isAuthenticated, …, { immediate: true })` in `App.vue` |
 | Starting the app db sync on `isAuthenticated` alone | a login rejected by `fetchPermissions()` leaves the sync worker running | gate it on the permissions status being `"success"` as well (above) |
 | Module-level cache in a shared composable with no reset | the next user sees the previous tenant's data | `onSessionCleared` |
-| Toasting `INVALID_APP_CONTEXT` | a second error over the logout | ignore it |
+| Toasting `INVALID_APP_CONTEXT` | a second error over the logout or the reload alert | ignore it |
 | Calling `logout()` again on a 401 handler | double teardown | the interceptor already does it |
 | Omitting fields in `initialiseConfig` | `oms` / `current` undefined, auth never true | pass every field |
 | An app composable also named `useAuth` (Company's `composables/useSecurity.ts` has one for `hasPermission` / `userProfile`) | the wrong one imported | `isAuthenticated`, `login`, `logout` come from `@common` |

@@ -102,8 +102,9 @@ const createTransfer = (facilityId: string) => transferStore.createTransfer(faci
 | A call that must **not** carry the session (another instance, a token exchange) | `client({ baseURL, url, … })`: a fresh axios with no token, no auth check, no 401 logout, every option passed through |
 
 - Every request except the login / profile / permission endpoints first checks `isAuthenticated`:
-  when false it logs out and rejects `Error("INVALID_APP_CONTEXT")` (don't toast it). A `401` logs
-  out (**accxui-auth**).
+  when false it rejects `Error("INVALID_APP_CONTEXT")` (don't toast it) and logs out if the session
+  is gone; if another tab or app replaced it, there is no logout, and `useSessionChangeAlert` asks the
+  user to reload. A `401` logs out (**accxui-auth**).
 - `params` objects are JSON-stringified, arrays sent as repeated keys.
 - **After every call:** `if (commonUtil.hasError(resp)) throw …` (an error body can arrive with HTTP
   200). The caller toasts a fixed `translate("Failed to …")` and `logger.error`s the error; there is

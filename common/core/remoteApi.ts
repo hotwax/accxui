@@ -4,22 +4,58 @@ import { setupCache } from 'axios-cache-adapter'
 import qs from "qs"
 import { commonUtil } from '../utils/commonUtil';
 import { useAuth } from '../composables/useAuth';
+import { cookieHelper } from '../helpers/cookieHelper';
+import { accxuiConfig } from './configRegistry';
+import emitter from './emitter';
+import { SESSION_CHANGED, type SessionChange } from './sessionChange';
 
-const requestInterceptor = async (config: any) => {
+/**
+ * The cookies hold a session that is still valid: a token that hasn't expired. Read from the cookies,
+ * not the tab's own state, which is what tells a replaced session (live cookies, another instance or
+ * user) from a gone one (a logout or expiry, cookies cleared).
+ */
+const hasLiveCookieSession = () => {
+  const token = cookieHelper().get("token");
+  if (!token) return false;
+  const expiry = Number(cookieHelper().get("expirationTime"));
+  return !expiry || expiry > Date.now();
+};
+
+/** What replaced this tab's session, or null when this tab held none (a Login page, a signed-out tab). */
+const sessionReplacement = (): SessionChange | null => {
+  const oms = accxuiConfig.value.oms;
+  const userId = accxuiConfig.value.current?.userId;
+  if (!oms || !userId) return null;
+  const cookieOms = cookieHelper().get("oms") || "";
+  if (cookieOms !== oms) return { field: "oms", from: oms, to: commonUtil.getOMSInstanceName() || cookieOms };
+  return { field: "userId", from: userId, to: cookieHelper().get("userId") || "" };
+};
+
+/** Exported for tests only; apps call `api()` / `client()`. */
+export const requestInterceptor = async (config: any) => {
   const token = commonUtil.getToken();
 
   // The following are the endpoints needs to bypass the auth check and when this calls are made we will assume
   // that we are always relogin with the new credentials present in cookies.
   const noAuthEndpoints = ["login", "logout", "checkLoginOptions", "user/profile", "user/permissions", "getPermissions", "app-bridge/login", "appVersions"]
 
-  // When the same app is opened in multiple tabs and logout from one tab, then another tab still uses the old
-  // session, to handle this scenario we have added check to always validate authentication before api calls
-  // so if the current apps session becomes invalid, due to external change to cookies/state, then the app updates
-  // the session automatically.
+  // When the same app is opened in multiple tabs and the session changes in another one (a logout, or a
+  // login to another instance or as another user), this tab still holds the old one. So authentication is
+  // validated before every api call, and a tab whose session no longer matches the cookies never sends one.
   // Bypass the check for endpoints that don't require authentication (like login, logout, profile),
   // as these are often called during the authentication flow itself or to refresh local state.
   const isAnonymousEndpoint = noAuthEndpoints.some((endpoint: string) => config.url.includes(endpoint));
   if (!useAuth().isAuthenticated.value && !isAnonymousEndpoint) {
+    // A login in another tab or app replaced the session: the cookies are live but not this tab's.
+    // Refuse the call, so this tab's stale request doesn't go out as that session, and ask the user to
+    // reload. Don't log out: clearAuth() would delete the other tab's cookies (logging it out too), and
+    // postLogout would wipe the local db, which is resolved from the cookie's instance, i.e. the new one.
+    if (!commonUtil.isAppEmbedded() && hasLiveCookieSession()) {
+      const change = sessionReplacement();
+      if (change) emitter.emit(SESSION_CHANGED, change);
+      return Promise.reject(new Error("INVALID_APP_CONTEXT"));
+    }
+    // The session is gone (a logout elsewhere, or expired): end this tab's too.
     await useAuth().logout({ isUserUnauthorised: true, invalidAppContext: true })
     useAuth().clearAuth()
     return Promise.reject(new Error("INVALID_APP_CONTEXT"));

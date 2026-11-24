@@ -380,12 +380,15 @@ registers its own (Order Manager's main-thread call is dead code).
 import { IonApp, IonRouterOutlet, IonSplitPane, loadingController } from "@ionic/vue";
 import { computed, onMounted, onUnmounted, watch } from "vue";
 import { useRoute } from "vue-router";
-import { emitter, FastTravel, translate, useAuth } from "@common";
+import { emitter, FastTravel, translate, useAuth, useSessionChangeAlert } from "@common";
 import Menu from "@/components/Menu.vue";
 import { startAppDbSync } from "@/db/appDbSync";
 import { useUserStore } from "@/store/user";
 
 const route = useRoute();
+// A login elsewhere (another instance, Maarg or user) replaces the shared session cookies: stop the
+// sync and ask the user to reload. Every app, with or without an app db; once, here.
+useSessionChangeAlert();
 let loader: HTMLIonLoadingElement | null = null;
 
 // `any`: the framework emitter is an untyped mitt(), and a typed default fails vue-tsc (TS2769).
