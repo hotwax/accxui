@@ -85,3 +85,6 @@ export type { FaroOptions } from './utils/faroUtil';
 export { useIosKeyboardScroll } from './composables/useIosKeyboardScroll';
 export type { IosKeyboardScrollOptions } from './composables/useIosKeyboardScroll';
 export { supportsIosKeyboardScroll } from './utils/keyboardScroll';
+export { useSessionChangeAlert } from './composables/useSessionChangeAlert';
+export { SESSION_CHANGED } from './core/sessionChange';
+export type { SessionChange } from './core/sessionChange';
