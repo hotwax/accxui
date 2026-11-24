@@ -150,7 +150,7 @@ import { arrowBackOutline, arrowForwardOutline, documentTextOutline, warningOutl
 import { cookieHelper } from "../helpers/cookieHelper";
 import { translate } from "../core/i18n"
 import { commonUtil } from "../utils/commonUtil";
-import { omsRef, useAuth } from "../composables/useAuth";
+import { isMoquiOmsRef, omsRef, useAuth } from "../composables/useAuth";
 import { accxuiConfig } from "../core/configRegistry";
 import { discoverLocalApiServers, type LocalApiServer, type LocalApiServerSignal } from "../core/localApiServerDiscovery";
 import logger from "../core/logger";
@@ -158,7 +158,7 @@ import logger from "../core/logger";
 let route = null as any;
 
 // This is the best practice for defining composable instance, as this ensures in managing the reactive state properly
-const { loginOption, fetchLoginOptions, fetchAppVersion, isAuthenticated, login: authLogin, updateOMS, clearAuth } = useAuth();
+const { loginOption, fetchLoginOptions, verifyLaunchpadOms, fetchAppVersion, isAuthenticated, login: authLogin, updateOMS } = useAuth();
 
 const username = ref("");
 const password = ref("");
@@ -482,21 +482,21 @@ const initialise = async () => {
 
   try {
     // When having token and oms in login, it means that we are coming from legacy launchpad login flow
-    if(route.query?.token && route.query?.oms) {
+    if(route.query?.token && "oms" in route.query) {
       // This array is maintaining list of apps those are moqui first, we are maintaining this to have support
       // to run the accxui apps with old login launchpad redirect flow
       const maargApps = ["atp", "company", "order-routing", "inventorycount", "bopis", "transfers", "order-manager", "products"]
       const { host } = new URL(window.location.href)
-      // Need to consider the info received in query as valid and thus need to clear the auth state
-      clearAuth()
       const { oms, omsRedirectionUrl } = route.query as any
       const isMaarg = maargApps.some(app => host.includes(app));
-      const target = commonUtil.isMoqui() !== isMaarg ? omsRedirectionUrl : oms;
-      updateOMS(target);
-      accxuiConfig.value.oms = target;
+      if (!await verifyLaunchpadOms(oms, omsRedirectionUrl, isMaarg)) {
+        showOmsInput.value = true;
+        await router.value.replace({ path: route.path });
+        await commonUtil.showToast(translate("Unable to reach the OMS. Check the OMS name and try again."));
+        return;
+      }
 
-      await fetchLoginOptions()
-      await fetchAppVersion();
+      if (isMoquiOmsRef.value || loginOption.value.maargInstanceUrl) await fetchAppVersion();
       await login(route.query)
       return;
     }

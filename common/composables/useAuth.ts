@@ -14,8 +14,29 @@ import { getCanonicalPath } from "../utils/appVersionUtil";
 interface LoginOption {
   loginAuthType?: string,
   maargInstanceUrl?: string,
+  omsInstanceUrl?: string,
   loginAuthUrl?: string
 }
+
+// Launchpad may name an instance by handle, base URL, or the URL of its API.
+const instanceBase = (value: unknown): string | undefined => {
+  const input = value instanceof URL ? value.href : value;
+  if (typeof input !== "string" || !input || /[\s?#\\]/.test(input)) return;
+  let address = input;
+  if (/^(?:localhost|127\.0\.0\.1|\[::1\])(?:[/:]|$)/i.test(address)) {
+    address = "http://" + address;
+  } else if (/^[a-z0-9][a-z0-9-]*$/i.test(address)) {
+    address = `https://${address}.hotwax.io`;
+  }
+  try {
+    const url = new URL(address);
+    if (!["http:", "https:"].includes(url.protocol) || url.username || url.password ||
+        ["null", "undefined"].includes(url.hostname.split(".")[0])) return;
+    return url.origin + url.pathname.replace(/\/(?:api|rest\/s1)\/?$|\/+$/g, "");
+  } catch {
+    return;
+  }
+};
 
 const loginOption = ref<LoginOption>({})
 export const omsRef = ref("")
@@ -332,6 +353,31 @@ export function useAuth() {
     return false
   };
 
+  const verifyLaunchpadOms = async (oms: unknown, alternate: unknown, maargFirst: boolean) => {
+    clearAuth();
+    const primary = instanceBase(oms);
+    const secondary = instanceBase(alternate);
+    if (!primary || (alternate && !secondary) || commonUtil.getToken()) return false;
+    const useAlternate = commonUtil.isMoqui() !== maargFirst && secondary !== undefined;
+    const target = useAlternate ? secondary : primary;
+
+    updateOMS(target);
+    accxuiConfig.value.oms = target;
+    if (!await fetchLoginOptions() || !loginOption.value.loginAuthType) return false;
+    if (instanceBase(commonUtil.getOmsURL()) !== target) return false;
+
+    // A native Moqui OMS serves its own app API. An OFBiz OMS advertises its paired Maarg.
+    const options = loginOption.value;
+    const maarg = isMoquiOmsRef.value ? target : instanceBase(options.maargInstanceUrl);
+    if (maargFirst || commonUtil.isMoqui() || secondary) {
+      if (!maarg || instanceBase(commonUtil.getMaargBaseURL()) !== maarg) return false;
+    }
+    // A direct Moqui login may repeat its own address even when it also advertises an OFBiz sibling.
+    if (!secondary || (isMoquiOmsRef.value && primary === secondary)) return true;
+    const paired = isMoquiOmsRef.value ? instanceBase(options.omsInstanceUrl || target) : maarg;
+    return paired === (useAlternate ? primary : secondary);
+  };
+
   // Enforce the canonical URL for the resolved appVersion (accxuiConfig, so it's app-agnostic): redirect
   // when the current URL isn't canonical, preserving path/query/hash. Returns true when a redirect was
   // issued so a router guard can cancel the in-flight navigation. No-op while appVersion is undefined
@@ -388,6 +434,7 @@ export function useAuth() {
   return {
     loginOption,
     fetchLoginOptions,
+    verifyLaunchpadOms,
     fetchAppVersion,
     checkAppVersionRedirect,
     login,
