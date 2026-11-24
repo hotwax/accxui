@@ -124,6 +124,14 @@ export default defineConfig(({ mode }) => {
 });
 ```
 
+**Update prompt (optional):** to tell users when a new build is deployed, swap the `VitePWA({ … selfDestroying … })`
+line for `VitePWA(appUpdatePwaOptions({ manifest }))` (`import { appUpdatePwaOptions } from "../../common/vite/appUpdatePwa"`)
+and call `useAppUpdate().startAppUpdateWatch()` from `@common` in `App.vue`'s `onMounted`. It builds the
+framework's detect-only worker (`common/pwa/sw.ts`) as `sw.js`: it caches nothing and needs no Firebase cache
+headers. `useAppUpdate` registers it with `register-service-worker`; a new build's worker waits, the framework
+toast offers Update (`SKIP_WAITING`, then a reload), and `updateAvailable` / `applyUpdate` drive a Settings button too. The app's `en.json` needs
+`"New version available, click update to get latest version"`, `"Dismiss"` and `"Update"`. Order Routing is the reference.
+
 Without `dedupe`, the app and `common/` load two copies of Vue / Pinia / Ionic: stores and
 `provide`/`inject` silently stop sharing state.
 
