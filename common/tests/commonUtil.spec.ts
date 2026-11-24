@@ -30,6 +30,12 @@ describe("commonUtil local instance URLs", () => {
     expect(commonUtil.getMaargURL()).toBe("http://localhost:8080/rest/s1/");
   });
 
+  it("turns a bare maarg instance name into a full host URL without the REST path", () => {
+    document.cookie = "maarg=demo-maarg; path=/";
+
+    expect(commonUtil.getMaargHostURL()).toBe("https://demo-maarg.hotwax.io");
+  });
+
   it("keeps normal HotWax aliases on the hosted domain", () => {
     document.cookie = "oms=demo; path=/";
 
