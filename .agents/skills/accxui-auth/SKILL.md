@@ -66,6 +66,11 @@ are getters/setters onto the app's user store: the framework reads and writes th
 Logging in is the framework's `Login` page (`/login` route, from `@common`); app code doesn't call
 `login()` or set the token itself.
 
+On a legacy Launchpad redirect, the Login page calls `verifyLaunchpadOms` before accepting the
+token. A link can supply only `oms`, or include the paired server in `omsRedirectionUrl`. The
+selected OMS's login options identify its backend. If a supplied pair disagrees or a required
+backend is unavailable, the page returns to instance selection.
+
 ## When `isAuthenticated` is true
 
 All of: a token and an expiration exist, the expiration is in the future, **and** either the app is

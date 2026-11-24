@@ -26,6 +26,7 @@ export const cookieHelper = () => {
     // Function to remove a cookie
     const remove = (name: string) => {
         document.cookie = `${encodeURIComponent(name)}=; path=/; max-age=0; SameSite=Lax`;
+        document.cookie = `${encodeURIComponent(name)}=; path=/; max-age=0; SameSite=Lax; domain=hotwax.io`;
     };
 
     return {
