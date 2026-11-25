@@ -371,7 +371,9 @@ const setOms = async () => {
   // as toggleOmsInput is called twice without this check, from fetchLoginOptions and
   // through setOms (here) again
   if (Object.keys(loginOption.value).length && loginOption.value.loginAuthType !== "BASIC") {
-    window.location.href = `${loginOption.value.loginAuthUrl}?relaystate=${window.location.origin}/login`;
+    const loginAuthUrl = new URL(loginOption.value.loginAuthUrl as string);
+    loginAuthUrl.searchParams.append("relaystate", `${window.location.origin}/login`);
+    window.location.href = loginAuthUrl.toString();
   } else {
     toggleOmsInput();
   }
