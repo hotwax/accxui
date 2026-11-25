@@ -1,13 +1,24 @@
-export const VERSION = /^v\d+\.\d+\.\d+$/;
+// A release tag, optionally with a suffix such as v5.3.0-ls2 for a customer line. The suffix
+// allows no "/" or "..", so a version is always a single safe directory name.
+export const VERSION = /^v\d+\.\d+\.\d+(?:-[0-9A-Za-z][0-9A-Za-z.-]*)?$/;
+// Newest first; v5.3.0 ranks above its own suffixed tags (v5.3.0-ls2) as in semver.
+export function compareVersions(a, b) {
+  const [, coreA, suffixA = ""] = a.match(/^v([^-]+)(?:-(.*))?$/);
+  const [, coreB, suffixB = ""] = b.match(/^v([^-]+)(?:-(.*))?$/);
+  const core = coreB.localeCompare(coreA, undefined, { numeric: true });
+  if (core) return core;
+  if (!suffixA || !suffixB) return (suffixA ? 1 : 0) - (suffixB ? 1 : 0);
+  return suffixB.localeCompare(suffixA, undefined, { numeric: true });
+}
 export const hostedVersions = (files) =>
   [
     ...new Set(
       files.flatMap((f) => {
-        const m = f.path.match(/^\/(v\d+\.\d+\.\d+)\/index\.html$/);
-        return m ? [m[1]] : [];
+        const m = f.path.match(/^\/([^/]+)\/index\.html$/);
+        return m && VERSION.test(m[1]) ? [m[1]] : [];
       }),
     ),
-  ].sort((a, b) => b.localeCompare(a, undefined, { numeric: true }));
+  ].sort(compareVersions);
 // Publish and replace take a comma-separated list; the other actions take one version.
 export function versionList(value) {
   const list = String(value || "")
@@ -15,7 +26,7 @@ export function versionList(value) {
     .map((v) => v.trim())
     .filter(Boolean);
   if (!list.length || list.some((v) => !VERSION.test(v)))
-    throw Error("Choose stable vX.Y.Z releases.");
+    throw Error("Choose vX.Y.Z releases.");
   if (new Set(list).size !== list.length)
     throw Error("Each version can be listed only once.");
   return list;
@@ -38,7 +49,7 @@ export function planChange({
     ? versionList(version)
     : null;
   if (!versions && action !== "rebuild" && !VERSION.test(version || ""))
-    throw Error("Choose a stable vX.Y.Z release.");
+    throw Error("Choose a vX.Y.Z release.");
   if (action !== "remove" && !buildCapable)
     throw Error("This app does not yet support versioned AccxUI builds.");
   const published = new Set(

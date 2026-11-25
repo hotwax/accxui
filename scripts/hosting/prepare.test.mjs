@@ -50,8 +50,8 @@ test("single-target configuration keeps its original shape", async (t) => {
 
 test("compatibility rewrite does not capture push workers or app navigation", () => {
   const pattern = new RegExp(legacyWorkerPattern);
-  for (const url of ["/service-worker.js", "/v1.20.300/service-worker.js"]) assert.ok(pattern.test(url));
-  for (const url of ["/firebase-messaging-sw.js", "/v1.2.3/firebase-messaging-sw.js", "/orders", "/service-worker.js/anything", "/assets/service-worker.js"]) assert.equal(pattern.test(url), false);
+  for (const url of ["/service-worker.js", "/v1.20.300/service-worker.js", "/v5.3.0-ls2/service-worker.js"]) assert.ok(pattern.test(url));
+  for (const url of ["/firebase-messaging-sw.js", "/v1.2.3/firebase-messaging-sw.js", "/orders", "/service-worker.js/anything", "/assets/service-worker.js", "/v5.3.0-/service-worker.js"]) assert.equal(pattern.test(url), false);
 });
 
 test("a missing build fails before the hosting configuration is changed", async (t) => {
@@ -93,4 +93,20 @@ test("retirement waits for activation, unregisters only itself, and reloads cont
   await pending;
   assert.deepEqual(calls, ["skipWaiting", "unregister", "https://app.test/v1.2.3/login?from=home#tab"]);
   assert.deepEqual(Object.keys(events), ["install", "activate"]);
+});
+
+test("suffixed version directories get the recovery worker and the old narrow rule is replaced", async (t) => {
+  const narrow = "^/(?:v[0-9]+\\.[0-9]+\\.[0-9]+/)?service-worker\\.js$";
+  const root = await fixture(t, {
+    public: "dist",
+    rewrites: [{ regex: narrow, destination: "/service-worker.js" }, { source: "**", destination: "/index.html" }],
+    headers: [{ regex: narrow, headers: [{ key: "Cache-Control", value: "no-store" }] }],
+  });
+  await mkdir(path.join(root, "dist/v5.3.0-ls2"), { recursive: true });
+  await writeFile(path.join(root, "dist/v5.3.0-ls2/index.html"), "line app");
+  await prepareHosting(root);
+  assert.equal(await readFile(path.join(root, "dist/v5.3.0-ls2/service-worker.js"), "utf8"), source);
+  const { hosting } = JSON.parse(await readFile(path.join(root, "firebase.json"), "utf8"));
+  assert.deepEqual(hosting.rewrites.map((r) => r.regex || r.source), [legacyWorkerPattern, "**"]);
+  assert.deepEqual(hosting.headers.map((h) => h.regex), [legacyWorkerPattern]);
 });

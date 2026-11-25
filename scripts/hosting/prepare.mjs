@@ -2,8 +2,10 @@ import { readFile, writeFile, readdir, access } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-export const legacyWorkerPattern = "^/(?:v[0-9]+\\.[0-9]+\\.[0-9]+/)?service-worker\\.js$";
-const versionDirectory = /^v\d+\.\d+\.\d+$/;
+export const legacyWorkerPattern = "^/(?:v[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z][0-9A-Za-z.-]*)?/)?service-worker\\.js$";
+// Earlier releases wrote this narrower rule; it is replaced rather than left alongside the new one.
+const previousWorkerPatterns = [legacyWorkerPattern, "^/(?:v[0-9]+\\.[0-9]+\\.[0-9]+/)?service-worker\\.js$"];
+const versionDirectory = /^v\d+\.\d+\.\d+(?:-[0-9A-Za-z][0-9A-Za-z.-]*)?$/;
 
 // Run after assembling ALL versions and regenerating rewrites, immediately before deployment.
 // It intentionally uses only Node builtins so pinned historical framework builds can use it.
@@ -31,10 +33,10 @@ export async function prepareHosting(appDirectory) {
     target.rewrites = [
       // Retain an update endpoint even for a version whose application files were pruned.
       { regex: legacyWorkerPattern, destination: "/service-worker.js" },
-      ...(target.rewrites || []).filter((rule) => rule.regex !== legacyWorkerPattern),
+      ...(target.rewrites || []).filter((rule) => !previousWorkerPatterns.includes(rule.regex)),
     ];
     target.headers = [
-      ...(target.headers || []).filter((rule) => rule.regex !== legacyWorkerPattern),
+      ...(target.headers || []).filter((rule) => !previousWorkerPatterns.includes(rule.regex)),
       { regex: legacyWorkerPattern, headers: [
         { key: "Cache-Control", value: "no-store" },
         { key: "Content-Type", value: "application/javascript; charset=utf-8" },

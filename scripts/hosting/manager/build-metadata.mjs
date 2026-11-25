@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { gzipSync } from "node:zlib";
 import { publicFile } from "./providers.mjs";
+import { VERSION } from "./plans.mjs";
 const hash = (b) => createHash("sha256").update(b).digest("hex");
 export function matchesHostedHash(bytes, expected) {
   if (hash(bytes) === expected) return true;
@@ -38,7 +39,7 @@ export function parseBuildMetadata(code) {
   const releases = [
     ...new Set(
       records
-        .filter((r) => !r.branch && /^v\d+\.\d+\.\d+$/.test(r.tag))
+        .filter((r) => !r.branch && VERSION.test(r.tag))
         .map((r) => r.tag),
     ),
   ];
@@ -49,7 +50,7 @@ export async function discoverDefault(state, target) {
     if (!state.files.some((f) => f.path === file)) continue;
     try {
       const manifest = JSON.parse(await verifiedFile(state, target, file));
-      if (/^v\d+\.\d+\.\d+$/.test(manifest.rootVersion))
+      if (VERSION.test(manifest.rootVersion))
         return {
           defaultVersion: manifest.rootVersion,
           configuredEnvironment: manifest.environmentTypeId || null,
