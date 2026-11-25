@@ -28,6 +28,43 @@ test("inventory requires an actual version index, not tags or orphan assets", ()
     ]),
     ["v12.0.0", "v2.0.0"],
   ));
+test("inventory lists suffixed release lines such as v5.3.0-ls2, newest first", () =>
+  assert.deepEqual(
+    hostedVersions([
+      { path: "/v5.3.0-ls2/index.html" },
+      { path: "/v5.3.0-ls10/index.html" },
+      { path: "/v5.3.0/index.html" },
+      { path: "/v5.4.1/index.html" },
+      { path: "/v5.3.0-/index.html" },
+      { path: "/latest/index.html" },
+    ]),
+    ["v5.4.1", "v5.3.0", "v5.3.0-ls10", "v5.3.0-ls2"],
+  ));
+test("suffixed releases can be published, promoted and removed", () => {
+  const releases = ["v5.4.1", "v5.3.0-ls2"].map((tag_name) => ({
+    tag_name,
+    draft: false,
+    prerelease: false,
+  }));
+  const ls = { ...base, defaultVersion: "v5.4.1", hosted: ["v5.4.1"], releases };
+  assert.deepEqual(
+    planChange({ ...ls, action: "publish", version: "v5.3.0-ls2" }).added,
+    ["v5.3.0-ls2"],
+  );
+  const hosted = { ...ls, hosted: ["v5.4.1", "v5.3.0-ls2"] };
+  assert.equal(
+    planChange({ ...hosted, action: "default", version: "v5.3.0-ls2" }).nextDefault,
+    "v5.3.0-ls2",
+  );
+  assert.deepEqual(
+    planChange({ ...hosted, action: "remove", version: "v5.3.0-ls2" }).removed,
+    ["v5.3.0-ls2"],
+  );
+  assert.deepEqual(planChange({ ...hosted, action: "rebuild" }).build, [
+    "v5.4.1",
+    "v5.3.0-ls2",
+  ]);
+});
 test("publish preserves Default and every old version", () => {
   const plan = planChange({ ...base, action: "publish", version: "v3.0.0" });
   assert.equal(plan.rootChanges, false);
@@ -50,7 +87,7 @@ test("publish takes a list, adds new versions and rebuilds hosted ones in place"
   assert.equal(plan.rootChanges, false);
 });
 test("version lists reject duplicates and malformed entries", () => {
-  for (const version of ["v3.0.0,v3.0.0", "v3.0.0,main", ","])
+  for (const version of ["v3.0.0,v3.0.0", "v3.0.0,main", ",", "v3.0.0-", "v3.0.0-ls/../x", "v3.0.0-.ls", "v3.0.0-ls 2"])
     assert.throws(() => planChange({ ...base, action: "publish", version }));
 });
 test("replace makes the site exactly the listed versions with the chosen Default", () => {
@@ -401,6 +438,12 @@ test("Default metadata ignores library versions and unreleased branch builds", (
       'version="3.5.30";JSON.parse(\'{"version":"3.4.1","branch":"","tag":"v3.4.1","revision":"abc","builtTime":123}\')',
     ),
     "v3.4.1",
+  );
+  assert.equal(
+    parseBuildMetadata(
+      '{"version":"5.3.0-ls2","branch":"","tag":"v5.3.0-ls2","revision":"abc","builtTime":123}',
+    ),
+    "v5.3.0-ls2",
   );
   assert.equal(
     parseBuildMetadata(

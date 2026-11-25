@@ -13,7 +13,10 @@ const file = { path: "/v5.2.1/index.html", status: "ACTIVE", hash: createHash("s
 test("retains only the requested complete version, without root or other versions", () => {
   assert.deepEqual(selectVersionFiles([file, { ...file, path: "/index.html" }, { ...file, path: "/v5.3.0/index.html" }], ["v5.2.1"]), [file]);
   assert.throws(() => selectVersionFiles([file], ["v5.1.0"]), /not hosted/);
-  assert.throws(() => selectVersionFiles([file], ["../v5.2.1"]), /stable/);
+  assert.throws(() => selectVersionFiles([file], ["../v5.2.1"]), /Expected/);
+  assert.throws(() => selectVersionFiles([file], ["v5.2.1-../x"]), /Expected/);
+  const line = { ...file, path: "/v5.3.0-ls2/index.html" };
+  assert.deepEqual(selectVersionFiles([file, line], ["v5.3.0-ls2"]), [line]);
 });
 
 test("rejects paths that could escape the retained version or change the download URL", () => {

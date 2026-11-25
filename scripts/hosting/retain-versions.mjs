@@ -7,8 +7,8 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 
 export function selectVersionFiles(files, versions) {
-  if (versions.some(version => !/^v\d+\.\d+\.\d+$/.test(version))) {
-    throw new Error("Expected stable vX.Y.Z versions");
+  if (versions.some(version => !/^v\d+\.\d+\.\d+(?:-[0-9A-Za-z][0-9A-Za-z.-]*)?$/.test(version))) {
+    throw new Error("Expected vX.Y.Z versions");
   }
   const selected = files.filter(file => versions.some(version => file.path.startsWith(`/${version}/`)));
   for (const file of selected) {
