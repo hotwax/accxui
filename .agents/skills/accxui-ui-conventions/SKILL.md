@@ -1,6 +1,6 @@
 ---
 name: accxui-ui-conventions
-description: Use when building or changing a page, component, modal, popover, alert, form, menu or the Settings page in any AccxUI app (apps/company, apps/order-manager, apps/bopis, apps/fulfillment or a new one), or a shared component in common/components. Triggers include ion-page / ion-header / ion-toolbar / ion-content, ion-menu / Menu.vue / ion-split-pane, modalController / popoverController / alertController, closeModal, ion-fab, ion-searchbar, ion-segment, ion-infinite-scroll, ion-skeleton-text, empty-state, list-item, overline, --spacer-*, standalone-hidden, theme.css / settings.css, class="settings", user-profile / section-header, StatCard, Sparkline, RadioFacetGroup, DxpOmsInstanceFooter, DxpShopifyImg, Logo, ImageModal, v-image-preview, v-segment-height, ionicons/icons, data-testid, form validation, error-text, ion-invalid / ion-touched, useFormValidator, useFieldValidator, buildYupSchema, vee-validate, yup.
+description: Use when building or changing a page, component, modal, popover, alert, form, menu or the Settings page in any AccxUI app (apps/company, apps/order-manager, apps/bopis, apps/fulfillment or a new one), or a shared component in common/components. Triggers include find pages, history filters, SearchFilterCard, UniformFilterLayout, ion-page / ion-header / ion-toolbar / ion-content, ion-menu / Menu.vue / ion-split-pane, modalController / popoverController / alertController, closeModal, ion-fab, ion-searchbar, ion-segment, ion-infinite-scroll, ion-skeleton-text, empty-state, list-item, overline, --spacer-*, standalone-hidden, theme.css / settings.css, class="settings", user-profile / section-header, StatCard, Sparkline, RadioFacetGroup, DxpOmsInstanceFooter, DxpShopifyImg, Logo, ImageModal, v-image-preview, v-segment-height, ionicons/icons, data-testid, form validation, error-text, ion-invalid / ion-touched, useFormValidator, useFieldValidator, buildYupSchema, vee-validate, yup.
 ---
 
 # UI conventions: pages, overlays, states, framework components, forms
@@ -82,6 +82,19 @@ data behind a list (loading vs empty) is **accxui-page-sync** / **accxui-app-db-
 - **Wide tables:** `.list-item` from `theme.css` is the responsive row grid: two columns on mobile
   (first and last child), children marked `.tablet` from 700 px, all from 991 px. Set `--columns-desktop`
   on the element when the row has a different number of columns.
+
+## Search and filter cards
+
+For find and history pages in Company and Order Manager, start with the app's existing
+`components/common/SearchFilterCard.vue` and `UniformFilterLayout.vue`. Company uses the pair in
+`apps/company/src/views/FindFacilities.vue`. Order Manager wraps them in
+`apps/order-manager/src/components/orders/WorkflowOrderFilterCard.vue`.
+
+Bind the search term to the outer card and give it a placeholder that names the searchable fields.
+Put the controls in `UniformFilterLayout` with stacked labels, outlined inputs, and popover selects.
+Set `:show-clear="false"` on the card and bind the layout's `clear` event to reset the query and
+filters to their defaults. The layout owns the grid, spacing and mobile wrapping. Check a matching
+query, an empty result, Clear filters, and a narrow viewport on the running page.
 
 ## The app shell and menu
 
